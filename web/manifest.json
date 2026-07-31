@@ -1,11 +1,11 @@
 {
-    "name": "one_night_match",
-    "short_name": "one_night_match",
+    "name": "ONE NIGHT MATCH",
+    "short_name": "ONM",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#090910",
+    "theme_color": "#ff477e",
+    "description": "女子プロレスカードバトル ONE NIGHT MATCH",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

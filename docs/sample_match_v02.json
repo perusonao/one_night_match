@@ -1,0 +1,48 @@
+{
+  "game": {
+    "gameId": "onm-1785521200000",
+    "version": "0.2",
+    "winner": "火神アカリ",
+    "finishType": "pin",
+    "finishingMove": "ドラゴンボム",
+    "turns": 9,
+    "maxRally": 5,
+    "finalHeat": 24,
+    "rank": "A",
+    "title": "激闘！",
+    "pinAttempts": 3,
+    "successfulPins": 1,
+    "hpKickOuts": 1
+  },
+  "players": [
+    {
+      "id": "player",
+      "wrestler": "火神アカリ",
+      "finalHp": 4,
+      "kickOutCount": 1,
+      "finisherUsed": true
+    },
+    {
+      "id": "cpu",
+      "wrestler": "黒蝶ジャック",
+      "finalHp": 0,
+      "kickOutCount": 1,
+      "finisherUsed": false
+    }
+  ],
+  "turns": [
+    {
+      "turn": 9,
+      "player": "火神アカリ",
+      "card": "ドラゴンボム",
+      "attribute": "投げ",
+      "power": 9,
+      "damage": 6,
+      "heatDelta": 7,
+      "rallyCount": 5,
+      "pin": true,
+      "kickOutMethod": null,
+      "timestamp": "2026-08-01T09:00:00.000Z"
+    }
+  ]
+}
