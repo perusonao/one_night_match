@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'game.dart';
+import 'wrestler_editor/editor_screens.dart';
+import 'level_match/level_match_screens.dart';
+import 'level_match/level_match_engine.dart';
 
 const _pink = Color(0xffff477e);
 const _gold = Color(0xffffc857);
@@ -49,7 +52,7 @@ class TitleScreen extends StatelessWidget {
                     letterSpacing: 3,
                   ),
                 ),
-                const Text('女子プロレスカードバトル  Ver.0.2'),
+                const Text('女子プロレスカードバトル  Ver.0.3'),
                 const SizedBox(height: 10),
                 const Text(
                   '技をつなぎ、観客を沸かせ、3カウントを奪え。',
@@ -61,7 +64,7 @@ class TitleScreen extends StatelessWidget {
                   icon: const Icon(Icons.play_arrow),
                   label: const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 24, vertical: 13),
-                    child: Text('試合を始める'),
+                    child: Text('クラシックマッチ  Ver.0.2'),
                   ),
                   onPressed: () => Navigator.push(
                     context,
@@ -70,10 +73,34 @@ class TitleScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(height: 10),
+                FilledButton.tonalIcon(
+                  icon: const Icon(Icons.layers),
+                  label: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                    child: Text('レベルカードマッチ  Ver.0.4'),
+                  ),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const LevelMatchIntroScreen(),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 8),
                 Wrap(
                   alignment: WrapAlignment.center,
                   children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.style),
+                      label: const Text('レスラーカードエディタ'),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const WrestlerEditorListScreen(),
+                        ),
+                      ),
+                    ),
                     TextButton.icon(
                       icon: const Icon(Icons.menu_book),
                       label: const Text('遊び方'),
@@ -1015,6 +1042,7 @@ class DebugScreen extends StatefulWidget {
 
 class _DebugScreenState extends State<DebugScreen> {
   List<Map<String, dynamic>>? matches;
+  List<Map<String, dynamic>>? levelMatches;
 
   @override
   void initState() {
@@ -1022,12 +1050,19 @@ class _DebugScreenState extends State<DebugScreen> {
     MatchHistoryStore().load().then((value) {
       if (mounted) setState(() => matches = value);
     });
+    LevelMatchHistoryStore().load().then((value) {
+      if (mounted) setState(() => levelMatches = value);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final data = matches;
     final analytics = data == null ? null : MatchAnalytics(data);
+    final levelData = levelMatches;
+    final levelAnalytics = levelData == null
+        ? null
+        : LevelMatchAnalytics(levelData);
     return Scaffold(
       appBar: AppBar(title: const Text('Debug / MATCH ANALYTICS')),
       body: data == null
@@ -1071,6 +1106,94 @@ class _DebugScreenState extends State<DebugScreen> {
                   icon: const Icon(Icons.copy),
                   label: const Text('最新試合JSONをコピー'),
                 ),
+                const SizedBox(height: 28),
+                const Text(
+                  'Ver.0.4 LEVEL CARD MATCH',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: _pink,
+                  ),
+                ),
+                if (levelAnalytics == null)
+                  const LinearProgressIndicator()
+                else ...[
+                  _metric('総試合数', '${levelAnalytics.totalMatches}'),
+                  _metric('プレイヤー勝率', _percent(levelAnalytics.playerWinRate)),
+                  _metric(
+                    '平均ターン数',
+                    levelAnalytics.averageGame('turns').toStringAsFixed(1),
+                  ),
+                  _metric(
+                    '平均最終HEAT',
+                    levelAnalytics.averageGame('finalHeat').toStringAsFixed(1),
+                  ),
+                  _metric(
+                    'Level 2到達率',
+                    _percent(
+                      levelAnalytics.playerMetricRate('level2UnlockedTurn'),
+                    ),
+                  ),
+                  _metric(
+                    'Level 3到達率',
+                    _percent(
+                      levelAnalytics.playerMetricRate('level3UnlockedTurn'),
+                    ),
+                  ),
+                  _metric(
+                    'Level 2平均到達ターン',
+                    levelAnalytics
+                        .averagePlayerTurn('level2UnlockedTurn')
+                        .toStringAsFixed(1),
+                  ),
+                  _metric(
+                    'Level 3平均到達ターン',
+                    levelAnalytics
+                        .averagePlayerTurn('level3UnlockedTurn')
+                        .toStringAsFixed(1),
+                  ),
+                  _metric(
+                    'フィニッシャー使用率',
+                    _percent(levelAnalytics.playerMetricRate('finisherUsed')),
+                  ),
+                  _metric(
+                    'フィニッシャー平均使用ターン',
+                    levelAnalytics
+                        .averagePlayerTurn('finisherUsedTurn')
+                        .toStringAsFixed(1),
+                  ),
+                  _metric(
+                    '平均セット交換回数',
+                    levelAnalytics.averageSetReplacements.toStringAsFixed(1),
+                  ),
+                  _metric('山札切れ率', _percent(levelAnalytics.deckOutRate)),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'レスラー別勝率',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  for (final entry in levelAnalytics.wrestlerWinRates.entries)
+                    _metric(entry.key, _percent(entry.value)),
+                  const Text(
+                    '属性別技使用率',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  for (final entry
+                      in levelAnalytics.attributeMoveUseRates.entries)
+                    _metric(entry.key, _percent(entry.value)),
+                  FilledButton.icon(
+                    onPressed: levelData!.isEmpty
+                        ? null
+                        : () => _copy(
+                            context,
+                            const JsonEncoder.withIndent(
+                              '  ',
+                            ).convert(levelData.last),
+                          ),
+                    icon: const Icon(Icons.copy),
+                    label: const Text('最新Ver.0.4試合JSONをコピー'),
+                  ),
+                ],
               ],
             ),
     );

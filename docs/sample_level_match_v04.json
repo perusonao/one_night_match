@@ -1,0 +1,70 @@
+{
+  "game": {
+    "gameId": "level-sample-v04",
+    "version": "0.4",
+    "mode": "levelCardMatch",
+    "startedAt": "2026-08-01T10:00:00.000Z",
+    "finishedAt": "2026-08-01T10:12:00.000Z",
+    "winner": "player",
+    "finishReason": "hpZero",
+    "turns": 13,
+    "finalHeat": 28,
+    "lastMove": "ハイスピード・ジャーマン"
+  },
+  "players": [
+    {
+      "playerId": "player",
+      "wrestlerId": "wrestler_akari",
+      "wrestlerName": "火神アカリ",
+      "maxHp": 100,
+      "finalHp": 24,
+      "finalLevel": 3,
+      "unlockedLevels": [1, 2, 3],
+      "finisherUsed": true,
+      "level2UnlockedTurn": 7,
+      "level3UnlockedTurn": 11,
+      "finisherUsedTurn": 13,
+      "setReplacementCount": 1
+    },
+    {
+      "playerId": "cpu",
+      "wrestlerId": "wrestler_misaki",
+      "wrestlerName": "豪田ミサキ",
+      "maxHp": 100,
+      "finalHp": 0,
+      "finalLevel": 2,
+      "unlockedLevels": [1, 2],
+      "finisherUsed": false,
+      "level2UnlockedTurn": 8,
+      "level3UnlockedTurn": null,
+      "finisherUsedTurn": null,
+      "setReplacementCount": 0
+    }
+  ],
+  "turns": [
+    {
+      "turn": 13,
+      "playerId": "player",
+      "phase": "resolveMove",
+      "action": "useMove",
+      "message": "ハイスピード・ジャーマン！ 28ダメージ",
+      "details": {
+        "selectedMove": "high_speed_german",
+        "moveAttribute": "throwMove",
+        "movePower": 38,
+        "targetResistance": 10,
+        "finalDamage": 28,
+        "heatBefore": 17,
+        "heatDelta": 11,
+        "heatAfter": 28,
+        "discardedSetCards": [
+          {"instanceId": "player-8", "attribute": "throwMove"},
+          {"instanceId": "player-12", "attribute": "throwMove"}
+        ],
+        "targetHpBefore": 28,
+        "targetHpAfter": 0
+      },
+      "timestamp": "2026-08-01T10:12:00.000Z"
+    }
+  ]
+}
