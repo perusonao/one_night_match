@@ -22,6 +22,7 @@ enum AdditionalCheckType {
   pinfall,
   bleeding,
   counterSuccess,
+  down,
 }
 
 enum ConditionOperator { and, or }
@@ -38,6 +39,14 @@ enum UnlockConditionType {
   bleeding,
   eventOccurred,
   previousLevelUnlocked,
+  // Ver.0.5: level-flexible unlock conditions (allow "飛び級" progression).
+  specificLevelUsedAtLeast,
+  specificLevelMoveSuccessAtLeast,
+  currentLevelIs,
+  levelChangeCountAtLeast,
+  pinKickOutCountAtLeast,
+  submissionEscapeCountAtLeast,
+  finisherKickOutCountAtLeast,
 }
 
 enum MoveConditionType {
@@ -147,17 +156,22 @@ class UnlockCondition {
     this.value,
     this.attribute,
     this.eventKey,
+    this.level,
   });
   final UnlockConditionType type;
   final int? value;
   final MoveAttribute? attribute;
   final String? eventKey;
 
+  /// Ver.0.5: target level referenced by specificLevel* conditions.
+  final int? level;
+
   Map<String, dynamic> toJson() => {
     'type': type.name,
     if (value != null) 'value': value,
     if (attribute != null) 'attribute': attribute!.name,
     if (eventKey != null) 'eventKey': eventKey,
+    if (level != null) 'level': level,
   };
 
   factory UnlockCondition.fromJson(Map<String, dynamic> json) =>
@@ -168,6 +182,7 @@ class UnlockCondition {
             ? null
             : enumValue(MoveAttribute.values, json['attribute'], 'attribute'),
         eventKey: json['eventKey'] as String?,
+        level: (json['level'] as num?)?.toInt(),
       );
 }
 
@@ -220,6 +235,15 @@ class MoveDefinition {
     this.imagePath,
     this.markUsedAfterUse = false,
     this.canResetUsedState = false,
+    this.canAttemptPin = false,
+    this.pinPower = 0,
+    this.autoPin = false,
+    this.pinAttemptLimit,
+    this.pinBonusOnFinisher = 0,
+    this.canAttemptSubmission = false,
+    this.submissionPower = 0,
+    this.autoSubmissionCheck = false,
+    this.submissionBonusOnFinisher = 0,
   });
 
   final String id;
@@ -241,6 +265,33 @@ class MoveDefinition {
   final bool markUsedAfterUse;
   final bool canResetUsedState;
 
+  // Ver.0.5: フォール（3カウント）用パラメータ。
+  final bool canAttemptPin;
+  final int pinPower;
+  final bool autoPin;
+  final int? pinAttemptLimit;
+  final int pinBonusOnFinisher;
+
+  // Ver.0.5: ギブアップ（サブミッション）用パラメータ。
+  final bool canAttemptSubmission;
+  final int submissionPower;
+  final bool autoSubmissionCheck;
+  final int submissionBonusOnFinisher;
+
+  /// この技が成功後にフォール判定へ移行できるか。
+  bool get offersPin =>
+      canAttemptPin || additionalChecks.contains(AdditionalCheckType.pinfall);
+
+  /// この技が成功後にギブアップ判定へ移行できるか。
+  bool get offersSubmission =>
+      canAttemptSubmission ||
+      additionalChecks.contains(AdditionalCheckType.submission);
+
+  /// この技が相手をダウンさせるか（旧knockoutはdown扱い）。
+  bool get causesDown =>
+      additionalChecks.contains(AdditionalCheckType.down) ||
+      additionalChecks.contains(AdditionalCheckType.knockout);
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
@@ -260,6 +311,15 @@ class MoveDefinition {
     'imagePath': imagePath,
     'markUsedAfterUse': markUsedAfterUse,
     'canResetUsedState': canResetUsedState,
+    'canAttemptPin': canAttemptPin,
+    'pinPower': pinPower,
+    'autoPin': autoPin,
+    'pinAttemptLimit': pinAttemptLimit,
+    'pinBonusOnFinisher': pinBonusOnFinisher,
+    'canAttemptSubmission': canAttemptSubmission,
+    'submissionPower': submissionPower,
+    'autoSubmissionCheck': autoSubmissionCheck,
+    'submissionBonusOnFinisher': submissionBonusOnFinisher,
   };
 
   factory MoveDefinition.fromJson(Map<String, dynamic> json) => MoveDefinition(
@@ -292,8 +352,29 @@ class MoveDefinition {
     imagePath: json['imagePath'] as String?,
     markUsedAfterUse: json['markUsedAfterUse'] as bool? ?? false,
     canResetUsedState: json['canResetUsedState'] as bool? ?? false,
+    canAttemptPin: json['canAttemptPin'] as bool? ?? false,
+    pinPower: (json['pinPower'] as num?)?.toInt() ?? 0,
+    autoPin: json['autoPin'] as bool? ?? false,
+    pinAttemptLimit: (json['pinAttemptLimit'] as num?)?.toInt(),
+    pinBonusOnFinisher: (json['pinBonusOnFinisher'] as num?)?.toInt() ?? 0,
+    canAttemptSubmission: json['canAttemptSubmission'] as bool? ?? false,
+    submissionPower: (json['submissionPower'] as num?)?.toInt() ?? 0,
+    autoSubmissionCheck: json['autoSubmissionCheck'] as bool? ?? false,
+    submissionBonusOnFinisher:
+        (json['submissionBonusOnFinisher'] as num?)?.toInt() ?? 0,
   );
 }
+
+/// Ver.0.5 で追加された追加判定・属性のラベル。
+String additionalCheckLabel(AdditionalCheckType value) => switch (value) {
+  AdditionalCheckType.none => 'なし',
+  AdditionalCheckType.knockout => 'KO(ダウン)',
+  AdditionalCheckType.submission => 'ギブアップ',
+  AdditionalCheckType.pinfall => 'フォール',
+  AdditionalCheckType.bleeding => '流血',
+  AdditionalCheckType.counterSuccess => '返し成功',
+  AdditionalCheckType.down => 'ダウン',
+};
 
 class AbilityDefinition {
   const AbilityDefinition({

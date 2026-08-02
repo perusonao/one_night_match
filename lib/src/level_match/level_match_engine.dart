@@ -4,6 +4,8 @@ import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../wrestler_editor/models.dart';
+import 'level_match_deck_builder.dart';
+import 'level_match_finish_models.dart';
 
 enum LevelMatchPhase {
   setup,
@@ -13,11 +15,16 @@ enum LevelMatchPhase {
   levelChange,
   chooseMove,
   resolveMove,
+  pinDecision,
+  kickOutDecision,
+  submissionDecision,
   turnEnd,
   gameOver,
 }
 
-enum LevelFinishReason { hpZero, deckOut }
+/// 決着理由。Ver.0.5 で pinfall / submission を追加。
+/// hpZero は旧Ver.0.4ログ互換のため残すが、Ver.0.5では新規に出力しない。
+enum LevelFinishReason { hpZero, deckOut, pinfall, submission }
 
 class TechniqueResourceCard {
   const TechniqueResourceCard(this.instanceId, this.attribute);
@@ -88,6 +95,32 @@ class PlayerLevelMatchState {
   int? level3UnlockedTurn;
   int? finisherUsedTurn;
 
+  // Ver.0.5: レスポンスカード（イベントカード最小実装）。
+  int kickOutCards = 1;
+  int ropeBreakCards = 1;
+  int kickOutCardUsedCount = 0;
+  int ropeBreakUsedCount = 0;
+
+  // Ver.0.5: 決着関連カウンタ。
+  int pinKickOutCount = 0;
+  int submissionEscapeCount = 0;
+  int finisherKickOutCount = 0;
+  int pinAttemptsReceived = 0;
+  int submissionAttemptsReceived = 0;
+  bool isDown = false;
+  int? hpZeroReachedTurn;
+
+  // Ver.0.5: 飛び級解放条件用トラッキング。
+  int levelChangeCount = 0;
+  final Map<int, int> levelUsedCounts = {};
+  final Map<int, int> levelMoveSuccessCounts = {};
+
+  // Ver.0.5: CPU評価用（直前使用技）。
+  String? previousMoveId;
+
+  // Ver.0.5: 自動生成デッキの内訳（プレビュー・ログ用）。
+  DeckBuildResult? deckBuild;
+
   WrestlerLevelDefinition get levelCard =>
       wrestler.levels.firstWhere((item) => item.level == currentLevel);
 
@@ -109,6 +142,19 @@ class PlayerLevelMatchState {
     'level3UnlockedTurn': level3UnlockedTurn,
     'finisherUsedTurn': finisherUsedTurn,
     'setReplacementCount': setReplacementCount,
+    'kickOutCount': kickOutCount,
+    'pinKickOutCount': pinKickOutCount,
+    'submissionEscapeCount': submissionEscapeCount,
+    'finisherKickOutCount': finisherKickOutCount,
+    'pinAttemptsReceived': pinAttemptsReceived,
+    'submissionAttemptsReceived': submissionAttemptsReceived,
+    'kickOutCardUsedCount': kickOutCardUsedCount,
+    'ropeBreakUsed': ropeBreakUsedCount,
+    'kickOutCardsRemaining': kickOutCards,
+    'ropeBreakCardsRemaining': ropeBreakCards,
+    'hpZeroReachedTurn': hpZeroReachedTurn,
+    'levelChangeCount': levelChangeCount,
+    'deck': deckBuild?.toJson(),
   };
 }
 
@@ -161,7 +207,7 @@ class LevelMatchState {
   });
 
   final String gameId;
-  final String version = '0.4';
+  final String version = '0.5';
   final String mode = 'levelCardMatch';
   LevelMatchPhase phase = LevelMatchPhase.setup;
   final PlayerLevelMatchState player;
@@ -174,10 +220,26 @@ class LevelMatchState {
   final List<LevelMatchLogEntry> logs = [];
   String? pendingAnimation;
   String? lastMove;
+  String? lastMoveId;
   int lastDamage = 0;
   String? unlockNotice;
   final DateTime startedAt;
   DateTime? finishedAt;
+
+  // Ver.0.5: 進行中のフォール／ギブアップ判定と決着メタ情報。
+  PendingPin? pendingPin;
+  PendingSubmission? pendingSubmission;
+  String? finishMoveId;
+  String? finishingMove;
+  int pinAttemptCount = 0;
+  int submissionAttemptCount = 0;
+  int kickOutTotalCount = 0;
+  int submissionEscapeTotalCount = 0;
+  int ropeBreakTotalCount = 0;
+  int finisherKickOutTotalCount = 0;
+
+  PlayerLevelMatchState byId(String id) =>
+      id == player.playerId ? player : cpu;
 
   PlayerLevelMatchState get active =>
       activePlayerId == player.playerId ? player : cpu;
@@ -194,9 +256,17 @@ class LevelMatchState {
       'finishedAt': finishedAt?.toIso8601String(),
       'winner': winnerId,
       'finishReason': finishReason?.name,
+      'finishingMove': finishingMove ?? lastMove,
+      'finishMoveId': finishMoveId ?? lastMoveId,
       'turns': turnNumber,
       'finalHeat': sharedHeat,
       'lastMove': lastMove,
+      'pinAttempts': pinAttemptCount,
+      'kickOuts': kickOutTotalCount,
+      'submissionAttempts': submissionAttemptCount,
+      'submissionEscapes': submissionEscapeTotalCount,
+      'ropeBreaks': ropeBreakTotalCount,
+      'finisherKickOuts': finisherKickOutTotalCount,
     },
     'players': [player.toSummaryJson(), cpu.toSummaryJson()],
     'turns': logs.map((item) => item.toJson()).toList(),
@@ -211,6 +281,8 @@ class LevelMatchEngine {
   final Map<String, MoveDefinition> moves;
   final Random random;
 
+  static const deckBuilder = LevelMatchDeckBuilder();
+
   static LevelMatchEngine create({
     required WrestlerDefinition playerWrestler,
     required WrestlerDefinition cpuWrestler,
@@ -219,22 +291,32 @@ class LevelMatchEngine {
     bool playerStarts = true,
   }) {
     final rng = random ?? Random();
-    final playerDeck = buildDeck('player')..shuffle(rng);
-    final cpuDeck = buildDeck('cpu')..shuffle(rng);
+    final playerDeckBuild = deckBuilder.build(
+      wrestler: playerWrestler,
+      moves: moves,
+      owner: 'player',
+    );
+    final cpuDeckBuild = deckBuilder.build(
+      wrestler: cpuWrestler,
+      moves: moves,
+      owner: 'cpu',
+    );
+    final playerDeck = List.of(playerDeckBuild.cards)..shuffle(rng);
+    final cpuDeck = List.of(cpuDeckBuild.cards)..shuffle(rng);
     final player = PlayerLevelMatchState(
       playerId: 'player',
       wrestler: playerWrestler,
       currentHp: playerWrestler.maxHp,
       deck: playerDeck,
       hand: [],
-    );
+    )..deckBuild = playerDeckBuild;
     final cpu = PlayerLevelMatchState(
       playerId: 'cpu',
       wrestler: cpuWrestler,
       currentHp: cpuWrestler.maxHp,
       deck: cpuDeck,
       hand: [],
-    );
+    )..deckBuild = cpuDeckBuild;
     for (var i = 0; i < 5; i++) {
       player.hand.add(player.deck.removeLast());
       cpu.hand.add(cpu.deck.removeLast());
@@ -246,10 +328,16 @@ class LevelMatchEngine {
       activePlayerId: playerStarts ? 'player' : 'cpu',
       startedAt: DateTime.now().toUtc(),
     );
-    return LevelMatchEngine(state: state, moves: moves, random: rng)
-      ..beginTurn();
+    final engine = LevelMatchEngine(state: state, moves: moves, random: rng);
+    for (final side in [player, cpu]) {
+      engine._log(side, 'deckGenerated', '${side.wrestler.name}のデッキを自動生成', {
+        'deck': side.deckBuild?.toJson(),
+      });
+    }
+    return engine..beginTurn();
   }
 
+  /// 後方互換用の固定デッキ生成（テスト等が参照する場合に備え残す）。
   static List<TechniqueResourceCard> buildDeck(String owner) {
     final counts = <MoveAttribute, int>{
       MoveAttribute.strike: 6,
@@ -272,6 +360,10 @@ class LevelMatchEngine {
     final actor = state.active;
     actor.cardSetUsedThisTurn = false;
     actor.levelChangeUsedThisTurn = false;
+    if (actor.isDown) {
+      actor.isDown = false;
+      _log(actor, 'downRecovered', '${actor.wrestler.name}はダウンから立ち上がった');
+    }
     state.phase = LevelMatchPhase.draw;
     _log(actor, 'turnStart', '${actor.wrestler.name}のターン開始');
     evaluateUnlocks(actor);
@@ -348,9 +440,11 @@ class LevelMatchEngine {
     final before = actor.currentLevel;
     actor.currentLevel = targetLevel;
     actor.levelChangeUsedThisTurn = true;
+    actor.levelChangeCount++;
     _log(actor, 'changeLevel', 'Level $before → Level $targetLevel', {
       'levelBefore': before,
       'levelAfter': targetLevel,
+      'levelChangeCount': actor.levelChangeCount,
     });
     evaluateUnlocks(actor);
     state.phase = LevelMatchPhase.chooseMove;
@@ -436,10 +530,18 @@ class LevelMatchEngine {
     actor.attributeSuccessCounts[move.attribute] =
         (actor.attributeSuccessCounts[move.attribute] ?? 0) + 1;
     actor.moveUsageCounts[move.id] = (actor.moveUsageCounts[move.id] ?? 0) + 1;
+    actor.levelUsedCounts[actor.currentLevel] =
+        (actor.levelUsedCounts[actor.currentLevel] ?? 0) + 1;
+    if (damage > 0) {
+      actor.levelMoveSuccessCounts[actor.currentLevel] =
+          (actor.levelMoveSuccessCounts[actor.currentLevel] ?? 0) + 1;
+    }
     var heatDelta = move.heat;
     if (damage > 0 && firstAttribute) heatDelta++;
     if (actor.currentHp <= 30) heatDelta++;
-    if (move.category == MoveCategory.finisher) {
+    final fromFinisher = move.category == MoveCategory.finisher;
+    actor.previousMoveId = move.id;
+    if (fromFinisher) {
       heatDelta += 3;
       actor.finisherUsed = true;
       actor.finisherUsedTurn = state.turnNumber;
@@ -448,7 +550,20 @@ class LevelMatchEngine {
     final discarded = _discardSetCards(actor, move.discardAfterUse);
     state.sharedHeat += heatDelta;
     state.lastMove = move.name;
+    state.lastMoveId = move.id;
     state.lastDamage = damage;
+
+    // Ver.0.5: このダメージで相手HPが0に到達した記録（試合は継続する）。
+    if (target.currentHp <= 0 && target.hpZeroReachedTurn == null) {
+      target.hpZeroReachedTurn = state.turnNumber;
+      _log(target, 'hpZeroReached', '${target.wrestler.name}のHPが0に到達（試合は継続）', {
+        'turn': state.turnNumber,
+      });
+    }
+
+    // ダウン判定用に、この技を受ける前のダウン状態を保持。
+    final targetWasDown = target.isDown;
+
     _log(actor, 'useMove', '${move.name}！ $damageダメージ', {
       'selectedMove': move.id,
       'moveAttribute': move.attribute.name,
@@ -464,14 +579,118 @@ class LevelMatchEngine {
       'additionalChecks': move.additionalChecks
           .map((item) => item.name)
           .toList(),
+      'offersPin': move.offersPin,
+      'offersSubmission': move.offersSubmission,
+      'causesDown': move.causesDown,
     });
     evaluateUnlocks(actor);
     evaluateUnlocks(target);
-    if (target.currentHp <= 0) {
-      _finish(actor, LevelFinishReason.hpZero);
+
+    // Ver.0.5: 打撃KOはダウンへ（即勝利にしない）。
+    if (move.causesDown && !target.isDown) {
+      target.isDown = true;
+      _log(target, 'down', '${target.wrestler.name}がダウン！', {
+        'until': 'nextTurnStart',
+        'nextPinBonus': 5,
+      });
+    }
+
+    // Ver.0.5: フォール／ギブアップへの分岐。
+    if (move.offersPin) {
+      _beginPin(
+        attacker: actor,
+        defender: target,
+        move: move,
+        damage: damage,
+        fromFinisher: fromFinisher,
+        targetWasDown: targetWasDown,
+      );
+      return;
+    }
+    if (move.offersSubmission) {
+      _beginSubmission(
+        attacker: actor,
+        defender: target,
+        move: move,
+        damage: damage,
+        fromFinisher: fromFinisher,
+      );
       return;
     }
     endTurn();
+  }
+
+  void _beginPin({
+    required PlayerLevelMatchState attacker,
+    required PlayerLevelMatchState defender,
+    required MoveDefinition move,
+    required int damage,
+    required bool fromFinisher,
+    required bool targetWasDown,
+  }) {
+    final strength = computePinStrength(
+      move: move,
+      finalDamage: damage,
+      targetHp: defender.currentHp,
+      fromFinisher: fromFinisher,
+      targetWasDown: targetWasDown,
+    );
+    state.pendingPin = PendingPin(
+      attackerId: attacker.playerId,
+      defenderId: defender.playerId,
+      moveId: move.id,
+      moveName: move.name,
+      strength: strength,
+      hpKickOutCost: requiredHpCostFor(strength.total),
+      fromFinisher: fromFinisher,
+      targetWasDown: targetWasDown,
+    );
+    if (move.autoPin || fromFinisher) {
+      // 自動フォール／フィニッシャーは宣言を省略して即カウントへ。
+      _confirmPinAttempt();
+    } else {
+      state.phase = LevelMatchPhase.pinDecision;
+      _log(attacker, 'pinOffered', '${move.name}後、フォール可能', {
+        'pinStrength': strength.total,
+        'hpKickOutCost': state.pendingPin!.hpKickOutCost,
+      });
+    }
+  }
+
+  void _beginSubmission({
+    required PlayerLevelMatchState attacker,
+    required PlayerLevelMatchState defender,
+    required MoveDefinition move,
+    required int damage,
+    required bool fromFinisher,
+  }) {
+    final resistance = defender.levelCard.resistances[MoveAttribute.submission] ?? 0;
+    final strength = computeSubmissionStrength(
+      move: move,
+      finalDamage: damage,
+      targetHp: defender.currentHp,
+      fromFinisher: fromFinisher,
+      targetSubmissionResistance: resistance,
+    );
+    state.pendingSubmission = PendingSubmission(
+      attackerId: attacker.playerId,
+      defenderId: defender.playerId,
+      moveId: move.id,
+      moveName: move.name,
+      strength: strength,
+      hpEscapeCost: requiredHpCostFor(strength.total),
+      fromFinisher: fromFinisher,
+      targetSubmissionResistance: resistance,
+    );
+    defender.submissionAttemptsReceived++;
+    state.submissionAttemptCount++;
+    state.phase = LevelMatchPhase.submissionDecision;
+    _log(attacker, 'submissionAttempt', '${move.name}でギブアップ判定', {
+      'submissionStrength': strength.total,
+      'submissionComponents': strength.toJson(),
+      'hpEscapeCost': state.pendingSubmission!.hpEscapeCost,
+      'defenderOptions': _submissionOptions(defender),
+    });
   }
 
   void skipMove(String playerId) {
@@ -481,6 +700,196 @@ class LevelMatchEngine {
     }
     _log(actor, 'skipMove', '技を使用せずターン終了');
     endTurn();
+  }
+
+  // ===== Ver.0.5: フォール（3カウント） =====
+
+  /// 攻撃側がフォールを宣言する。
+  void declarePin(String playerId) {
+    final pin = state.pendingPin;
+    if (state.phase != LevelMatchPhase.pinDecision || pin == null) {
+      throw StateError('フォールを宣言できる局面ではありません');
+    }
+    if (pin.attackerId != playerId) throw StateError('フォール宣言は攻撃側のみです');
+    _confirmPinAttempt();
+  }
+
+  /// 攻撃側がフォールを見送る（試合続行、HEAT+1）。
+  void declinePin(String playerId) {
+    final pin = state.pendingPin;
+    if (state.phase != LevelMatchPhase.pinDecision || pin == null) {
+      throw StateError('フォール判断の局面ではありません');
+    }
+    if (pin.attackerId != playerId) throw StateError('攻撃側のみ選択できます');
+    final attacker = state.byId(pin.attackerId);
+    state.sharedHeat += 1;
+    _log(attacker, 'pinDeclined', 'フォールせず試合を続ける（HEAT+1）', {
+      'heatAfter': state.sharedHeat,
+    });
+    state.pendingPin = null;
+    endTurn();
+  }
+
+  void _confirmPinAttempt() {
+    final pin = state.pendingPin!;
+    final defender = state.byId(pin.defenderId);
+    final attacker = state.byId(pin.attackerId);
+    defender.pinAttemptsReceived++;
+    state.pinAttemptCount++;
+    state.phase = LevelMatchPhase.kickOutDecision;
+    _log(attacker, 'pinAttempt', '${pin.moveName}でフォール！ ONE… TWO…', {
+      'pinStrength': pin.strength.total,
+      'pinComponents': pin.strength.toJson(),
+      'hpKickOutCost': pin.hpKickOutCost,
+      'fromFinisher': pin.fromFinisher,
+      'defenderOptions': _kickOutOptions(defender, pin),
+    });
+  }
+
+  /// 防御側のキックアウト対応。
+  void kickOut(String playerId, DefenseMethod method) {
+    final pin = state.pendingPin;
+    if (state.phase != LevelMatchPhase.kickOutDecision || pin == null) {
+      throw StateError('キックアウトできる局面ではありません');
+    }
+    if (pin.defenderId != playerId) throw StateError('キックアウトは防御側のみです');
+    final defender = state.byId(pin.defenderId);
+    switch (method) {
+      case DefenseMethod.card:
+        if (defender.kickOutCards <= 0) throw StateError('キックアウトカードがありません');
+        defender.kickOutCards--;
+        defender.kickOutCardUsedCount++;
+        final heat = 2 + (pin.fromFinisher ? 2 : 0);
+        state.sharedHeat += heat;
+        _registerKickOut(defender, pin, method: 'card', heat: heat);
+      case DefenseMethod.hp:
+        if (defender.currentHp <= 0) throw StateError('HP0のためHP消費キックアウト不可');
+        if (defender.currentHp < pin.hpKickOutCost) throw StateError('HPが足りません');
+        defender.currentHp -= pin.hpKickOutCost;
+        final heat = 2 + (pin.fromFinisher ? 1 : 0);
+        state.sharedHeat += heat;
+        _registerKickOut(defender, pin, method: 'hp', heat: heat);
+      case DefenseMethod.accept:
+        _finishPin(pin);
+    }
+  }
+
+  void _registerKickOut(
+    PlayerLevelMatchState defender,
+    PendingPin pin, {
+    required String method,
+    required int heat,
+  }) {
+    defender.kickOutCount++;
+    defender.pinKickOutCount++;
+    state.kickOutTotalCount++;
+    if (pin.fromFinisher) {
+      defender.finisherKickOutCount++;
+      state.finisherKickOutTotalCount++;
+    }
+    _log(defender, 'kickOut', '${defender.wrestler.name}がキックアウト！ 2.9！', {
+      'selectedKickOutMethod': method,
+      'hpCost': method == 'hp' ? pin.hpKickOutCost : 0,
+      'cardUsed': method == 'card',
+      'kickOutSuccess': true,
+      'threeCount': false,
+      'fromFinisher': pin.fromFinisher,
+      'heatDelta': heat,
+      'heatAfter': state.sharedHeat,
+    });
+    state.pendingPin = null;
+    state.pendingAnimation = null;
+    endTurn();
+  }
+
+  void _finishPin(PendingPin pin) {
+    _log(state.byId(pin.defenderId), 'threeCount', 'ONE… TWO… THREE！', {
+      'kickOutSuccess': false,
+      'threeCount': true,
+    });
+    state.finishMoveId = pin.moveId;
+    state.finishingMove = pin.moveName;
+    state.pendingPin = null;
+    _finish(state.byId(pin.attackerId), LevelFinishReason.pinfall);
+  }
+
+  // ===== Ver.0.5: ギブアップ（サブミッション） =====
+
+  /// 防御側のギブアップ対応。card=ロープブレイク / hp=耐える / accept=ギブアップ。
+  void escapeSubmission(String playerId, DefenseMethod method) {
+    final sub = state.pendingSubmission;
+    if (state.phase != LevelMatchPhase.submissionDecision || sub == null) {
+      throw StateError('ギブアップ判定の局面ではありません');
+    }
+    if (sub.defenderId != playerId) throw StateError('対応できるのは防御側です');
+    final defender = state.byId(sub.defenderId);
+    switch (method) {
+      case DefenseMethod.card:
+        if (defender.ropeBreakCards <= 0) throw StateError('ロープブレイクカードがありません');
+        defender.ropeBreakCards--;
+        defender.ropeBreakUsedCount++;
+        state.ropeBreakTotalCount++;
+        state.sharedHeat += 1;
+        _registerEscape(defender, sub, method: 'ropeBreak', heat: 1);
+      case DefenseMethod.hp:
+        if (defender.currentHp <= 0) throw StateError('HP0のためHP消費不可');
+        if (defender.currentHp < sub.hpEscapeCost) throw StateError('HPが足りません');
+        defender.currentHp -= sub.hpEscapeCost;
+        state.sharedHeat += 1;
+        _registerEscape(defender, sub, method: 'hp', heat: 1);
+      case DefenseMethod.accept:
+        _finishSubmission(sub);
+    }
+  }
+
+  void _registerEscape(
+    PlayerLevelMatchState defender,
+    PendingSubmission sub, {
+    required String method,
+    required int heat,
+  }) {
+    defender.submissionEscapeCount++;
+    state.submissionEscapeTotalCount++;
+    _log(defender, 'submissionEscape', '${defender.wrestler.name}が耐えた！', {
+      'selectedEscapeMethod': method,
+      'hpCost': method == 'hp' ? sub.hpEscapeCost : 0,
+      'ropeBreakUsed': method == 'ropeBreak',
+      'escapeSuccess': true,
+      'submissionFinish': false,
+      'heatDelta': heat,
+      'heatAfter': state.sharedHeat,
+    });
+    state.pendingSubmission = null;
+    endTurn();
+  }
+
+  void _finishSubmission(PendingSubmission sub) {
+    _log(state.byId(sub.defenderId), 'submissionFinish', 'ギブアップ！', {
+      'escapeSuccess': false,
+      'submissionFinish': true,
+    });
+    state.finishMoveId = sub.moveId;
+    state.finishingMove = sub.moveName;
+    state.pendingSubmission = null;
+    _finish(state.byId(sub.attackerId), LevelFinishReason.submission);
+  }
+
+  List<String> _kickOutOptions(PlayerLevelMatchState defender, PendingPin pin) => [
+    if (defender.kickOutCards > 0) 'card',
+    if (defender.currentHp > 0 && defender.currentHp >= pin.hpKickOutCost) 'hp',
+    'accept',
+  ];
+
+  List<String> _submissionOptions(PlayerLevelMatchState defender) {
+    final sub = state.pendingSubmission;
+    return [
+      if (defender.ropeBreakCards > 0) 'ropeBreak',
+      if (sub != null &&
+          defender.currentHp > 0 &&
+          defender.currentHp >= sub.hpEscapeCost)
+        'hp',
+      'giveUp',
+    ];
   }
 
   List<UnlockEvaluation> evaluateUnlocks(PlayerLevelMatchState actor) {
@@ -543,8 +952,40 @@ class LevelMatchEngine {
     );
   }
 
+  /// CPU が今すぐ判断すべき局面か（手番中の通常操作＋防御側としての対応を含む）。
+  bool get cpuActionPending {
+    if (state.isGameOver) return false;
+    switch (state.phase) {
+      case LevelMatchPhase.pinDecision:
+        return state.pendingPin?.attackerId == 'cpu';
+      case LevelMatchPhase.kickOutDecision:
+        return state.pendingPin?.defenderId == 'cpu';
+      case LevelMatchPhase.submissionDecision:
+        return state.pendingSubmission?.defenderId == 'cpu';
+      default:
+        return state.activePlayerId == 'cpu';
+    }
+  }
+
   void runCpuTurn() {
-    if (state.isGameOver || state.activePlayerId != 'cpu') return;
+    if (state.isGameOver) return;
+    // 防御側としての対応（手番でなくても発生する）。
+    if (state.phase == LevelMatchPhase.kickOutDecision &&
+        state.pendingPin?.defenderId == 'cpu') {
+      _cpuKickOut();
+      return;
+    }
+    if (state.phase == LevelMatchPhase.submissionDecision &&
+        state.pendingSubmission?.defenderId == 'cpu') {
+      _cpuEscape();
+      return;
+    }
+    if (state.phase == LevelMatchPhase.pinDecision &&
+        state.pendingPin?.attackerId == 'cpu') {
+      _cpuPinDecision();
+      return;
+    }
+    if (state.activePlayerId != 'cpu') return;
     final cpu = state.cpu;
     if (state.phase == LevelMatchPhase.setCard) {
       final desired = _desiredAttributes(cpu);
@@ -599,33 +1040,124 @@ class LevelMatchEngine {
       final candidates = _currentMoves(
         cpu,
       ).where((move) => evaluateMove(cpu, move).usable).toList();
-      candidates.sort((a, b) {
-        if (a.category == MoveCategory.finisher) return -1;
-        if (b.category == MoveCategory.finisher) return 1;
-        final damageA = max(
-          0,
-          a.power - (state.player.levelCard.resistances[a.attribute] ?? 0),
-        );
-        final damageB = max(
-          0,
-          b.power - (state.player.levelCard.resistances[b.attribute] ?? 0),
-        );
-        return damageB.compareTo(damageA);
-      });
       if (candidates.isEmpty) {
         _log(cpu, 'cpuDecision', '使用可能な技なし', {'candidates': <String>[]});
         skipMove('cpu');
       } else {
+        candidates.sort(
+          (a, b) => _scoreMove(cpu, b).compareTo(_scoreMove(cpu, a)),
+        );
         final selected = candidates.first;
         _log(cpu, 'cpuDecision', '${selected.name}を選択', {
-          'candidates': candidates.map((item) => item.id).toList(),
+          'candidates': [
+            for (final move in candidates)
+              {'id': move.id, 'score': _scoreMove(cpu, move)},
+          ],
           'selectionReason': selected.category == MoveCategory.finisher
               ? 'finisherAvailable'
-              : 'maximumDamage',
+              : (selected.offersPin
+                    ? 'pinChance'
+                    : selected.offersSubmission
+                    ? 'submissionChance'
+                    : 'maximumScore'),
         });
         useMove('cpu', selected.id);
       }
     }
+  }
+
+  /// CPU の技評価値（§13）。
+  int _scoreMove(PlayerLevelMatchState cpu, MoveDefinition move) {
+    final opponent = state.player;
+    final damage = max(
+      0,
+      move.power - (opponent.levelCard.resistances[move.attribute] ?? 0),
+    );
+    var score = damage + move.heat;
+    if (move.offersPin) score += 8;
+    if (move.offersSubmission) score += 8;
+    if (move.category == MoveCategory.finisher) {
+      if (opponent.currentHp <= 20) {
+        score += 30;
+      } else if (opponent.currentHp <= 50) {
+        score += 20;
+      } else if (opponent.currentHp >= 80) {
+        score += 0;
+      } else {
+        score += 8;
+      }
+    }
+    if (move.id == cpu.previousMoveId) score -= 5; // 同一技連続ペナルティ
+    if ((cpu.moveUsageCounts[move.id] ?? 0) == 0) score += 3; // 初使用ボーナス
+    if ((cpu.attributeSuccessCounts[move.attribute] ?? 0) == 0) {
+      score += 3; // 初使用属性ボーナス
+    }
+    // 相手のキックアウトカードが尽きているならフォール技を後押し。
+    if (move.offersPin && opponent.kickOutCards == 0) score += 5;
+    return score;
+  }
+
+  void _cpuPinDecision() {
+    final pin = state.pendingPin!;
+    final defender = state.byId(pin.defenderId);
+    final shouldPin =
+        pin.fromFinisher ||
+        defender.currentHp <= 50 ||
+        (defender.kickOutCards == 0 &&
+            defender.currentHp < pin.hpKickOutCost);
+    _log(state.cpu, 'cpuDecision', shouldPin ? 'フォールを選択' : 'フォールを見送り', {
+      'pinStrength': pin.strength.total,
+      'defenderHp': defender.currentHp,
+      'defenderKickOutCards': defender.kickOutCards,
+    });
+    if (shouldPin) {
+      declarePin('cpu');
+    } else {
+      declinePin('cpu');
+    }
+  }
+
+  void _cpuKickOut() {
+    final pin = state.pendingPin!;
+    final cpu = state.cpu;
+    final canHp = cpu.currentHp > 0 && cpu.currentHp >= pin.hpKickOutCost;
+    final bigCost = pin.hpKickOutCost > cpu.currentHp * 0.5;
+    final DefenseMethod method;
+    if (cpu.kickOutCards > 0 && (!canHp || bigCost)) {
+      method = DefenseMethod.card;
+    } else if (canHp) {
+      method = DefenseMethod.hp;
+    } else if (cpu.kickOutCards > 0) {
+      method = DefenseMethod.card;
+    } else {
+      method = DefenseMethod.accept;
+    }
+    _log(cpu, 'cpuDecision', 'キックアウト対応: ${method.name}', {
+      'hpKickOutCost': pin.hpKickOutCost,
+      'currentHp': cpu.currentHp,
+      'kickOutCards': cpu.kickOutCards,
+    });
+    kickOut('cpu', method);
+  }
+
+  void _cpuEscape() {
+    final sub = state.pendingSubmission!;
+    final cpu = state.cpu;
+    final canHp = cpu.currentHp > 0 && cpu.currentHp >= sub.hpEscapeCost;
+    final DefenseMethod method;
+    if (cpu.ropeBreakCards > 0) {
+      method = DefenseMethod.card;
+    } else if (canHp) {
+      method = DefenseMethod.hp;
+    } else {
+      method = DefenseMethod.accept;
+    }
+    _log(cpu, 'cpuDecision', 'ギブアップ対応: ${method.name}', {
+      'hpEscapeCost': sub.hpEscapeCost,
+      'currentHp': cpu.currentHp,
+      'ropeBreakCards': cpu.ropeBreakCards,
+    });
+    escapeSubmission('cpu', method);
   }
 
   void endTurn() {
@@ -751,6 +1283,47 @@ class LevelMatchEngine {
         true,
         '前レベル解放済み',
       ),
+      // Ver.0.5: 飛び級を許容する条件群。
+      UnlockConditionType.specificLevelUsedAtLeast => (
+        (actor.levelUsedCounts[condition.level ?? targetLevel - 1] ?? 0) >=
+            value,
+        condition.level != null,
+        'Lv.${condition.level}使用回数 '
+            '${actor.levelUsedCounts[condition.level ?? -1] ?? 0} ≥ $value',
+      ),
+      UnlockConditionType.specificLevelMoveSuccessAtLeast => (
+        (actor.levelMoveSuccessCounts[condition.level ?? targetLevel - 1] ??
+                0) >=
+            value,
+        condition.level != null,
+        'Lv.${condition.level}技成功 '
+            '${actor.levelMoveSuccessCounts[condition.level ?? -1] ?? 0} ≥ $value',
+      ),
+      UnlockConditionType.currentLevelIs => (
+        actor.currentLevel == value,
+        true,
+        '現在Level ${actor.currentLevel} == $value',
+      ),
+      UnlockConditionType.levelChangeCountAtLeast => (
+        actor.levelChangeCount >= value,
+        true,
+        'レベル変更回数 ${actor.levelChangeCount} ≥ $value',
+      ),
+      UnlockConditionType.pinKickOutCountAtLeast => (
+        actor.pinKickOutCount >= value,
+        true,
+        'キックアウト回数 ${actor.pinKickOutCount} ≥ $value',
+      ),
+      UnlockConditionType.submissionEscapeCountAtLeast => (
+        actor.submissionEscapeCount >= value,
+        true,
+        'ギブアップ回避 ${actor.submissionEscapeCount} ≥ $value',
+      ),
+      UnlockConditionType.finisherKickOutCountAtLeast => (
+        actor.finisherKickOutCount >= value,
+        true,
+        'フィニッシャー返し ${actor.finisherKickOutCount} ≥ $value',
+      ),
       UnlockConditionType.bleeding => (false, false, '流血状態は未対応'),
       UnlockConditionType.eventOccurred => (false, false, 'イベント条件は未対応'),
     };
@@ -817,6 +1390,8 @@ class LevelMatchEngine {
     state.phase = LevelMatchPhase.gameOver;
     _log(winner, 'gameOver', '${winner.wrestler.name}の勝利', {
       'finishReason': reason.name,
+      'finishingMove': state.finishingMove ?? state.lastMove,
+      'finishMoveId': state.finishMoveId ?? state.lastMoveId,
     });
   }
 
@@ -952,4 +1527,147 @@ class LevelMatchAnalytics {
 
   double _ratio(bool Function(Map<String, dynamic>) test) =>
       matches.isEmpty ? 0 : matches.where(test).length / matches.length;
+
+  // ===== Ver.0.5 用メトリクス =====
+
+  Map<String, dynamic> _game(Map<String, dynamic> match) =>
+      Map<String, dynamic>.from(match['game'] as Map? ?? const {});
+  List<Map<String, dynamic>> _players(Map<String, dynamic> match) => [
+    for (final item in (match['players'] as List? ?? const []))
+      Map<String, dynamic>.from(item as Map),
+  ];
+  int _sumGame(String key) => matches.fold<int>(
+    0,
+    (sum, match) => sum + ((_game(match)[key] as num?)?.toInt() ?? 0),
+  );
+  int _sumPlayers(String key) => matches.fold<int>(0, (sum, match) {
+    return sum +
+        _players(match).fold<int>(
+          0,
+          (inner, player) => inner + ((player[key] as num?)?.toInt() ?? 0),
+        );
+  });
+
+  double get pinfallFinishRate =>
+      _ratio((match) => _game(match)['finishReason'] == 'pinfall');
+  double get submissionFinishRate =>
+      _ratio((match) => _game(match)['finishReason'] == 'submission');
+  double get finisherFinishRate => _ratio((match) {
+    final game = _game(match);
+    final reason = game['finishReason'];
+    if (reason != 'pinfall' && reason != 'submission') return false;
+    return _players(match).any(
+      (player) =>
+          player['playerId'] == game['winner'] &&
+          player['finisherUsed'] == true,
+    );
+  });
+  double get averagePinAttempts => averageGame('pinAttempts');
+  double get averageSubmissionAttempts => averageGame('submissionAttempts');
+
+  double get pinSuccessRate {
+    final attempts = _sumGame('pinAttempts');
+    if (attempts == 0) return 0;
+    final successes = matches
+        .where((match) => _game(match)['finishReason'] == 'pinfall')
+        .length;
+    return successes / attempts;
+  }
+
+  double get kickOutCardUseRate {
+    final kickOuts = _sumGame('kickOuts');
+    if (kickOuts == 0) return 0;
+    return _sumPlayers('kickOutCardUsedCount') / kickOuts;
+  }
+
+  double get hpKickOutRate {
+    final kickOuts = _sumGame('kickOuts');
+    if (kickOuts == 0) return 0;
+    final card = _sumPlayers('kickOutCardUsedCount');
+    return (kickOuts - card) / kickOuts;
+  }
+
+  double get finisherKickOutRate {
+    final kickOuts = _sumGame('kickOuts');
+    if (kickOuts == 0) return 0;
+    return _sumGame('finisherKickOuts') / kickOuts;
+  }
+
+  double get ropeBreakUseRate {
+    final attempts = _sumGame('submissionAttempts');
+    if (attempts == 0) return 0;
+    return _sumGame('ropeBreaks') / attempts;
+  }
+
+  double get hpEnduranceRate {
+    final escapes = _sumGame('submissionEscapes');
+    if (escapes == 0) return 0;
+    return (escapes - _sumGame('ropeBreaks')) / escapes;
+  }
+
+  double get averageContinueAfterHpZero {
+    final samples = <int>[];
+    for (final match in matches) {
+      final turns = (_game(match)['turns'] as num?)?.toInt() ?? 0;
+      for (final player in _players(match)) {
+        final reached = (player['hpZeroReachedTurn'] as num?)?.toInt();
+        if (reached != null) samples.add(max(0, turns - reached));
+      }
+    }
+    return samples.isEmpty
+        ? 0
+        : samples.reduce((a, b) => a + b) / samples.length;
+  }
+
+  /// レスラー別の平均デッキ構成（属性別枚数）。
+  Map<String, Map<String, double>> get deckCompositionByWrestler {
+    final totals = <String, Map<String, int>>{};
+    final counts = <String, int>{};
+    for (final match in matches) {
+      for (final player in _players(match)) {
+        final deck = player['deck'];
+        if (deck is! Map) continue;
+        final name = player['wrestlerName'] as String? ?? '';
+        final attributeCounts = Map<String, dynamic>.from(
+          deck['counts'] as Map? ?? const {},
+        );
+        final target = totals.putIfAbsent(name, () => {});
+        attributeCounts.forEach((key, value) {
+          target[key] = (target[key] ?? 0) + ((value as num?)?.toInt() ?? 0);
+        });
+        counts[name] = (counts[name] ?? 0) + 1;
+      }
+    }
+    return {
+      for (final entry in totals.entries)
+        entry.key: {
+          for (final attribute in entry.value.entries)
+            attribute.key: attribute.value / (counts[entry.key] ?? 1),
+        },
+    };
+  }
+
+  /// 一度も参照されない属性が入っていた割合（不要カード率）。
+  double get unusedCardRate {
+    var unused = 0;
+    var total = 0;
+    for (final match in matches) {
+      for (final player in _players(match)) {
+        final deck = player['deck'];
+        if (deck is! Map) continue;
+        final used = ((deck['usedAttributes'] as List?) ?? const [])
+            .map((item) => item.toString())
+            .toSet();
+        final counts = Map<String, dynamic>.from(
+          deck['counts'] as Map? ?? const {},
+        );
+        counts.forEach((key, value) {
+          final n = (value as num?)?.toInt() ?? 0;
+          total += n;
+          if (!used.contains(key)) unused += n;
+        });
+      }
+    }
+    return total == 0 ? 0 : unused / total;
+  }
 }

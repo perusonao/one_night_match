@@ -78,7 +78,7 @@ class TitleScreen extends StatelessWidget {
                   icon: const Icon(Icons.layers),
                   label: const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-                    child: Text('レベルカードマッチ  Ver.0.4'),
+                    child: Text('レベルカードマッチ  Ver.0.5'),
                   ),
                   onPressed: () => Navigator.push(
                     context,
@@ -1108,7 +1108,7 @@ class _DebugScreenState extends State<DebugScreen> {
                 ),
                 const SizedBox(height: 28),
                 const Text(
-                  'Ver.0.4 LEVEL CARD MATCH',
+                  'Ver.0.5 LEVEL CARD MATCH',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -1181,6 +1181,67 @@ class _DebugScreenState extends State<DebugScreen> {
                   for (final entry
                       in levelAnalytics.attributeMoveUseRates.entries)
                     _metric(entry.key, _percent(entry.value)),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Ver.0.5 決着メトリクス',
+                    style: TextStyle(fontWeight: FontWeight.bold, color: _pink),
+                  ),
+                  _metric(
+                    '3カウント決着率',
+                    _percent(levelAnalytics.pinfallFinishRate),
+                  ),
+                  _metric(
+                    'ギブアップ決着率',
+                    _percent(levelAnalytics.submissionFinishRate),
+                  ),
+                  _metric(
+                    'フィニッシャー決着率',
+                    _percent(levelAnalytics.finisherFinishRate),
+                  ),
+                  _metric(
+                    'HP0到達後平均継続ターン',
+                    levelAnalytics.averageContinueAfterHpZero.toStringAsFixed(1),
+                  ),
+                  _metric(
+                    '平均フォール試行',
+                    levelAnalytics.averagePinAttempts.toStringAsFixed(1),
+                  ),
+                  _metric('フォール成功率', _percent(levelAnalytics.pinSuccessRate)),
+                  _metric(
+                    'キックアウトカード使用率',
+                    _percent(levelAnalytics.kickOutCardUseRate),
+                  ),
+                  _metric('HPキックアウト率', _percent(levelAnalytics.hpKickOutRate)),
+                  _metric(
+                    'フィニッシャー返し率',
+                    _percent(levelAnalytics.finisherKickOutRate),
+                  ),
+                  _metric(
+                    '平均ギブアップ判定',
+                    levelAnalytics.averageSubmissionAttempts.toStringAsFixed(1),
+                  ),
+                  _metric(
+                    'ロープブレイク使用率',
+                    _percent(levelAnalytics.ropeBreakUseRate),
+                  ),
+                  _metric('HP耐久率', _percent(levelAnalytics.hpEnduranceRate)),
+                  _metric('不要カード率', _percent(levelAnalytics.unusedCardRate)),
+                  const Text(
+                    'レスラー別デッキ構成（平均枚数）',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  for (final entry
+                      in levelAnalytics.deckCompositionByWrestler.entries)
+                    _metric(
+                      entry.key,
+                      entry.value.entries
+                          .where((attribute) => attribute.value > 0)
+                          .map(
+                            (attribute) =>
+                                '${attribute.key}${attribute.value.toStringAsFixed(1)}',
+                          )
+                          .join(' '),
+                    ),
                   FilledButton.icon(
                     onPressed: levelData!.isEmpty
                         ? null
@@ -1191,7 +1252,7 @@ class _DebugScreenState extends State<DebugScreen> {
                             ).convert(levelData.last),
                           ),
                     icon: const Icon(Icons.copy),
-                    label: const Text('最新Ver.0.4試合JSONをコピー'),
+                    label: const Text('最新Ver.0.5試合JSONをコピー'),
                   ),
                 ],
               ],

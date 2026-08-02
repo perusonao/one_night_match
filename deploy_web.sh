@@ -25,7 +25,7 @@ WORKTREE_DIR="$(mktemp -d)"
 
 echo "==> flutter build web (base-href=${BASE_HREF})"
 flutter pub get
-flutter build web --release --base-href "${BASE_HREF}"
+flutter build web --release --base-href "${BASE_HREF}" --no-web-resources-cdn
 
 echo "==> gh-pages ブランチを更新"
 # 既存の gh-pages（ローカル/リモート）を取得。無ければ orphan で新規作成。
