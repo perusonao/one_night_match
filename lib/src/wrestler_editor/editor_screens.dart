@@ -1660,6 +1660,7 @@ String _checkLabel(AdditionalCheckType value) => switch (value) {
   AdditionalCheckType.pinfall => 'フォール判定',
   AdditionalCheckType.bleeding => '流血判定',
   AdditionalCheckType.counterSuccess => '返し成功判定',
+  AdditionalCheckType.down => 'ダウン判定',
 };
 
 String _timingLabel(AbilityTiming value) => switch (value) {
@@ -1687,6 +1688,13 @@ String _unlockLabel(UnlockConditionType value) => switch (value) {
   UnlockConditionType.bleeding => '流血状態',
   UnlockConditionType.eventOccurred => '特定イベント発生済み',
   UnlockConditionType.previousLevelUnlocked => '前レベル解放済み',
+  UnlockConditionType.specificLevelUsedAtLeast => '特定Levelの使用回数',
+  UnlockConditionType.specificLevelMoveSuccessAtLeast => '特定Levelでの技成功回数',
+  UnlockConditionType.currentLevelIs => '現在Levelが指定値',
+  UnlockConditionType.levelChangeCountAtLeast => 'レベル変更回数',
+  UnlockConditionType.pinKickOutCountAtLeast => 'キックアウト成功回数',
+  UnlockConditionType.submissionEscapeCountAtLeast => 'ギブアップ回避回数',
+  UnlockConditionType.finisherKickOutCountAtLeast => 'フィニッシャー返し回数',
 };
 
 bool _needsValue(UnlockConditionType type) => !{

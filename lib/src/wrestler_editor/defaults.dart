@@ -4,33 +4,114 @@ Map<MoveAttribute, int> _cards([MoveAttribute? type, int count = 0]) => {
   for (final value in MoveAttribute.values) value: value == type ? count : 0,
 };
 
+/// Ver.0.5 用の技ビルダー。フォール／ギブアップ／ダウンのパラメータを持たせる。
+MoveDefinition _move(
+  String id,
+  String name,
+  MoveAttribute attribute,
+  int power,
+  int heat, {
+  int cost = 1,
+  MoveCategory category = MoveCategory.normal,
+  bool pin = false,
+  int pinPower = 0,
+  bool submission = false,
+  int submissionPower = 0,
+  bool down = false,
+  String description = 'Ver.0.5 検討用の仮技データです。',
+}) {
+  final checks = <AdditionalCheckType>[
+    if (pin) AdditionalCheckType.pinfall,
+    if (submission) AdditionalCheckType.submission,
+    if (down) AdditionalCheckType.down,
+  ];
+  return MoveDefinition(
+    id: id,
+    name: name,
+    category: category,
+    attribute: attribute,
+    power: power,
+    heat: heat,
+    requiredCards: _cards(attribute, cost),
+    discardAfterUse: _cards(),
+    additionalChecks: checks.isEmpty ? const [AdditionalCheckType.none] : checks,
+    canAttemptPin: pin,
+    pinPower: pinPower,
+    canAttemptSubmission: submission,
+    submissionPower: submissionPower,
+    description: description,
+  );
+}
+
+MoveDefinition _finisher(
+  String id,
+  String name,
+  MoveAttribute attribute, {
+  required bool pinfall,
+  int strength = 12,
+}) => MoveDefinition(
+  id: id,
+  name: name,
+  category: MoveCategory.finisher,
+  attribute: attribute,
+  power: pinfall ? 38 : 36,
+  heat: 8,
+  requiredCards: {..._cards(attribute, 4), MoveAttribute.counter: 1},
+  discardAfterUse: _cards(attribute, 2),
+  usageLimit: 1,
+  markUsedAfterUse: true,
+  additionalChecks: [
+    pinfall ? AdditionalCheckType.pinfall : AdditionalCheckType.submission,
+  ],
+  canAttemptPin: pinfall,
+  pinPower: pinfall ? strength : 0,
+  pinBonusOnFinisher: pinfall ? 15 : 0,
+  canAttemptSubmission: !pinfall,
+  submissionPower: pinfall ? 0 : strength,
+  submissionBonusOnFinisher: pinfall ? 0 : 15,
+  description: 'Ver.0.5 のフィニッシャー。決着（フォール／ギブアップ）へ直結する。',
+);
+
 final defaultEditorMoves = <MoveDefinition>[
-  for (final item in const [
-    ('dropkick', 'ドロップキック', MoveAttribute.strike, 14, 3),
-    ('arm_drag', 'アームドラッグ', MoveAttribute.throwMove, 12, 2),
-    ('running_knee', 'ランニングニー', MoveAttribute.strike, 18, 4),
-    ('brainbuster', 'ブレーンバスター', MoveAttribute.throwMove, 22, 5),
-    ('high_kick', 'ハイキック', MoveAttribute.strike, 24, 5),
-    ('dragon_suplex', 'ドラゴンスープレックス', MoveAttribute.throwMove, 28, 6),
-    ('lariat', '豪腕ラリアット', MoveAttribute.strike, 22, 3),
-    ('powerbomb', 'パワーボム', MoveAttribute.throwMove, 26, 5),
-    ('armbar', '腕ひしぎ十字固め', MoveAttribute.submission, 18, 4),
-    ('figure_four', '足4の字固め', MoveAttribute.submission, 21, 5),
-    ('heel_kick', 'ヒールキック', MoveAttribute.strike, 17, 4),
-    ('chair_attack', 'チェアー攻撃', MoveAttribute.rough, 25, -2),
-    ('moonsault', 'ムーンサルトプレス', MoveAttribute.aerial, 27, 7),
-  ])
-    MoveDefinition(
-      id: item.$1,
-      name: item.$2,
-      category: MoveCategory.normal,
-      attribute: item.$3,
-      power: item.$4,
-      heat: item.$5,
-      requiredCards: _cards(item.$3, item.$4 >= 24 ? 3 : 2),
-      discardAfterUse: _cards(),
-      description: 'Ver.0.3エディタ用の仮技データです。',
-    ),
+  // 打撃（KO=ダウン）。
+  _move('dropkick', 'ドロップキック', MoveAttribute.strike, 14, 3, cost: 1),
+  _move('elbow', 'エルボー', MoveAttribute.strike, 12, 2, cost: 1),
+  _move('running_knee', 'ランニングニー', MoveAttribute.strike, 18, 4, cost: 2, down: true),
+  _move('high_kick', 'ハイキック', MoveAttribute.strike, 24, 5, cost: 3, down: true),
+  _move('lariat', '豪腕ラリアット', MoveAttribute.strike, 22, 3, cost: 2, down: true),
+  // 投げ（フォール可能）。
+  _move('arm_drag', 'アームドラッグ', MoveAttribute.throwMove, 12, 2,
+      cost: 1, pin: true, pinPower: 3),
+  _move('body_slam', 'ボディスラム', MoveAttribute.throwMove, 15, 3,
+      cost: 1, pin: true, pinPower: 4),
+  _move('neckbreaker', 'ネックブリーカー', MoveAttribute.throwMove, 20, 4,
+      cost: 2, pin: true, pinPower: 5),
+  _move('brainbuster', 'ブレーンバスター', MoveAttribute.throwMove, 22, 5,
+      cost: 2, pin: true, pinPower: 6),
+  _move('backdrop', 'バックドロップ', MoveAttribute.throwMove, 24, 5,
+      cost: 2, pin: true, pinPower: 7),
+  _move('dragon_suplex', 'ドラゴンスープレックス', MoveAttribute.throwMove, 28, 6,
+      cost: 3, pin: true, pinPower: 9),
+  _move('powerbomb', 'パワーボム', MoveAttribute.throwMove, 28, 6,
+      cost: 3, pin: true, pinPower: 10),
+  // 関節（ギブアップ可能）。
+  _move('armbar', '腕ひしぎ十字固め', MoveAttribute.submission, 18, 4,
+      cost: 2, submission: true, submissionPower: 5),
+  _move('figure_four', '足4の字固め', MoveAttribute.submission, 21, 5,
+      cost: 2, submission: true, submissionPower: 6),
+  _move('camel_clutch', 'キャメルクラッチ', MoveAttribute.submission, 19, 4,
+      cost: 2, submission: true, submissionPower: 5),
+  _move('cross_face', 'クロスフェイス', MoveAttribute.submission, 24, 5,
+      cost: 3, submission: true, submissionPower: 8),
+  // 凶（ヒール）。
+  _move('rough_slam', 'ラフ投げ', MoveAttribute.rough, 22, 2,
+      cost: 2, pin: true, pinPower: 6),
+  _move('low_blow', '急所攻撃', MoveAttribute.rough, 16, -1, cost: 1, down: true),
+  _move('chair_attack', 'チェアー攻撃', MoveAttribute.rough, 25, -2, cost: 2),
+  // 飛（フォール可能）。
+  _move('moonsault', 'ムーンサルトプレス', MoveAttribute.aerial, 27, 7,
+      cost: 3, pin: true, pinPower: 7),
+  // 返し技（Ver.0.5でも本格実装は見送り）。
   MoveDefinition(
     id: 'counter_brainbuster',
     name: '切り返しブレーンバスター',
@@ -43,26 +124,15 @@ final defaultEditorMoves = <MoveDefinition>[
     successRate: 65,
     additionalChecks: const [AdditionalCheckType.counterSuccess],
   ),
-  for (final item in const [
-    ('high_speed_german', 'ハイスピード・ジャーマン', MoveAttribute.throwMove),
-    ('gouda_driver', '豪田ドライバー', MoveAttribute.throwMove),
-    ('silver_lock', '白銀式クロスロック', MoveAttribute.submission),
-    ('black_butterfly', 'ブラック・バタフライ', MoveAttribute.aerial),
-  ])
-    MoveDefinition(
-      id: item.$1,
-      name: item.$2,
-      category: MoveCategory.finisher,
-      attribute: item.$3,
-      power: 38,
-      heat: 8,
-      requiredCards: {..._cards(item.$3, 4), MoveAttribute.counter: 1},
-      discardAfterUse: _cards(item.$3, 2),
-      usageLimit: 1,
-      markUsedAfterUse: true,
-      additionalChecks: const [AdditionalCheckType.pinfall],
-      description: 'Ver.0.3エディタ用の仮フィニッシャーです。',
-    ),
+  // フィニッシャー（各レスラー固有・決着直結）。
+  _finisher('high_speed_german', 'ハイスピード・ジャーマン', MoveAttribute.throwMove,
+      pinfall: true, strength: 8),
+  _finisher('gouda_driver', '豪田ドライバー', MoveAttribute.throwMove,
+      pinfall: true, strength: 12),
+  _finisher('silver_lock', '白銀式クロスロック', MoveAttribute.submission,
+      pinfall: false, strength: 12),
+  _finisher('black_butterfly', 'ブラック・バタフライ', MoveAttribute.rough,
+      pinfall: true, strength: 10),
 ];
 
 final defaultEditorAbilities = <AbilityDefinition>[
@@ -75,7 +145,7 @@ final defaultEditorAbilities = <AbilityDefinition>[
     AbilityDefinition(
       id: item.$1,
       name: item.$2,
-      description: 'Ver.0.3エディタ用の仮能力データです。',
+      description: 'Ver.0.5 用の仮能力データです。',
       timing: AbilityTiming.afterDamage,
       successEffects: const ['HEATを+1する'],
     ),
@@ -104,7 +174,7 @@ WrestlerLevelDefinition _level(
               type: level == 2
                   ? UnlockConditionType.hpAtMost
                   : UnlockConditionType.heatAtLeast,
-              value: level == 2 ? 50 : 20,
+              value: level == 2 ? 70 : 20,
             ),
           ],
         ),
@@ -119,70 +189,110 @@ WrestlerLevelDefinition _level(
   flavorText: level == 3 ? 'この一撃で、夜を終わらせる。' : 'ここからが私の試合！',
 );
 
+/// レスラーごとの技構成（個性を反映）。
+class _WrestlerBlueprint {
+  const _WrestlerBlueprint({
+    required this.id,
+    required this.name,
+    required this.subtitle,
+    required this.type,
+    required this.color,
+    required this.ability,
+    required this.finisher,
+    required this.level1,
+    required this.level2,
+    required this.level3,
+  });
+  final String id;
+  final String name;
+  final String subtitle;
+  final EditorWrestlerType type;
+  final String color;
+  final String ability;
+  final String finisher;
+  final List<String> level1;
+  final List<String> level2;
+  final List<String> level3;
+}
+
+const _blueprints = <_WrestlerBlueprint>[
+  _WrestlerBlueprint(
+    id: 'wrestler_akari',
+    name: '火神アカリ',
+    subtitle: '紅蓮のニューヒロイン',
+    type: EditorWrestlerType.babyface,
+    color: '#E53935',
+    ability: 'burning_spirit',
+    finisher: 'high_speed_german',
+    level1: ['dropkick', 'arm_drag'],
+    level2: ['running_knee', 'brainbuster'],
+    level3: ['high_kick', 'dragon_suplex'],
+  ),
+  _WrestlerBlueprint(
+    id: 'wrestler_misaki',
+    name: '豪田ミサキ',
+    subtitle: '鋼鉄の女帝',
+    type: EditorWrestlerType.power,
+    color: '#F9A825',
+    ability: 'power_pressure',
+    finisher: 'gouda_driver',
+    level1: ['elbow', 'body_slam'],
+    level2: ['lariat', 'powerbomb'],
+    level3: ['running_knee', 'backdrop'],
+  ),
+  _WrestlerBlueprint(
+    id: 'wrestler_reina',
+    name: '白銀レイナ',
+    subtitle: 'リングの魔術師',
+    type: EditorWrestlerType.technician,
+    color: '#8E8EAA',
+    ability: 'silver_technique',
+    finisher: 'silver_lock',
+    level1: ['dropkick', 'armbar'],
+    level2: ['brainbuster', 'figure_four'],
+    level3: ['camel_clutch', 'cross_face'],
+  ),
+  _WrestlerBlueprint(
+    id: 'wrestler_jack',
+    name: '黒蝶ジャック',
+    subtitle: '漆黒の悪女',
+    type: EditorWrestlerType.heel,
+    color: '#9C27B0',
+    ability: 'heel_instinct',
+    finisher: 'black_butterfly',
+    level1: ['elbow', 'rough_slam'],
+    level2: ['low_blow', 'neckbreaker'],
+    level3: ['chair_attack', 'rough_slam'],
+  ),
+];
+
 final defaultEditorWrestlers = <WrestlerDefinition>[
-  for (final item in const [
-    (
-      'wrestler_akari',
-      '火神アカリ',
-      '紅蓮のニューヒロイン',
-      EditorWrestlerType.babyface,
-      '#E53935',
-      'burning_spirit',
-      'high_speed_german',
-    ),
-    (
-      'wrestler_misaki',
-      '豪田ミサキ',
-      '鋼鉄の女帝',
-      EditorWrestlerType.power,
-      '#F9A825',
-      'power_pressure',
-      'gouda_driver',
-    ),
-    (
-      'wrestler_reina',
-      '白銀レイナ',
-      'リングの魔術師',
-      EditorWrestlerType.technician,
-      '#8E8EAA',
-      'silver_technique',
-      'silver_lock',
-    ),
-    (
-      'wrestler_jack',
-      '黒蝶ジャック',
-      '漆黒の悪女',
-      EditorWrestlerType.heel,
-      '#9C27B0',
-      'heel_instinct',
-      'black_butterfly',
-    ),
-  ])
+  for (final item in _blueprints)
     WrestlerDefinition(
-      id: item.$1,
-      name: item.$2,
-      subtitle: item.$3,
-      type: item.$4,
+      id: item.id,
+      name: item.name,
+      subtitle: item.subtitle,
+      type: item.type,
       maxHp: 100,
-      description: '新ルール検討用の仮データです。既存Ver.0.2対戦には接続されません。',
-      themeColor: item.$5,
-      tags: [wrestlerTypeLabel(item.$4), '仮データ'],
+      description: 'Ver.0.5 フォール・ギブアップ試作版の仮データです。既存Ver.0.2対戦には接続されません。',
+      themeColor: item.color,
+      tags: [wrestlerTypeLabel(item.type), '仮データ'],
       levels: [
-        _level(item.$2, 1, const ['dropkick', 'arm_drag'], item.$6),
+        _level(item.name, 1, item.level1, item.ability),
         _level(
-          item.$2,
+          item.name,
           2,
-          const ['running_knee', 'brainbuster'],
-          item.$6,
+          item.level2,
+          item.ability,
           counter: 'counter_brainbuster',
         ),
         _level(
-          item.$2,
+          item.name,
           3,
-          const ['high_kick', 'dragon_suplex'],
-          item.$6,
+          item.level3,
+          item.ability,
           counter: 'counter_brainbuster',
-          finisher: item.$7,
+          finisher: item.finisher,
         ),
       ],
       createdAt: DateTime.utc(2026, 8, 1),
