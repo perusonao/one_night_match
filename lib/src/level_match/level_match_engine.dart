@@ -1018,123 +1018,143 @@ class LevelMatchEngine {
     );
   }
 
-  /// CPU が今すぐ判断すべき局面か（手番中の通常操作＋防御側としての対応を含む）。
-  bool get cpuActionPending {
-    if (state.isGameOver) return false;
+  PlayerLevelMatchState _opponentOf(PlayerLevelMatchState actor) =>
+      actor.playerId == state.player.playerId ? state.cpu : state.player;
+
+  /// 現在、判断すべきプレイヤーID（手番中の通常操作＋防御側としての対応）。
+  /// draw/turnEnd/resolveMove 等は自動遷移のため null。
+  String? decisionOwnerId() {
+    if (state.isGameOver) return null;
     switch (state.phase) {
       case LevelMatchPhase.pinDecision:
-        return state.pendingPin?.attackerId == 'cpu';
+        return state.pendingPin?.attackerId;
       case LevelMatchPhase.kickOutDecision:
-        return state.pendingPin?.defenderId == 'cpu';
+        return state.pendingPin?.defenderId;
       case LevelMatchPhase.submissionDecision:
-        return state.pendingSubmission?.defenderId == 'cpu';
+        return state.pendingSubmission?.defenderId;
+      case LevelMatchPhase.setCard:
+      case LevelMatchPhase.levelChange:
+      case LevelMatchPhase.chooseMove:
+        return state.activePlayerId;
       default:
-        return state.activePlayerId == 'cpu';
+        return null;
     }
+  }
+
+  /// CPU が今すぐ判断すべき局面か。
+  bool get cpuActionPending => decisionOwnerId() == 'cpu';
+
+  /// シミュレーション用：現在の判断者に対して1手だけ自動で進める（両プレイヤー対応）。
+  void autoAdvance() {
+    final ownerId = decisionOwnerId();
+    if (ownerId != null) _autoStepFor(state.byId(ownerId));
   }
 
   void runCpuTurn() {
-    if (state.isGameOver) return;
-    // 防御側としての対応（手番でなくても発生する）。
-    if (state.phase == LevelMatchPhase.kickOutDecision &&
-        state.pendingPin?.defenderId == 'cpu') {
-      _cpuKickOut();
-      return;
-    }
-    if (state.phase == LevelMatchPhase.submissionDecision &&
-        state.pendingSubmission?.defenderId == 'cpu') {
-      _cpuEscape();
-      return;
-    }
-    if (state.phase == LevelMatchPhase.pinDecision &&
-        state.pendingPin?.attackerId == 'cpu') {
-      _cpuPinDecision();
-      return;
-    }
-    if (state.activePlayerId != 'cpu') return;
-    final cpu = state.cpu;
-    if (state.phase == LevelMatchPhase.setCard) {
-      final desired = _desiredAttributes(cpu);
-      final candidates = cpu.hand
-          .where((card) => desired.contains(card.attribute))
-          .toList();
-      final card = candidates.isNotEmpty
-          ? candidates.first
-          : (cpu.hand.isEmpty ? null : cpu.hand.first);
-      if (card == null) {
-        skipSetCard('cpu');
-      } else if (cpu.setCards.length < 6) {
-        setTechniqueCard('cpu', card.instanceId);
-      } else {
-        final removable = cpu.setCards.firstWhere(
-          (item) => !desired.contains(item.attribute),
-          orElse: () => cpu.setCards.first,
-        );
-        setTechniqueCard(
-          'cpu',
-          card.instanceId,
-          replaceInstanceId: removable.instanceId,
-        );
-      }
-    }
-    if (state.phase == LevelMatchPhase.levelChange) {
-      final options =
-          cpu.unlockedLevels
-              .where((level) => level != cpu.currentLevel)
-              .toList()
-            ..sort();
-      int? best;
-      var bestDamage = _bestDamage(cpu, cpu.currentLevel);
-      for (final level in options) {
-        final score = _bestDamage(cpu, level);
-        if (score > bestDamage) {
-          best = level;
-          bestDamage = score;
-        }
-      }
-      if (best == null) {
-        skipLevelChange('cpu');
-      } else {
-        _log(cpu, 'cpuDecision', '使用可能技が増えるLevel $bestを選択', {
-          'candidates': options,
-          'selectionReason': 'maximumLegalDamage',
-        });
-        changeLevel('cpu', best);
-      }
-    }
-    if (state.phase == LevelMatchPhase.chooseMove) {
-      final candidates = _currentMoves(
-        cpu,
-      ).where((move) => evaluateMove(cpu, move).usable).toList();
-      if (candidates.isEmpty) {
-        _log(cpu, 'cpuDecision', '使用可能な技なし', {'candidates': <String>[]});
-        skipMove('cpu');
-      } else {
-        candidates.sort(
-          (a, b) => _scoreMove(cpu, b).compareTo(_scoreMove(cpu, a)),
-        );
-        final selected = candidates.first;
-        _log(cpu, 'cpuDecision', '${selected.name}を選択', {
-          'candidates': [
-            for (final move in candidates)
-              {'id': move.id, 'score': _scoreMove(cpu, move)},
-          ],
-          'selectionReason': selected.category == MoveCategory.finisher
-              ? 'finisherAvailable'
-              : (selected.offersPin
-                    ? 'pinChance'
-                    : selected.offersSubmission
-                    ? 'submissionChance'
-                    : 'maximumScore'),
-        });
-        useMove('cpu', selected.id);
-      }
+    if (decisionOwnerId() == 'cpu') _autoStepFor(state.cpu);
+  }
+
+  void _autoStepFor(PlayerLevelMatchState actor) {
+    switch (state.phase) {
+      case LevelMatchPhase.pinDecision:
+        _autoPinDecision(actor);
+      case LevelMatchPhase.kickOutDecision:
+        _autoKickOut(actor);
+      case LevelMatchPhase.submissionDecision:
+        _autoEscape(actor);
+      case LevelMatchPhase.setCard:
+        _autoSetCard(actor);
+      case LevelMatchPhase.levelChange:
+        _autoLevelChange(actor);
+      case LevelMatchPhase.chooseMove:
+        _autoChooseMove(actor);
+      default:
+        break;
     }
   }
 
-  /// CPU の技評価値（§13）。
-  int _scoreMove(PlayerLevelMatchState cpu, MoveDefinition move) {
-    final opponent = state.player;
+  void _autoSetCard(PlayerLevelMatchState actor) {
+    final id = actor.playerId;
+    final desired = _desiredAttributes(actor);
+    final candidates = actor.hand
+        .where((card) => desired.contains(card.attribute))
+        .toList();
+    final card = candidates.isNotEmpty
+        ? candidates.first
+        : (actor.hand.isEmpty ? null : actor.hand.first);
+    if (card == null) {
+      skipSetCard(id);
+    } else if (actor.setCards.length < 6) {
+      setTechniqueCard(id, card.instanceId);
+    } else {
+      final removable = actor.setCards.firstWhere(
+        (item) => !desired.contains(item.attribute),
+        orElse: () => actor.setCards.first,
+      );
+      setTechniqueCard(id, card.instanceId, replaceInstanceId: removable.instanceId);
+    }
+  }
+
+  void _autoLevelChange(PlayerLevelMatchState actor) {
+    final id = actor.playerId;
+    final options =
+        actor.unlockedLevels
+            .where((level) => level != actor.currentLevel)
+            .toList()
+          ..sort();
+    int? best;
+    var bestDamage = _bestDamage(actor, actor.currentLevel);
+    for (final level in options) {
+      final score = _bestDamage(actor, level);
+      if (score > bestDamage) {
+        best = level;
+        bestDamage = score;
+      }
+    }
+    if (best == null) {
+      skipLevelChange(id);
+    } else {
+      _log(actor, 'cpuDecision', '使用可能技が増えるLevel $bestを選択', {
+        'candidates': options,
+        'selectionReason': 'maximumLegalDamage',
+      });
+      changeLevel(id, best);
+    }
+  }
+
+  void _autoChooseMove(PlayerLevelMatchState actor) {
+    final id = actor.playerId;
+    final candidates = _currentMoves(
+      actor,
+    ).where((move) => evaluateMove(actor, move).usable).toList();
+    if (candidates.isEmpty) {
+      _log(actor, 'cpuDecision', '使用可能な技なし', {'candidates': <String>[]});
+      skipMove(id);
+    } else {
+      candidates.sort(
+        (a, b) => _scoreMoveFor(actor, b).compareTo(_scoreMoveFor(actor, a)),
+      );
+      final selected = candidates.first;
+      _log(actor, 'cpuDecision', '${selected.name}を選択', {
+        'candidates': [
+          for (final move in candidates)
+            {'id': move.id, 'score': _scoreMoveFor(actor, move)},
+        ],
+        'selectionReason': selected.category == MoveCategory.finisher
+            ? 'finisherAvailable'
+            : (selected.offersPin
+                  ? 'pinChance'
+                  : selected.offersSubmission
+                  ? 'submissionChance'
+                  : 'maximumScore'),
+      });
+      useMove(id, selected.id);
+    }
+  }
+
+  /// CPU の技評価値（§13）。actor 視点で相手を評価する。
+  int _scoreMoveFor(PlayerLevelMatchState cpu, MoveDefinition move) {
+    final opponent = _opponentOf(cpu);
     final damage = max(
       0,
       move.power - (opponent.levelCard.resistances[move.attribute] ?? 0),
@@ -1163,7 +1183,7 @@ class LevelMatchEngine {
     return score;
   }
 
-  void _cpuPinDecision() {
+  void _autoPinDecision(PlayerLevelMatchState attacker) {
     final pin = state.pendingPin!;
     final defender = state.byId(pin.defenderId);
     // Ver.0.6: CPUを積極化。HP70でフォール検討、40/20は確実に、
@@ -1173,59 +1193,59 @@ class LevelMatchEngine {
         defender.currentHp <= 70 ||
         (defender.kickOutCards == 0 &&
             defender.currentHp < pin.hpKickOutCost);
-    _log(state.cpu, 'cpuDecision', shouldPin ? 'フォールを選択' : 'フォールを見送り', {
+    _log(attacker, 'cpuDecision', shouldPin ? 'フォールを選択' : 'フォールを見送り', {
       'pinStrength': pin.strength.total,
       'defenderHp': defender.currentHp,
       'defenderKickOutCards': defender.kickOutCards,
     });
     if (shouldPin) {
-      declarePin('cpu');
+      declarePin(attacker.playerId);
     } else {
-      declinePin('cpu');
+      declinePin(attacker.playerId);
     }
   }
 
-  void _cpuKickOut() {
+  void _autoKickOut(PlayerLevelMatchState defender) {
     final pin = state.pendingPin!;
-    final cpu = state.cpu;
-    final canHp = cpu.currentHp > 0 && cpu.currentHp >= pin.hpKickOutCost;
-    final bigCost = pin.hpKickOutCost > cpu.currentHp * 0.5;
+    final canHp =
+        defender.currentHp > 0 && defender.currentHp >= pin.hpKickOutCost;
+    final bigCost = pin.hpKickOutCost > defender.currentHp * 0.5;
     final DefenseMethod method;
-    if (cpu.kickOutCards > 0 && (!canHp || bigCost)) {
+    if (defender.kickOutCards > 0 && (!canHp || bigCost)) {
       method = DefenseMethod.card;
     } else if (canHp) {
       method = DefenseMethod.hp;
-    } else if (cpu.kickOutCards > 0) {
+    } else if (defender.kickOutCards > 0) {
       method = DefenseMethod.card;
     } else {
       method = DefenseMethod.accept;
     }
-    _log(cpu, 'cpuDecision', 'キックアウト対応: ${method.name}', {
+    _log(defender, 'cpuDecision', 'キックアウト対応: ${method.name}', {
       'hpKickOutCost': pin.hpKickOutCost,
-      'currentHp': cpu.currentHp,
-      'kickOutCards': cpu.kickOutCards,
+      'currentHp': defender.currentHp,
+      'kickOutCards': defender.kickOutCards,
     });
-    kickOut('cpu', method);
+    kickOut(defender.playerId, method);
   }
 
-  void _cpuEscape() {
+  void _autoEscape(PlayerLevelMatchState defender) {
     final sub = state.pendingSubmission!;
-    final cpu = state.cpu;
-    final canHp = cpu.currentHp > 0 && cpu.currentHp >= sub.hpEscapeCost;
+    final canHp =
+        defender.currentHp > 0 && defender.currentHp >= sub.hpEscapeCost;
     final DefenseMethod method;
-    if (cpu.ropeBreakCards > 0) {
+    if (defender.ropeBreakCards > 0) {
       method = DefenseMethod.card;
     } else if (canHp) {
       method = DefenseMethod.hp;
     } else {
       method = DefenseMethod.accept;
     }
-    _log(cpu, 'cpuDecision', 'ギブアップ対応: ${method.name}', {
+    _log(defender, 'cpuDecision', 'ギブアップ対応: ${method.name}', {
       'hpEscapeCost': sub.hpEscapeCost,
-      'currentHp': cpu.currentHp,
-      'ropeBreakCards': cpu.ropeBreakCards,
+      'currentHp': defender.currentHp,
+      'ropeBreakCards': defender.ropeBreakCards,
     });
-    escapeSubmission('cpu', method);
+    escapeSubmission(defender.playerId, method);
   }
 
   void endTurn() {
