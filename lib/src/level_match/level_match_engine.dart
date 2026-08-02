@@ -24,7 +24,18 @@ enum LevelMatchPhase {
 
 /// 決着理由。Ver.0.5 で pinfall / submission を追加。
 /// hpZero は旧Ver.0.4ログ互換のため残すが、Ver.0.5では新規に出力しない。
-enum LevelFinishReason { hpZero, deckOut, pinfall, submission }
+/// deckOut も Ver.0.6 で新規には出さない（山札切れは疲労へ）。exhaustion は安全弁。
+enum LevelFinishReason { hpZero, deckOut, pinfall, submission, exhaustion }
+
+/// Ver.0.6 バランス定数。
+const int kKickOutPenaltyStep = 5; // キックアウト成功ごとの必要HP増加
+const int kEscapePenaltyStep = 5; // ギブアップ耐久成功ごとの必要HP増加
+const int kKickOutHeatGain = 5; // キックアウト成功時のHEAT
+const int kEscapeHeatGain = 3; // ギブアップ耐久成功時のHEAT
+const int kFinisherKickOutHpCost = 40; // フィニッシャーのHPキックアウト固定コスト
+const int kExhaustionHpLoss = 5; // 疲労1ターンあたりのHP減少
+const int kExhaustionHeatGain = 5; // 疲労1ターンあたりのHEAT増加
+const int kMaxTurnSafetyCap = 200; // 無限試合を避ける安全弁
 
 class TechniqueResourceCard {
   const TechniqueResourceCard(this.instanceId, this.attribute);
@@ -110,6 +121,14 @@ class PlayerLevelMatchState {
   bool isDown = false;
   int? hpZeroReachedTurn;
 
+  // Ver.0.6: 累積キックアウト／ギブアップ耐久ペナルティ（返すほど重くなる）。
+  int kickOutPenalty = 0;
+  int submissionEscapePenalty = 0;
+
+  // Ver.0.6: 疲労状態（山札切れ→敗北ではなく疲労）。
+  bool isExhausted = false;
+  int exhaustionTurns = 0;
+
   // Ver.0.5: 飛び級解放条件用トラッキング。
   int levelChangeCount = 0;
   final Map<int, int> levelUsedCounts = {};
@@ -154,6 +173,10 @@ class PlayerLevelMatchState {
     'ropeBreakCardsRemaining': ropeBreakCards,
     'hpZeroReachedTurn': hpZeroReachedTurn,
     'levelChangeCount': levelChangeCount,
+    'kickOutPenalty': kickOutPenalty,
+    'submissionEscapePenalty': submissionEscapePenalty,
+    'exhausted': isExhausted,
+    'exhaustionTurns': exhaustionTurns,
     'deck': deckBuild?.toJson(),
   };
 }
@@ -207,7 +230,7 @@ class LevelMatchState {
   });
 
   final String gameId;
-  final String version = '0.5';
+  final String version = '0.6';
   final String mode = 'levelCardMatch';
   LevelMatchPhase phase = LevelMatchPhase.setup;
   final PlayerLevelMatchState player;
@@ -367,8 +390,32 @@ class LevelMatchEngine {
     state.phase = LevelMatchPhase.draw;
     _log(actor, 'turnStart', '${actor.wrestler.name}のターン開始');
     evaluateUnlocks(actor);
+
+    // Ver.0.6: 無限試合を避ける安全弁（通常到達しない高ターン数）。
+    if (state.turnNumber > kMaxTurnSafetyCap) {
+      final winner = state.player.currentHp >= state.cpu.currentHp
+          ? state.player
+          : state.cpu;
+      state.finishingMove = '消耗の果て';
+      _finish(winner, LevelFinishReason.exhaustion);
+      return;
+    }
+
+    // Ver.0.6: 山札切れは敗北ではなく「疲労」。毎ターンHP-5・HEAT+5。
     if (actor.deck.isEmpty) {
-      _finish(state.defender, LevelFinishReason.deckOut);
+      actor.isExhausted = true;
+      actor.exhaustionTurns++;
+      actor.currentHp = max(0, actor.currentHp - kExhaustionHpLoss);
+      state.sharedHeat += kExhaustionHeatGain;
+      if (actor.currentHp <= 0 && actor.hpZeroReachedTurn == null) {
+        actor.hpZeroReachedTurn = state.turnNumber;
+      }
+      _log(actor, 'exhausted', '${actor.wrestler.name}は消耗（山札切れ）: HP-$kExhaustionHpLoss', {
+        'exhaustionTurns': actor.exhaustionTurns,
+        'hpAfter': actor.currentHp,
+        'heatAfter': state.sharedHeat,
+      });
+      state.phase = LevelMatchPhase.setCard;
       return;
     }
     final card = actor.deck.removeLast();
@@ -641,7 +688,13 @@ class LevelMatchEngine {
       moveId: move.id,
       moveName: move.name,
       strength: strength,
-      hpKickOutCost: requiredHpCostFor(strength.total),
+      // Ver.0.6: フィニッシャーは固定の重いHPコスト、通常は強度基準。
+      // いずれも累積ペナルティ（返すほど重い）を加算。
+      hpKickOutCost:
+          (fromFinisher
+              ? kFinisherKickOutHpCost
+              : requiredHpCostFor(strength.total)) +
+          defender.kickOutPenalty,
       fromFinisher: fromFinisher,
       targetWasDown: targetWasDown,
     );
@@ -678,7 +731,9 @@ class LevelMatchEngine {
       moveId: move.id,
       moveName: move.name,
       strength: strength,
-      hpEscapeCost: requiredHpCostFor(strength.total),
+      // Ver.0.6: 耐えるほど重くなる累積ペナルティを加算。
+      hpEscapeCost:
+          requiredHpCostFor(strength.total) + defender.submissionEscapePenalty,
       fromFinisher: fromFinisher,
       targetSubmissionResistance: resistance,
     );
@@ -759,14 +814,14 @@ class LevelMatchEngine {
         if (defender.kickOutCards <= 0) throw StateError('キックアウトカードがありません');
         defender.kickOutCards--;
         defender.kickOutCardUsedCount++;
-        final heat = 2 + (pin.fromFinisher ? 2 : 0);
+        final heat = kKickOutHeatGain + (pin.fromFinisher ? 2 : 0);
         state.sharedHeat += heat;
         _registerKickOut(defender, pin, method: 'card', heat: heat);
       case DefenseMethod.hp:
         if (defender.currentHp <= 0) throw StateError('HP0のためHP消費キックアウト不可');
         if (defender.currentHp < pin.hpKickOutCost) throw StateError('HPが足りません');
         defender.currentHp -= pin.hpKickOutCost;
-        final heat = 2 + (pin.fromFinisher ? 1 : 0);
+        final heat = kKickOutHeatGain + (pin.fromFinisher ? 2 : 0);
         state.sharedHeat += heat;
         _registerKickOut(defender, pin, method: 'hp', heat: heat);
       case DefenseMethod.accept:
@@ -783,6 +838,9 @@ class LevelMatchEngine {
     defender.kickOutCount++;
     defender.pinKickOutCount++;
     state.kickOutTotalCount++;
+    // Ver.0.6: 返すほど次回のHPキックアウトが重くなる（“もう返せない”を作る）。
+    final penaltyBefore = defender.kickOutPenalty;
+    defender.kickOutPenalty += kKickOutPenaltyStep;
     if (pin.fromFinisher) {
       defender.finisherKickOutCount++;
       state.finisherKickOutTotalCount++;
@@ -796,6 +854,9 @@ class LevelMatchEngine {
       'fromFinisher': pin.fromFinisher,
       'heatDelta': heat,
       'heatAfter': state.sharedHeat,
+      'kickOutPenaltyBefore': penaltyBefore,
+      'kickOutPenaltyAfter': defender.kickOutPenalty,
+      'nextHpKickOutExtra': defender.kickOutPenalty,
     });
     state.pendingPin = null;
     state.pendingAnimation = null;
@@ -829,14 +890,14 @@ class LevelMatchEngine {
         defender.ropeBreakCards--;
         defender.ropeBreakUsedCount++;
         state.ropeBreakTotalCount++;
-        state.sharedHeat += 1;
-        _registerEscape(defender, sub, method: 'ropeBreak', heat: 1);
+        state.sharedHeat += kEscapeHeatGain;
+        _registerEscape(defender, sub, method: 'ropeBreak', heat: kEscapeHeatGain);
       case DefenseMethod.hp:
         if (defender.currentHp <= 0) throw StateError('HP0のためHP消費不可');
         if (defender.currentHp < sub.hpEscapeCost) throw StateError('HPが足りません');
         defender.currentHp -= sub.hpEscapeCost;
-        state.sharedHeat += 1;
-        _registerEscape(defender, sub, method: 'hp', heat: 1);
+        state.sharedHeat += kEscapeHeatGain;
+        _registerEscape(defender, sub, method: 'hp', heat: kEscapeHeatGain);
       case DefenseMethod.accept:
         _finishSubmission(sub);
     }
@@ -850,6 +911,9 @@ class LevelMatchEngine {
   }) {
     defender.submissionEscapeCount++;
     state.submissionEscapeTotalCount++;
+    // Ver.0.6: 耐えるほど次回のHP耐久が重くなる。
+    final penaltyBefore = defender.submissionEscapePenalty;
+    defender.submissionEscapePenalty += kEscapePenaltyStep;
     _log(defender, 'submissionEscape', '${defender.wrestler.name}が耐えた！', {
       'selectedEscapeMethod': method,
       'hpCost': method == 'hp' ? sub.hpEscapeCost : 0,
@@ -858,6 +922,8 @@ class LevelMatchEngine {
       'submissionFinish': false,
       'heatDelta': heat,
       'heatAfter': state.sharedHeat,
+      'escapePenaltyBefore': penaltyBefore,
+      'escapePenaltyAfter': defender.submissionEscapePenalty,
     });
     state.pendingSubmission = null;
     endTurn();
@@ -1100,9 +1166,11 @@ class LevelMatchEngine {
   void _cpuPinDecision() {
     final pin = state.pendingPin!;
     final defender = state.byId(pin.defenderId);
+    // Ver.0.6: CPUを積極化。HP70でフォール検討、40/20は確実に、
+    // カード切れで返せない見込みならHP高でも仕掛ける。
     final shouldPin =
         pin.fromFinisher ||
-        defender.currentHp <= 50 ||
+        defender.currentHp <= 70 ||
         (defender.kickOutCards == 0 &&
             defender.currentHp < pin.hpKickOutCost);
     _log(state.cpu, 'cpuDecision', shouldPin ? 'フォールを選択' : 'フォールを見送り', {

@@ -454,7 +454,7 @@ void main() {
       match.kickOut('cpu', DefenseMethod.accept);
       final json = jsonDecode(jsonEncode(match.state.toJson())) as Map;
       final game = json['game'] as Map;
-      expect(game['version'], '0.5');
+      expect(game['version'], '0.6');
       expect(game['finishReason'], 'pinfall');
       expect(game['pinAttempts'], 1);
       expect(game['finishingMove'], '投げ技');

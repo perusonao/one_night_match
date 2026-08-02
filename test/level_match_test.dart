@@ -421,7 +421,7 @@ void main() {
   test('試合JSON往復相当・壊れた履歴を1件だけ無視', () async {
     final match = engine();
     final json = jsonEncode(match.state.toJson());
-    expect(jsonDecode(json)['game']['version'], '0.5');
+    expect(jsonDecode(json)['game']['version'], '0.6');
     SharedPreferences.setMockInitialValues({
       LevelMatchHistoryStore.key: ['broken', json],
     });
@@ -442,7 +442,7 @@ void main() {
     expect(find.text('レスラーを選ぶ'), findsOneWidget);
     await tester.tap(find.text('レスラーを選ぶ'));
     await tester.pumpAndSettle();
-    expect(find.text('Ver.0.5 レスラー選択'), findsOneWidget);
+    expect(find.text('Ver.0.6 レスラー選択'), findsOneWidget);
     expect(find.text('火神アカリ'), findsOneWidget);
     expect(find.text('✓ 対戦可能'), findsWidgets);
   });

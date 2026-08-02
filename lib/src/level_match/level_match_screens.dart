@@ -18,7 +18,8 @@ const _gold = Color(0xffffc857);
 String finishReasonLabel(LevelFinishReason? reason) => switch (reason) {
   LevelFinishReason.pinfall => '3カウント',
   LevelFinishReason.submission => 'ギブアップ',
-  LevelFinishReason.deckOut => 'デッキ切れ',
+  LevelFinishReason.exhaustion => '消耗の果て',
+  LevelFinishReason.deckOut => 'デッキ切れ(旧仕様)',
   LevelFinishReason.hpZero => 'HP0(旧仕様)',
   null => '-',
 };
@@ -28,7 +29,7 @@ class LevelMatchIntroScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('レベルカードマッチ Ver.0.5')),
+    appBar: AppBar(title: const Text('レベルカードマッチ Ver.0.6')),
     body: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 620),
@@ -50,8 +51,9 @@ class LevelMatchIntroScreen extends StatelessWidget {
               'HPは消耗の指標（0でも試合は続く）',
               '投げ技からフォール（3カウント）',
               '関節技からギブアップ',
-              'キックアウト／ロープブレイクで凌ぐ',
-              'フィニッシャーで決着を狙う',
+              'キックアウトは返すほど重くなる',
+              'フィニッシャーは切り札（返しにくい）',
+              '山札切れは敗北でなく“疲労”（毎ターンHP減）',
             ])
               Card(
                 child: ListTile(
@@ -120,7 +122,7 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Ver.0.5 レスラー選択')),
+    appBar: AppBar(title: const Text('Ver.0.6 レスラー選択')),
     body: wrestlers == null
         ? const Center(child: CircularProgressIndicator())
         : ListView.builder(
@@ -383,6 +385,17 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                     'DOWN',
                     style: TextStyle(
                       color: Colors.orangeAccent,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              if (fighter.isExhausted)
+                const Padding(
+                  padding: EdgeInsets.only(right: 6),
+                  child: Text(
+                    '疲労',
+                    style: TextStyle(
+                      color: Colors.redAccent,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -789,7 +802,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                         )
                       : null,
                   icon: const Icon(Icons.bolt, size: 18),
-                  label: Text('キックアウトカード(${me.kickOutCards}) HEAT+2'),
+                  label: Text('キックアウトカード(${me.kickOutCards}) HEAT+5'),
                 ),
                 FilledButton.icon(
                   onPressed: canHp
@@ -847,7 +860,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                         )
                       : null,
                   icon: const Icon(Icons.horizontal_rule, size: 18),
-                  label: Text('ロープブレイク(${me.ropeBreakCards}) HEAT+1'),
+                  label: Text('ロープブレイク(${me.ropeBreakCards}) HEAT+3'),
                 ),
                 FilledButton.icon(
                   onPressed: canHp
