@@ -78,7 +78,7 @@ class TitleScreen extends StatelessWidget {
                   icon: const Icon(Icons.layers),
                   label: const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-                    child: Text('レベルカードマッチ  Ver.0.5'),
+                    child: Text('レベルカードマッチ  Ver.0.6'),
                   ),
                   onPressed: () => Navigator.push(
                     context,
@@ -1108,7 +1108,7 @@ class _DebugScreenState extends State<DebugScreen> {
                 ),
                 const SizedBox(height: 28),
                 const Text(
-                  'Ver.0.5 LEVEL CARD MATCH',
+                  'Ver.0.6 LEVEL CARD MATCH',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -1183,7 +1183,7 @@ class _DebugScreenState extends State<DebugScreen> {
                     _metric(entry.key, _percent(entry.value)),
                   const SizedBox(height: 12),
                   const Text(
-                    'Ver.0.5 決着メトリクス',
+                    'Ver.0.6 決着メトリクス',
                     style: TextStyle(fontWeight: FontWeight.bold, color: _pink),
                   ),
                   _metric(
@@ -1252,7 +1252,7 @@ class _DebugScreenState extends State<DebugScreen> {
                             ).convert(levelData.last),
                           ),
                     icon: const Icon(Icons.copy),
-                    label: const Text('最新Ver.0.5試合JSONをコピー'),
+                    label: const Text('最新Ver.0.6試合JSONをコピー'),
                   ),
                 ],
               ],
