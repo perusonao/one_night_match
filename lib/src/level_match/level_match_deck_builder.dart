@@ -120,6 +120,13 @@ class LevelMatchDeckBuilder {
       }
     }
 
+    // Ver.0.7.2: レスラータイプ別バイアスで“プレイフィール”を差別化。
+    for (final entry in _typeBias(wrestler.type).entries) {
+      if (weights[entry.key]! > 0) {
+        weights[entry.key] = weights[entry.key]! * entry.value;
+      }
+    }
+
     final usedAttributes = <MoveAttribute>{
       for (final attribute in MoveAttribute.values)
         if (weights[attribute]! > 0 || minimums[attribute]! > 0) attribute,
@@ -209,6 +216,24 @@ class LevelMatchDeckBuilder {
     }
     return counts;
   }
+
+  /// レスラータイプ別の属性重みバイアス（1.0=中立）。
+  Map<MoveAttribute, double> _typeBias(EditorWrestlerType type) => switch (type) {
+    // Ver.0.7.2: 強者を過度に増幅しないよう控えめに。ジャック(heel)は厚めに。
+    EditorWrestlerType.power => {MoveAttribute.throwMove: 1.15},
+    EditorWrestlerType.heel => {MoveAttribute.rough: 1.6},
+    EditorWrestlerType.technician => {MoveAttribute.submission: 1.4},
+    EditorWrestlerType.highSpeed => {
+      MoveAttribute.strike: 1.3,
+      MoveAttribute.aerial: 1.4,
+    },
+    EditorWrestlerType.babyface => {
+      MoveAttribute.strike: 1.25,
+      MoveAttribute.aerial: 1.25,
+    },
+    EditorWrestlerType.striker => {MoveAttribute.strike: 1.4},
+    _ => const {},
+  };
 
   Map<MoveAttribute, int> _fallbackCounts() {
     // 6属性へ均等（5枚ずつ）= 30枚。

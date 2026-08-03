@@ -29,6 +29,7 @@ class _LevelMatchSimulatorScreenState
   int matchesPerPair = 20;
   bool running = false;
   Map<String, dynamic>? report;
+  SimReport? _report; // CSV出力用に保持
 
   @override
   void initState() {
@@ -55,9 +56,26 @@ class _LevelMatchSimulatorScreenState
     );
     if (!mounted) return;
     setState(() {
+      _report = result;
       report = result.toJson();
       running = false;
     });
+  }
+
+  Future<void> _downloadCsv() async {
+    final rep = _report;
+    if (rep == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final csv = rep.toCsv();
+    final name =
+        'onm_sim_${DateTime.now().toUtc().toIso8601String().replaceAll(RegExp(r'[:.]'), '-')}.csv';
+    final ok = await downloadTextFile(name, csv);
+    if (!ok) {
+      await Clipboard.setData(ClipboardData(text: csv));
+      messenger.showSnackBar(const SnackBar(content: Text('CSVをコピーしました')));
+    } else {
+      messenger.showSnackBar(SnackBar(content: Text('$name を保存しました')));
+    }
   }
 
   String get _prettyJson =>
@@ -149,10 +167,9 @@ class _LevelMatchSimulatorScreenState
                   _metric('3カウント決着率', _pct(summary['pinfallRate'])),
                   _metric('ギブアップ決着率', _pct(summary['submissionRate'])),
                   _metric('消耗決着率', _pct(summary['exhaustionRate'])),
-                  _metric(
-                    'フィニッシャー使用試合率',
-                    _pct(summary['matchesWithAnyFinisher']),
-                  ),
+                  _metric('フィニッシャー使用率', _pct(summary['finisherUseRate'])),
+                  _metric('フィニッシャー決着率', _pct(summary['finisherDecisionRate'])),
+                  _metric('先手勝率', _pct(summary['firstWinRate'])),
                   _metric('平均ターン数', _num(summary['avgTurns'])),
                   _metric('平均フォール試行', _num(summary['avgPinAttempts'])),
                   _metric('平均キックアウト', _num(summary['avgKickOuts'])),
@@ -165,9 +182,27 @@ class _LevelMatchSimulatorScreenState
                     'レスラー別勝利数',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
+                  const Text(
+                    'レスラー別 勝率 / フィニッシャー決着',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   for (final entry
-                      in (summary['winsByWrestler'] as Map).entries)
-                    _metric('${entry.key}', '${entry.value}'),
+                      in (report!['byWrestler'] as Map).entries)
+                    _metric(
+                      '${entry.key}',
+                      '${_pct((entry.value as Map)['winRate'])}'
+                          ' / F${(entry.value as Map)['finisherWins']}勝',
+                    ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '対戦カード別',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  for (final m in (report!['byMatchup'] as List))
+                    _metric(
+                      '${(m as Map)['matchup']}',
+                      '平均${_num(m['avgTurns'])}T',
+                    ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -175,15 +210,23 @@ class _LevelMatchSimulatorScreenState
                         child: OutlinedButton.icon(
                           onPressed: _copy,
                           icon: const Icon(Icons.copy),
-                          label: const Text('JSONをコピー'),
+                          label: const Text('JSONコピー'),
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: FilledButton.icon(
                           onPressed: _download,
                           icon: const Icon(Icons.download),
-                          label: const Text('JSONを保存'),
+                          label: const Text('JSON保存'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _downloadCsv,
+                          icon: const Icon(Icons.table_chart),
+                          label: const Text('CSV保存'),
                         ),
                       ),
                     ],

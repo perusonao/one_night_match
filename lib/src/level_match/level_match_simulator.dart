@@ -32,6 +32,9 @@ class SimMatchResult {
     required this.anyExhausted,
     required this.steps,
     required this.completed,
+    required this.playerStarts,
+    required this.firstWrestler,
+    required this.finisherDecided,
   });
 
   final String playerWrestler;
@@ -54,12 +57,24 @@ class SimMatchResult {
   final int steps;
   final bool completed;
 
+  // Ver.0.7.2: 先手/後手・フィニッシャー決着の集計用。
+  final bool playerStarts;
+  final String firstWrestler;
+  final bool finisherDecided;
+
+  bool get winnerWasFirst =>
+      winnerWrestler != null && winnerWrestler == firstWrestler;
+  bool get anyFinisherUsed => playerFinisherUsed || cpuFinisherUsed;
+
   Map<String, dynamic> toJson() => {
     'playerWrestler': playerWrestler,
     'cpuWrestler': cpuWrestler,
+    'firstWrestler': firstWrestler,
     'winnerId': winnerId,
     'winnerWrestler': winnerWrestler,
+    'winnerWasFirst': winnerWasFirst,
     'finishReason': finishReason,
+    'finisherDecided': finisherDecided,
     'turns': turns,
     'finalHeat': finalHeat,
     'finishingMove': finishingMove,
@@ -110,41 +125,167 @@ class SimReport {
     return counts;
   }
 
+  /// レスラー別集計（総勝率・先手/後手勝率・平均HEAT・フィニッシャー・決着種別）。
+  Map<String, dynamic> get byWrestler {
+    final names = <String>{
+      for (final r in results) ...[r.playerWrestler, r.cpuWrestler],
+    };
+    final out = <String, dynamic>{};
+    for (final name in names) {
+      final inMatches = results
+          .where((r) => r.playerWrestler == name || r.cpuWrestler == name)
+          .toList();
+      final wins = inMatches.where((r) => r.winnerWrestler == name).toList();
+      final firstMatches =
+          inMatches.where((r) => r.firstWrestler == name).toList();
+      final secondMatches =
+          inMatches.where((r) => r.firstWrestler != name).toList();
+      double rate(int a, int b) => b == 0 ? 0 : a / b;
+      out[name] = {
+        'games': inMatches.length,
+        'wins': wins.length,
+        'winRate': rate(wins.length, inMatches.length),
+        'firstWinRate': rate(
+          firstMatches.where((r) => r.winnerWrestler == name).length,
+          firstMatches.length,
+        ),
+        'secondWinRate': rate(
+          secondMatches.where((r) => r.winnerWrestler == name).length,
+          secondMatches.length,
+        ),
+        'avgHeat': inMatches.isEmpty
+            ? 0
+            : inMatches.map((r) => r.finalHeat).fold<num>(0, (a, b) => a + b) /
+                  inMatches.length,
+        'finisherUseRate': rate(
+          inMatches
+              .where(
+                (r) =>
+                    (r.playerWrestler == name && r.playerFinisherUsed) ||
+                    (r.cpuWrestler == name && r.cpuFinisherUsed),
+              )
+              .length,
+          inMatches.length,
+        ),
+        'finisherWins':
+            wins.where((r) => r.finisherDecided).length,
+        'pinfallWins': wins.where((r) => r.finishReason == 'pinfall').length,
+        'submissionWins':
+            wins.where((r) => r.finishReason == 'submission').length,
+        'exhaustionWins':
+            wins.where((r) => r.finishReason == 'exhaustion').length,
+      };
+    }
+    return out;
+  }
+
+  /// 対戦カード別集計（勝敗・先手勝率・平均ターン・決着方法）。
+  List<Map<String, dynamic>> get byMatchup {
+    final pairs = <String, List<SimMatchResult>>{};
+    for (final r in results) {
+      final key = ([r.playerWrestler, r.cpuWrestler]..sort()).join(' vs ');
+      pairs.putIfAbsent(key, () => []).add(r);
+    }
+    return [
+      for (final entry in pairs.entries)
+        () {
+          final list = entry.value;
+          final names = entry.key.split(' vs ');
+          final a = names[0], b = names[1];
+          final finish = <String, int>{};
+          for (final r in list) {
+            finish[r.finishReason] = (finish[r.finishReason] ?? 0) + 1;
+          }
+          return {
+            'matchup': entry.key,
+            'games': list.length,
+            '${a}Wins': list.where((r) => r.winnerWrestler == a).length,
+            '${b}Wins': list.where((r) => r.winnerWrestler == b).length,
+            'firstWins': list.where((r) => r.winnerWasFirst).length,
+            'avgTurns': list.isEmpty
+                ? 0
+                : list.map((r) => r.turns).fold<num>(0, (x, y) => x + y) /
+                      list.length,
+            'finishMethods': finish,
+          };
+        }(),
+    ];
+  }
+
   Map<String, dynamic> toJson() {
     final reasons = finishReasonCounts;
     Map<String, double> reasonRates() =>
         {for (final e in reasons.entries) e.key: total == 0 ? 0 : e.value / total};
     return {
       'generatedAt': DateTime.now().toUtc().toIso8601String(),
-      'version': '0.6',
+      'version': '0.7.2',
       'config': config,
       'summary': {
         'totalMatches': total,
         'completedMatches': results.where((r) => r.completed).length,
-        // 決着理由の内訳（決着がついているか）
         'finishReasonCounts': reasons,
         'finishReasonRates': reasonRates(),
         'pinfallRate': _rate((r) => r.finishReason == 'pinfall'),
         'submissionRate': _rate((r) => r.finishReason == 'submission'),
         'exhaustionRate': _rate((r) => r.finishReason == 'exhaustion'),
-        // フォール／ギブアップが「そもそも起きているか」の検証
         'matchesWithAnyPinAttempt': _rate((r) => r.pinAttempts > 0),
         'matchesWithAnySubmissionAttempt':
             _rate((r) => r.submissionAttempts > 0),
-        'matchesWithAnyFinisher':
-            _rate((r) => r.playerFinisherUsed || r.cpuFinisherUsed),
+        // Ver.0.7.2: フィニッシャー指標
+        'finisherUseRate': _rate((r) => r.anyFinisherUsed),
+        'finisherDecisionRate': _rate((r) => r.finisherDecided),
+        'firstWinRate': _rate((r) => r.winnerWasFirst),
         'avgTurns': _avg((r) => r.turns),
         'avgPinAttempts': _avg((r) => r.pinAttempts),
         'avgKickOuts': _avg((r) => r.kickOuts),
         'avgSubmissionAttempts': _avg((r) => r.submissionAttempts),
-        'avgSubmissionEscapes': _avg((r) => r.submissionEscapes),
         'avgRopeBreaks': _avg((r) => r.ropeBreaks),
         'avgFinalHeat': _avg((r) => r.finalHeat),
         'exhaustionOccurredRate': _rate((r) => r.anyExhausted),
         'winsByWrestler': winsByWrestler,
       },
+      'byWrestler': byWrestler,
+      'byMatchup': byMatchup,
       'matches': results.map((r) => r.toJson()).toList(),
     };
+  }
+
+  /// 1試合1行のCSV（表計算・外部分析用）。
+  String toCsv() {
+    const headers = [
+      'firstWrestler',
+      'playerWrestler',
+      'cpuWrestler',
+      'winnerWrestler',
+      'winnerWasFirst',
+      'finishReason',
+      'finisherDecided',
+      'turns',
+      'finalHeat',
+      'pinAttempts',
+      'kickOuts',
+      'submissionAttempts',
+      'ropeBreaks',
+    ];
+    final rows = <String>[headers.join(',')];
+    for (final r in results) {
+      rows.add([
+        r.firstWrestler,
+        r.playerWrestler,
+        r.cpuWrestler,
+        r.winnerWrestler ?? '',
+        r.winnerWasFirst,
+        r.finishReason,
+        r.finisherDecided,
+        r.turns,
+        r.finalHeat,
+        r.pinAttempts,
+        r.kickOuts,
+        r.submissionAttempts,
+        r.ropeBreaks,
+      ].join(','));
+    }
+    return rows.join('\n');
   }
 }
 
@@ -178,11 +319,20 @@ class LevelMatchSimulator {
     final winner = state.winnerId == null
         ? null
         : state.byId(state.winnerId!).wrestler.name;
+    // 決着技がフィニッシャーだったか。
+    final finishId = state.finishMoveId;
+    final finisherDecided =
+        winner != null &&
+        finishId != null &&
+        moves[finishId]?.category == MoveCategory.finisher;
     return SimMatchResult(
       playerWrestler: player.name,
       cpuWrestler: cpu.name,
+      playerStarts: playerStarts,
+      firstWrestler: playerStarts ? player.name : cpu.name,
       winnerId: state.winnerId,
       winnerWrestler: winner,
+      finisherDecided: finisherDecided,
       finishReason: state.finishReason?.name ?? 'unfinished',
       turns: state.turnNumber,
       finalHeat: state.sharedHeat,
@@ -218,6 +368,8 @@ class LevelMatchSimulator {
               player: wrestlers[i],
               cpu: wrestlers[j],
               seed: counter++,
+              // Ver.0.7.2: 先手/後手を交互にして両方の勝率を測る。
+              playerStarts: k.isEven,
             ),
           );
         }
