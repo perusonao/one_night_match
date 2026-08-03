@@ -260,6 +260,7 @@ class MoveDefinition {
     this.ignoreNormalSpeed = false,
     this.allowedResponses = const [],
     this.extra = const {},
+    this.heatCost = 0,
   });
 
   final String id;
@@ -314,10 +315,24 @@ class MoveDefinition {
   final List<String>
   allowedResponses; // 許可レスポンス: dedicatedCounter/escape/ability/take 等
 
-  /// Ver.0.8.0: 将来拡張用の任意メタデータ（AI優先度・消費/必要HEAT・発動率・
-  /// レアリティ・エフェクト/SE/モーションID・コンボ条件・部位ダメージ・ロープブレイク等）。
+  /// Ver.0.8.0: 将来拡張用の任意メタデータ（AI優先度・発動率・レアリティ・
+  /// エフェクト/SE/モーションID・コンボ条件・部位ダメージ・ロープブレイク等）。
   /// 現行エンジンは未使用。増やしてもモデル改変不要。
   final Map<String, dynamic> extra;
+
+  /// Ver.0.8.0: HEATマナ制での消費HEAT（0=カテゴリから自動推定）。
+  final int heatCost;
+
+  /// 表示・HEATマナ制で使う消費HEAT。未設定(0)ならカテゴリから推定。
+  int get displayHeatCost {
+    if (heatCost > 0) return heatCost;
+    final cardCost = requiredCards.values.fold<int>(0, (a, b) => a + b);
+    return switch (category) {
+      MoveCategory.basic => 1,
+      MoveCategory.finisher => 8,
+      _ => (cardCost + 2).clamp(3, 6),
+    };
+  }
 
   /// 技編集時に、UI未対応のフィールドを失わないためのコピー生成。
   MoveDefinition copyWith({
@@ -346,6 +361,7 @@ class MoveDefinition {
     bool? canKO,
     bool? canAttemptPin,
     bool? canAttemptSubmission,
+    int? heatCost,
   }) => MoveDefinition(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -390,6 +406,7 @@ class MoveDefinition {
     ignoreNormalSpeed: ignoreNormalSpeed,
     allowedResponses: allowedResponses,
     extra: extra,
+    heatCost: heatCost ?? this.heatCost,
   );
 
   /// この技は「返し」として相手技に対応する性質を持つか。
@@ -465,6 +482,7 @@ class MoveDefinition {
     'ignoreNormalSpeed': ignoreNormalSpeed,
     'allowedResponses': allowedResponses,
     if (extra.isNotEmpty) 'extra': extra,
+    if (heatCost > 0) 'heatCost': heatCost,
   };
 
   factory MoveDefinition.fromJson(Map<String, dynamic> json) => MoveDefinition(
@@ -533,6 +551,7 @@ class MoveDefinition {
       json['allowedResponses'] as List? ?? const [],
     ),
     extra: Map<String, dynamic>.from(json['extra'] as Map? ?? const {}),
+    heatCost: (json['heatCost'] as num?)?.toInt() ?? 0,
   );
 }
 

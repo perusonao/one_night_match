@@ -1347,6 +1347,8 @@ class _MoveEditScreenState extends State<MoveEditScreen> {
   late bool canPin = widget.initial.canPin;
   late bool canSubmit = widget.initial.canSubmit;
   late bool canKO = widget.initial.canKO;
+  late final heatCost =
+      TextEditingController(text: '${widget.initial.heatCost}');
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -1388,6 +1390,7 @@ class _MoveEditScreenState extends State<MoveEditScreen> {
             _text(power, '攻撃力（0以上）', number: true),
             _text(heat, 'HEAT増減（負数可）', signed: true),
             _text(speed, '速度（大きいほど速い）', number: true),
+            _text(heatCost, 'HEATコスト（0=カテゴリから自動）', number: true),
             Row(
               children: [
                 Expanded(child: _text(pinPower, 'フォール強度', number: true)),
@@ -1551,6 +1554,7 @@ class _MoveEditScreenState extends State<MoveEditScreen> {
       canKO: canKO,
       canAttemptPin: canPin,
       canAttemptSubmission: canSubmit,
+      heatCost: int.tryParse(heatCost.text) ?? 0,
     );
     final problems = <String>[
       if (move.id.isEmpty) '技IDは必須です',
