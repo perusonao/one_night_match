@@ -301,6 +301,10 @@ class _TechniqueListScreenState extends State<TechniqueListScreen> {
             children: [
               Row(
                 children: [
+                  Text('★' * m.rank.clamp(1, 5),
+                      style: const TextStyle(
+                          color: Color(0xffffc857), fontSize: 13)),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       m.name.isEmpty ? '(名称未設定)' : m.name,
@@ -308,6 +312,9 @@ class _TechniqueListScreenState extends State<TechniqueListScreen> {
                           fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ),
+                  Text('${m.displayDeckPoints}P',
+                      style: const TextStyle(
+                          fontSize: 12, color: Colors.white54)),
                   IconButton(
                     tooltip: '削除',
                     visualDensity: VisualDensity.compact,
@@ -316,6 +323,21 @@ class _TechniqueListScreenState extends State<TechniqueListScreen> {
                   ),
                 ],
               ),
+              if (m.energyCost.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2, bottom: 2),
+                  child: Wrap(
+                    spacing: 4,
+                    children: [
+                      const Text('必要E',
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.white54)),
+                      for (final e in m.energyCost.entries)
+                        _badge('${techniqueTypeLabel(e.key)}×${e.value}',
+                            techniqueTypeColor(e.key)),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 2),
               Wrap(
                 spacing: 6,

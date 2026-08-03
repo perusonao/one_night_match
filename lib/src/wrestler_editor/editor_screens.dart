@@ -1349,6 +1349,9 @@ class _MoveEditScreenState extends State<MoveEditScreen> {
   late bool canKO = widget.initial.canKO;
   late final heatCost =
       TextEditingController(text: '${widget.initial.heatCost}');
+  late int rank = widget.initial.rank.clamp(1, 5);
+  late final deckPoints =
+      TextEditingController(text: '${widget.initial.deckPoints}');
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -1391,6 +1394,30 @@ class _MoveEditScreenState extends State<MoveEditScreen> {
             _text(heat, 'HEAT増減（負数可）', signed: true),
             _text(speed, '速度（大きいほど速い）', number: true),
             _text(heatCost, 'HEATコスト（0=カテゴリから自動）', number: true),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  const Text('技ランク: '),
+                  const SizedBox(width: 8),
+                  DropdownButton<int>(
+                    value: rank,
+                    items: [
+                      for (var r = 1; r <= 5; r++)
+                        DropdownMenuItem(
+                          value: r,
+                          child: Text('${'★' * r}（★$r）'),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => rank = v ?? 1),
+                  ),
+                  const Spacer(),
+                  Expanded(
+                    child: _text(deckPoints, 'デッキP（0=ランク値）', number: true),
+                  ),
+                ],
+              ),
+            ),
             Row(
               children: [
                 Expanded(child: _text(pinPower, 'フォール強度', number: true)),
@@ -1555,6 +1582,8 @@ class _MoveEditScreenState extends State<MoveEditScreen> {
       canAttemptPin: canPin,
       canAttemptSubmission: canSubmit,
       heatCost: int.tryParse(heatCost.text) ?? 0,
+      rank: rank,
+      deckPoints: int.tryParse(deckPoints.text) ?? 0,
     );
     final problems = <String>[
       if (move.id.isEmpty) '技IDは必須です',
