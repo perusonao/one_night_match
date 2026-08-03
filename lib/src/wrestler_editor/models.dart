@@ -257,6 +257,8 @@ class MoveDefinition {
     this.requiredPreviousState,
     this.consumesSetCards = true,
     this.canUseAsNormalMove = false,
+    this.ignoreNormalSpeed = false,
+    this.allowedResponses = const [],
   });
 
   final String id;
@@ -305,6 +307,11 @@ class MoveDefinition {
   final String? requiredPreviousState; // 使用に必要な直前状態（例: down, topRope）
   final bool consumesSetCards; // 使用時にセットカードを消費するか
   final bool canUseAsNormalMove; // 返し技を通常攻撃としても宣言できるか
+
+  // Ver.0.7.2: フィニッシャーは通常技のSpeedクラッシュで割り込めない切り札。
+  final bool ignoreNormalSpeed; // 通常技のSpeed勝ちを無効化
+  final List<String>
+  allowedResponses; // 許可レスポンス: dedicatedCounter/escape/ability/take 等
 
   /// この技は「返し」として相手技に対応する性質を持つか。
   bool get isCounterMove =>
@@ -376,6 +383,8 @@ class MoveDefinition {
     'requiredPreviousState': requiredPreviousState,
     'consumesSetCards': consumesSetCards,
     'canUseAsNormalMove': canUseAsNormalMove,
+    'ignoreNormalSpeed': ignoreNormalSpeed,
+    'allowedResponses': allowedResponses,
   };
 
   factory MoveDefinition.fromJson(Map<String, dynamic> json) => MoveDefinition(
@@ -439,6 +448,10 @@ class MoveDefinition {
     requiredPreviousState: json['requiredPreviousState'] as String?,
     consumesSetCards: json['consumesSetCards'] as bool? ?? true,
     canUseAsNormalMove: json['canUseAsNormalMove'] as bool? ?? false,
+    ignoreNormalSpeed: json['ignoreNormalSpeed'] as bool? ?? false,
+    allowedResponses: List<String>.from(
+      json['allowedResponses'] as List? ?? const [],
+    ),
   );
 }
 

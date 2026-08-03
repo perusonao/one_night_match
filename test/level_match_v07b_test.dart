@@ -175,6 +175,33 @@ void main() {
     expect(m.state.pendingPin, isNull);
   });
 
+  test('Ver.0.7.2: フィニッシャーは通常技の速度勝ちで割り込めない', () {
+    final m = engine();
+    final finisher = MoveDefinition(
+      id: 'fin',
+      name: 'フィニッシャー',
+      category: MoveCategory.finisher,
+      attribute: MoveAttribute.throwMove,
+      power: 36,
+      heat: 8,
+      requiredCards: none(),
+      discardAfterUse: none(),
+      speed: 2,
+      canPin: true,
+      ignoreNormalSpeed: true,
+    );
+    // 速い打撃でもフィニッシャーには速度勝ちできない（neutral=攻撃側が通る）。
+    expect(
+      m.clashBetween(finisher, moves['fastStrike']!),
+      ClashOutcome.neutral,
+    );
+    // 専用返し（投げを返す）なら成立する。
+    expect(
+      m.clashBetween(finisher, moves['counterMove']!),
+      ClashOutcome.counter,
+    );
+  });
+
   test('requiredPreviousState：ダウン中のみ使用可能', () {
     final m = engine();
     toChoose(m);

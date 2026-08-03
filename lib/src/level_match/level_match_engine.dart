@@ -680,6 +680,9 @@ class LevelMatchEngine {
         response.cannotCounterTypes.contains(attack.attribute) ||
         attack.cannotCounterTypes.contains(response.attribute);
     if (canCounter && !blocked) return ClashOutcome.counter;
+    // Ver.0.7.2: フィニッシャーは通常技のSpeed勝ちで割り込めない（切り札）。
+    // 有効な専用返しがなければ攻撃側が通る（neutral）。
+    if (attack.ignoreNormalSpeed) return ClashOutcome.neutral;
     if (response.speed > attack.speed) return ClashOutcome.speedWin;
     if (response.speed < attack.speed) return ClashOutcome.speedLoss;
     return ClashOutcome.neutral;
@@ -695,13 +698,23 @@ class LevelMatchEngine {
     if (atk == null) return const MoveAvailability(false, ['対応する攻撃がありません']);
     final attack = moves[atk.moveId];
     if (attack == null) return const MoveAvailability(false, ['攻撃技が不明です']);
+    // Ver.0.7.2: フィニッシャーへの対応は「専用返し（返し成立）」のみ。
+    // 通常技・単体技のSpeed勝ちでは割り込めない。
+    if (attack.ignoreNormalSpeed) {
+      if (clashBetween(attack, move) != ClashOutcome.counter) {
+        return const MoveAvailability(false, ['フィニッシャーには通常技で割り込めません']);
+      }
+    }
     if (move.isCounterMove && !move.canUseAsNormalMove) {
       // 返し技は「対応成立」する時だけ使える。
       if (clashBetween(attack, move) != ClashOutcome.counter) {
         return const MoveAvailability(false, ['この攻撃には対応できません']);
       }
     }
-    if (isBasic) return const MoveAvailability(true, []);
+    if (isBasic) {
+      // フィニッシャーへ単体技で割り込むのは不可（上でカバー済み）。
+      return const MoveAvailability(true, []);
+    }
     return evaluateMove(defender, move);
   }
 
@@ -751,6 +764,10 @@ class LevelMatchEngine {
       (c) => c.instanceId == cardInstanceId,
     );
     if (index < 0) throw StateError('手札にカードがありません');
+    final attack = moves[atk.moveId];
+    if (attack != null && attack.ignoreNormalSpeed) {
+      throw StateError('フィニッシャーには単体技で割り込めません');
+    }
     final card = defender.hand[index];
     final move = basicMoveFor(card.attribute);
     if (move == null) throw StateError('この属性の単体技がありません');
@@ -1549,6 +1566,13 @@ class LevelMatchEngine {
     if (move.offersPin && opponent.kickOutCards == 0) score += 5;
     // Ver.0.7.1: 速い固有技ほど、相手のレスポンスに潰されにくい。
     score += move.speed;
+    // Ver.0.7.2: フィニッシャーは通常技で割り込まれない“信頼できる切り札”。
+    // 相手が弱っているほど期待値が高い（返し残数・HP・HEATを加味）。
+    if (move.ignoreNormalSpeed) {
+      score += 12;
+      if (opponent.kickOutCards == 0) score += 8;
+      if (state.sharedHeat >= 40) score += 4;
+    }
     return score;
   }
 

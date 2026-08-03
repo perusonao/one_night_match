@@ -95,7 +95,8 @@ MoveDefinition _finisher(
   attribute: attribute,
   power: pinfall ? 38 : 36,
   heat: 8,
-  requiredCards: {..._cards(attribute, 4), MoveAttribute.counter: 1},
+  // Ver.0.7.2: フィニッシャーを到達可能なコストに（4+返1 → 3）。切り札を実戦投入可能に。
+  requiredCards: _cards(attribute, 3),
   discardAfterUse: _cards(attribute, 2),
   usageLimit: 1,
   markUsedAfterUse: true,
@@ -108,10 +109,13 @@ MoveDefinition _finisher(
   canAttemptSubmission: !pinfall,
   submissionPower: pinfall ? 0 : strength,
   submissionBonusOnFinisher: pinfall ? 0 : 15,
-  speed: 2, // フィニッシャーは最も遅い
+  speed: 2, // 表示用（Ver.0.7.2 以降フィニッシャーはSpeedクラッシュ対象外）
   canPin: pinfall,
   canSubmit: !pinfall,
-  description: 'Ver.0.5 のフィニッシャー。決着（フォール／ギブアップ）へ直結する。',
+  // Ver.0.7.2: フィニッシャーは通常技で割り込めない切り札。専用返し／受けのみ。
+  ignoreNormalSpeed: true,
+  allowedResponses: const ['dedicatedCounter', 'take'],
+  description: 'Ver.0.7.2 のフィニッシャー。通常技では割り込めない切り札。',
 );
 
 /// Ver.0.7 単体技カタログ（属性→基本技）。手札から直接使用できる。
@@ -146,12 +150,13 @@ final defaultEditorMoves = <MoveDefinition>[
       cost: 2, pin: true, pinPower: 5),
   _move('brainbuster', 'ブレーンバスター', MoveAttribute.throwMove, 22, 5,
       cost: 2, pin: true, pinPower: 6),
-  _move('backdrop', 'バックドロップ', MoveAttribute.throwMove, 24, 5,
-      cost: 2, pin: true, pinPower: 7),
+  _move('backdrop', 'バックドロップ', MoveAttribute.throwMove, 22, 5,
+      cost: 2, pin: true, pinPower: 5),
   _move('dragon_suplex', 'ドラゴンスープレックス', MoveAttribute.throwMove, 28, 6,
-      cost: 3, pin: true, pinPower: 9),
-  _move('powerbomb', 'パワーボム', MoveAttribute.throwMove, 28, 6,
-      cost: 3, pin: true, pinPower: 10),
+      cost: 3, pin: true, pinPower: 8),
+  // Ver.0.7.2: 豪田ミサキ弱体化（フォール性能を抑制）。
+  _move('powerbomb', 'パワーボム', MoveAttribute.throwMove, 24, 6,
+      cost: 3, pin: true, pinPower: 6),
   // 関節（ギブアップ可能）。
   _move('armbar', '腕ひしぎ十字固め', MoveAttribute.submission, 18, 4,
       cost: 2, submission: true, submissionPower: 5),
@@ -161,12 +166,18 @@ final defaultEditorMoves = <MoveDefinition>[
       cost: 2, submission: true, submissionPower: 5),
   _move('cross_face', 'クロスフェイス', MoveAttribute.submission, 24, 5,
       cost: 3, submission: true, submissionPower: 8),
-  // 凶（ヒール）。
-  _move('rough_slam', 'ラフ投げ', MoveAttribute.rough, 22, 2,
-      cost: 2, pin: true, pinPower: 6),
-  _move('low_blow', '急所攻撃', MoveAttribute.rough, 16, -1, cost: 1, down: true),
-  _move('chair_attack', 'チェアー攻撃', MoveAttribute.rough, 25, -2,
-      cost: 2, specialAbilities: ['cannotCounter']),
+  // 凶（ヒール）。Ver.0.7.2: ジャックの“嫌らしさ” = 返しにくく高威力の妨害技。
+  _move('rough_slam', 'ラフ投げ', MoveAttribute.rough, 26, 2,
+      cost: 2, pin: true, pinPower: 10, speed: 7,
+      specialAbilities: ['cannotCounter']),
+  _move('low_blow', '急所攻撃', MoveAttribute.rough, 18, -1,
+      cost: 1, down: true, speed: 8, specialAbilities: ['cannotCounter']),
+  _move('chair_attack', 'チェアー攻撃', MoveAttribute.rough, 26, -2,
+      cost: 2, pin: true, pinPower: 8, speed: 6,
+      specialAbilities: ['cannotCounter']),
+  _move('neckbreaker_heel', '毒霧ネックブリーカー', MoveAttribute.rough, 24, 1,
+      cost: 2, pin: true, pinPower: 9, speed: 6,
+      specialAbilities: ['cannotCounter']),
   // 飛（フォール可能）。
   _move('moonsault', 'ムーンサルトプレス', MoveAttribute.aerial, 27, 7,
       cost: 3, pin: true, pinPower: 7),
@@ -193,7 +204,7 @@ final defaultEditorMoves = <MoveDefinition>[
   _finisher('silver_lock', '白銀式クロスロック', MoveAttribute.submission,
       pinfall: false, strength: 12),
   _finisher('black_butterfly', 'ブラック・バタフライ', MoveAttribute.rough,
-      pinfall: true, strength: 10),
+      pinfall: true, strength: 14),
   // Ver.0.7 単体技（全レスラー共通・手札から直接使用）。
   ...defaultBasicMoves,
 ];
@@ -323,8 +334,9 @@ const _blueprints = <_WrestlerBlueprint>[
     color: '#9C27B0',
     ability: 'heel_instinct',
     finisher: 'black_butterfly',
+    // Ver.0.7.2: 返しにくい妨害技で主導権を握る“嫌らしい”構成。
     level1: ['elbow', 'rough_slam'],
-    level2: ['low_blow', 'neckbreaker'],
+    level2: ['low_blow', 'neckbreaker_heel'],
     level3: ['chair_attack', 'rough_slam'],
   ),
 ];
