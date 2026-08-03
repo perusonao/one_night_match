@@ -9,6 +9,8 @@ import '../screens.dart' show TitleScreen;
 import '../game.dart' show GameCatalog;
 import '../wrestler_editor/models.dart';
 import '../wrestler_editor/repository.dart';
+import 'battle_audio.dart';
+import 'battle_presentation.dart';
 import 'level_match_cost_preview.dart';
 import 'level_match_deck_builder.dart';
 import 'level_match_engine.dart';
@@ -115,19 +117,6 @@ Duration matchStepDelay(MatchSpeed s) => switch (s) {
   MatchSpeed.normal => const Duration(milliseconds: 560),
   MatchSpeed.slow => const Duration(milliseconds: 950),
   MatchSpeed.manual => Duration.zero,
-};
-
-/// 山場（フォール/キックアウト/解放）で追加する“ため”。
-const _dramaticActions = {
-  'attackDeclared',
-  'pinAttempt',
-  'kickOut',
-  'threeCount',
-  'submissionAttempt',
-  'submissionEscape',
-  'submissionFinish',
-  'unlockLevel',
-  'clashResolution',
 };
 
 String finishReasonLabel(LevelFinishReason? reason) => switch (reason) {
@@ -492,7 +481,8 @@ class LevelMatchBattleScreen extends StatefulWidget {
   State<LevelMatchBattleScreen> createState() => _LevelMatchBattleScreenState();
 }
 
-class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
+class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
+    with SingleTickerProviderStateMixin {
   LevelMatchEngine get engine => widget.engine;
   LevelMatchState get state => engine.state;
   bool _driving = false;
@@ -509,6 +499,19 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   // Ver.0.7.5：CPU思考の実況ローテーション（⑦）。
   Timer? _thinkTimer;
   int _thinkTick = 0;
+
+  // ===== Ver.0.9 演出システム：BattleEventQueue / 演出制御 =====
+  // エンジン（level_match_engine.dart）には一切手を加えず、試合ログの
+  // 差分から演出イベント列を組み立てて段階的に見せる“表示専用”レイヤー。
+  final BattleAudio _audio = BattleAudio();
+  static const BattleEventQueue _eventQueue = BattleEventQueue();
+  BattleEvent? _currentEvent; // 現在表示中の演出（技名/対応/ヒット/HEAT等）
+  BattleEvent? _finisherEvent; // 必殺技カットイン（フルスクリーン演出）
+  late final AnimationController _shakeController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 150),
+  );
+  Animation<Offset> _shakeAnim = const AlwaysStoppedAnimation(Offset.zero);
 
   LevelMatchCostPreview get _preview => LevelMatchCostPreview(
     wrestler: state.player.wrestler,
@@ -544,6 +547,8 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   @override
   void dispose() {
     _thinkTimer?.cancel();
+    _shakeController.dispose();
+    _audio.dispose();
     super.dispose();
   }
 
@@ -553,10 +558,144 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 680),
-          child: _unified(),
+          child: Stack(
+            children: [
+              _unified(),
+              if (_currentEvent != null) _beatBanner(_currentEvent!),
+              if (_finisherEvent != null) _finisherCutinOverlay(_finisherEvent!),
+            ],
+          ),
         ),
       ),
     ),
+  );
+
+  // ===== Ver.0.9 演出システム：ヒットバナー／必殺技カットイン =====
+  Color _beatColor(BattleBeatKind kind) => switch (kind) {
+    BattleBeatKind.announce => _gold,
+    BattleBeatKind.finisherCutin => _gold,
+    BattleBeatKind.response => Colors.white70,
+    BattleBeatKind.clash => Colors.lightBlueAccent,
+    BattleBeatKind.hit => Colors.redAccent,
+    BattleBeatKind.heat => _gold,
+    BattleBeatKind.down => Colors.orangeAccent,
+    BattleBeatKind.pinDeclare => _pink,
+    BattleBeatKind.pinCount => Colors.white,
+    BattleBeatKind.kickOutResult => Colors.greenAccent,
+    BattleBeatKind.pinResult => _gold,
+    BattleBeatKind.submissionDeclare => _pink,
+    BattleBeatKind.submissionResult => _gold,
+    BattleBeatKind.unlock => Colors.purpleAccent,
+    BattleBeatKind.info => Colors.white54,
+  };
+
+  Widget _beatBanner(BattleEvent event) {
+    const bigKinds = {
+      BattleBeatKind.pinCount,
+      BattleBeatKind.pinResult,
+      BattleBeatKind.submissionResult,
+      BattleBeatKind.kickOutResult,
+    };
+    final big = bigKinds.contains(event.kind);
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Align(
+          alignment: const Alignment(0, -0.32),
+          child: Container(
+            padding: EdgeInsets.symmetric(
+                horizontal: big ? 22 : 16, vertical: big ? 12 : 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _beatColor(event.kind), width: 2),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  event.text,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: big ? 30 : 18,
+                      fontWeight: FontWeight.w900,
+                      color: _beatColor(event.kind)),
+                ),
+                if (event.subtitle != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(event.subtitle!,
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.white70)),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _finisherCutinOverlay(BattleEvent event) => Positioned.fill(
+    child: IgnorePointer(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.88),
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (event.subtitle != null)
+              Text(event.subtitle!,
+                  style: const TextStyle(
+                      fontSize: 16,
+                      color: Colors.white70,
+                      fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text(
+              event.text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  fontSize: 34, fontWeight: FontWeight.w900, color: _gold),
+            ),
+            const SizedBox(height: 4),
+            const Text('！！',
+                style: TextStyle(
+                    fontSize: 28,
+                    color: _gold,
+                    fontWeight: FontWeight.w900)),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  void _triggerShake(double intensity, Duration duration) {
+    if (intensity <= 0 || duration <= Duration.zero) return;
+    _shakeController.duration = duration;
+    final seq = TweenSequence<Offset>([
+      TweenSequenceItem(
+          tween: Tween(begin: Offset.zero, end: Offset(intensity, 0)),
+          weight: 1),
+      TweenSequenceItem(
+          tween: Tween(
+              begin: Offset(intensity, 0), end: Offset(-intensity * 0.7, 0)),
+          weight: 1),
+      TweenSequenceItem(
+          tween: Tween(
+              begin: Offset(-intensity * 0.7, 0),
+              end: Offset(intensity * 0.4, 0)),
+          weight: 1),
+      TweenSequenceItem(
+          tween: Tween(begin: Offset(intensity * 0.4, 0), end: Offset.zero),
+          weight: 1),
+    ]);
+    _shakeAnim = seq.animate(_shakeController);
+    _shakeController.forward(from: 0);
+  }
+
+  Widget _ringShake(Widget child) => AnimatedBuilder(
+    animation: _shakeController,
+    builder: (_, c) => Transform.translate(offset: _shakeAnim.value, child: c),
+    child: child,
   );
 
   // ===== Ver.0.7.5：全フェーズ共通レイアウト（①） =====
@@ -568,9 +707,15 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     children: [
       _topBarSlim(),
       _stepIndicator(),
-      _fighterPanelV2(state.cpu, isCpu: true),
-      _statusRow(),
-      _centerFor(),
+      _ringShake(
+        Column(
+          children: [
+            _fighterPanelV2(state.cpu, isCpu: true),
+            _statusRow(),
+            _centerFor(),
+          ],
+        ),
+      ),
       Expanded(
         child: state.isGameOver
             ? const SizedBox.shrink()
@@ -2943,17 +3088,26 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   }
 
   void _act(VoidCallback action, {bool continueCpu = true}) {
+    _audio.play(SeKind.button);
+    final before = state.logs.length;
     try {
       setState(action);
-      if (state.isGameOver) {
-        _finish();
-      } else if (continueCpu) {
-        _drive();
-      }
     } on Object catch (error) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('$error')));
+      return;
+    }
+    _afterAct(before, continueCpu);
+  }
+
+  Future<void> _afterAct(int before, bool continueCpu) async {
+    await _presentNewLogs(before);
+    if (!mounted) return;
+    if (state.isGameOver) {
+      await _finish();
+    } else if (continueCpu) {
+      await _drive();
     }
   }
 
@@ -2966,8 +3120,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       if (!mounted) break;
       final before = state.logs.length;
       setState(engine.autoAdvance);
-      _updateCommentary(before);
-      await _dramaticPause(before);
+      await _presentNewLogs(before);
     }
     _driving = false;
     if (mounted) setState(() {});
@@ -2996,13 +3149,72 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     setState(() => _commentary = headline.message);
   }
 
-  Future<void> _dramaticPause(int fromIndex) async {
-    if (_speed == MatchSpeed.manual || _speed == MatchSpeed.fast) return;
+  /// Ver.0.9 演出システム：新しく積まれたログをBattleEventQueueで
+  /// イベント列に変換し、1つずつ段階的に見せる（技名→対応→速度判定→
+  /// ヒット→ダメージ→HEAT→フォール→カウント）。
+  /// エンジンの状態遷移そのものには一切関与しない（表示専用）。
+  Future<void> _presentNewLogs(int fromIndex) async {
     if (fromIndex >= state.logs.length) return;
     final fresh = state.logs.sublist(fromIndex);
-    if (fresh.any((l) => _dramaticActions.contains(l.action))) {
-      await Future<void>.delayed(matchStepDelay(_speed));
+    _updateCommentary(fromIndex);
+    if (_speed == MatchSpeed.manual && fresh.length < 2) {
+      // 手動送りで進行ログが1件だけ（＝地味な進行）のときは、演出無しで
+      // 即座に反映する（ステップ実行のテンポを優先）。
+      return;
     }
+    final events = _eventQueue.build(fresh, state, engine.moves);
+    for (final event in events) {
+      if (!mounted) return;
+      if (event.se != null) _audio.play(event.se!);
+      final hitStop = _scaled(event.hitStop, event.kind);
+      if (hitStop > Duration.zero) {
+        await Future<void>.delayed(hitStop);
+        if (!mounted) return;
+      }
+      setState(() {
+        if (event.kind == BattleBeatKind.finisherCutin) {
+          _finisherEvent = event;
+        } else {
+          _currentEvent = event;
+        }
+      });
+      if (event.shakeIntensity > 0) {
+        _triggerShake(event.shakeIntensity, event.shakeDuration);
+      }
+      final hold = _scaled(event.hold, event.kind);
+      if (hold > Duration.zero) {
+        await Future<void>.delayed(hold);
+        if (!mounted) return;
+      }
+      if (event.kind == BattleBeatKind.finisherCutin) {
+        setState(() => _finisherEvent = null);
+      }
+    }
+    if (mounted) setState(() => _currentEvent = null);
+  }
+
+  /// 山場（フォール／キックアウト／必殺技等）は速度設定によらず極端に
+  /// 削らない。通常の技演出はテンポ優先で大きく短縮する。
+  static const _importantBeatKinds = {
+    BattleBeatKind.pinDeclare,
+    BattleBeatKind.pinCount,
+    BattleBeatKind.pinResult,
+    BattleBeatKind.kickOutResult,
+    BattleBeatKind.submissionDeclare,
+    BattleBeatKind.submissionResult,
+    BattleBeatKind.finisherCutin,
+  };
+
+  Duration _scaled(Duration base, BattleBeatKind kind) {
+    if (base <= Duration.zero) return Duration.zero;
+    final important = _importantBeatKinds.contains(kind);
+    final factor = switch (_speed) {
+      MatchSpeed.fast => important ? 0.6 : 0.18,
+      MatchSpeed.normal => 1.0,
+      MatchSpeed.slow => 1.4,
+      MatchSpeed.manual => important ? 0.7 : 0.3,
+    };
+    return Duration(milliseconds: (base.inMilliseconds * factor).round());
   }
 
   Future<void> _finish() async {
