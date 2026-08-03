@@ -722,16 +722,43 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
           Builder(
             builder: (_) {
               final availability = engine.evaluateMove(player, move);
+              final clash = engine.clashOutcome(player, move);
               final tags = <String>[
                 if (move.offersPin) 'フォール',
                 if (move.offersSubmission) 'ギブアップ',
                 if (move.causesDown) 'ダウン',
                 if (move.category == MoveCategory.finisher) 'FINISHER',
               ];
+              final (clashLabel, clashColor) = switch (clash) {
+                ClashOutcome.counter => ('🔄返せる', _gold),
+                ClashOutcome.speedWin => ('⚡速度勝ち', Colors.greenAccent),
+                ClashOutcome.speedLoss => ('🐢速度負け', Colors.white38),
+                ClashOutcome.neutral => ('', Colors.white),
+              };
               return Card(
+                color: clash == ClashOutcome.counter
+                    ? const Color(0xff2a2410)
+                    : clash == ClashOutcome.speedWin
+                    ? const Color(0xff10241a)
+                    : null,
                 child: ListTile(
-                  title: Text(
-                    '${move.name}${tags.isEmpty ? "" : "  [${tags.join("/")}]"}',
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${move.name}${tags.isEmpty ? "" : "  [${tags.join("/")}]"}',
+                        ),
+                      ),
+                      if (clashLabel.isNotEmpty)
+                        Text(
+                          clashLabel,
+                          style: TextStyle(
+                            color: clashColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
                   ),
                   subtitle: Text(
                     '${moveAttributeLabel(move.attribute)} / 攻撃 ${move.power} / 速度 ${move.speed} / HEAT ${move.heat >= 0 ? "+" : ""}${move.heat}\n'
