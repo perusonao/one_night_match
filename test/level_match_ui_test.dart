@@ -50,13 +50,45 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 100));
 
-    // 中継風の主要要素が出ている。
+    // 中継風・統一レイアウトの主要要素が出ている。
     expect(find.text('相手の攻撃！'), findsOneWidget);
-    expect(find.text('対応してください'), findsOneWidget);
+    expect(find.text('あなたの対応を選択してください'), findsOneWidget);
     expect(find.text('速度比較'), findsOneWidget);
     expect(find.text('結果予測'), findsOneWidget);
     expect(find.text('受ける'), findsWidgets);
+    // Ver.0.7.5：全フェーズ共通の枠（状況・実況・次の操作）。
+    expect(find.text('試合の流れ'), findsOneWidget);
+    expect(find.text('🎤 実況'), findsWidgets);
+    expect(find.text('次の操作'), findsOneWidget);
+    expect(find.text('直前の攻防ログ'), findsWidgets);
     // レイアウト例外（オーバーフロー等）が出ていないこと。
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Ver.0.7.5 UI: セット等の非対応フェーズも共通レイアウトで描画', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final moves = {for (final m in defaultEditorMoves) m.id: m};
+    final ws = {for (final w in defaultEditorWrestlers) w.id: w};
+    final engine = LevelMatchEngine.create(
+      playerWrestler: ws['wrestler_akari']!,
+      cpuWrestler: ws['wrestler_misaki']!,
+      moves: moves,
+      random: Random(1),
+      playerStarts: true,
+    );
+    expect(engine.state.phase, LevelMatchPhase.setCard);
+    await tester.pumpWidget(
+      MaterialApp(theme: ThemeData.dark(),
+          home: LevelMatchBattleScreen(engine: engine)),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('カードセット'), findsWidgets);
+    expect(find.text('試合の流れ'), findsOneWidget);
+    expect(find.text('次の操作'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
