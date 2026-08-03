@@ -68,9 +68,9 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('固有技（エネルギーを消費・決着可）'), findsOneWidget);
-    // Ver.0.8.0：無料の単体技セクションはenergyモードでは非表示。
-    expect(find.text('単体技（カード1枚で使用・コスト不要）'), findsNothing);
+    expect(find.text('🌟 固有技｜手札不要・エネルギーを消費して繰り出す（決着可）'), findsOneWidget);
+    // Ver.0.9：無料の単体技セクションはenergyモードでは非表示。
+    expect(find.text('🥊 単体技｜カード1枚で使用（コスト不要・決着不可）'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

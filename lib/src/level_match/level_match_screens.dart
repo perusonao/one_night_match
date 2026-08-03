@@ -133,8 +133,9 @@ const _dramaticActions = {
 String finishReasonLabel(LevelFinishReason? reason) => switch (reason) {
   LevelFinishReason.pinfall => '3カウント',
   LevelFinishReason.submission => 'ギブアップ',
-  LevelFinishReason.exhaustion => '消耗の果て',
-  LevelFinishReason.decision => '時間切れ判定',
+  LevelFinishReason.exhaustion => '引き分け（消耗の果て）',
+  LevelFinishReason.decision => '時間切れ判定(旧仕様)',
+  LevelFinishReason.draw => '引き分け（時間切れ）',
   LevelFinishReason.deckOut => 'デッキ切れ(旧仕様)',
   LevelFinishReason.hpZero => 'HP0(旧仕様)',
   null => '-',
@@ -566,6 +567,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   Widget _unified() => Column(
     children: [
       _topBarSlim(),
+      _stepIndicator(),
       _fighterPanelV2(state.cpu, isCpu: true),
       _statusRow(),
       _centerFor(),
@@ -608,6 +610,100 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       ],
     ),
   );
+
+  // ===== Ver.0.9 UX改善④：現在のフェーズをSTEPで明示 =====
+  // 「今何をすればいいか」を一目で分かるようにする常設インジケーター。
+  // ルールには一切影響しない表示専用のもの。
+  static const _classicStepLabels = ['カード', 'レベル', '技', '対応', '結果'];
+  static const _energyStepLabels = ['エネルギー', 'レベル', '技', '対応', '結果'];
+
+  int _currentStepIndex() => switch (state.phase) {
+    LevelMatchPhase.setup ||
+    LevelMatchPhase.draw ||
+    LevelMatchPhase.setCard => 0,
+    LevelMatchPhase.unlockCheck || LevelMatchPhase.levelChange => 1,
+    LevelMatchPhase.chooseMove => 2,
+    LevelMatchPhase.responseSelection ||
+    LevelMatchPhase.resolveMove ||
+    LevelMatchPhase.pinDecision ||
+    LevelMatchPhase.kickOutDecision ||
+    LevelMatchPhase.submissionDecision => 3,
+    LevelMatchPhase.turnEnd || LevelMatchPhase.gameOver => 4,
+  };
+
+  Widget _stepIndicator() {
+    if (state.isGameOver) return const SizedBox.shrink();
+    final labels = _isEnergyMode ? _energyStepLabels : _classicStepLabels;
+    final current = _currentStepIndex();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 2, 14, 3),
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++) ...[
+            if (i > 0)
+              Expanded(
+                child: SizedBox(
+                  height: 20,
+                  child: Center(
+                    child: Container(
+                      height: 2,
+                      color: i <= current
+                          ? _pink.withValues(alpha: 0.6)
+                          : Colors.white12,
+                    ),
+                  ),
+                ),
+              ),
+            _stepDot(i, labels[i], current),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _stepDot(int index, String label, int current) {
+    final isCurrent = index == current;
+    final isDone = index < current;
+    final ringColor = isCurrent
+        ? _pink
+        : (isDone ? Colors.white54 : Colors.white24);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: isCurrent ? 20 : 14,
+          height: isCurrent ? 20 : 14,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isCurrent
+                ? _pink
+                : (isDone ? Colors.white38 : Colors.transparent),
+            border: Border.all(color: ringColor, width: isCurrent ? 2 : 1),
+          ),
+          child: isDone
+              ? const Icon(Icons.check, size: 9, color: Colors.black)
+              : (isCurrent
+                    ? Text(
+                        '${index + 1}',
+                        style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white),
+                      )
+                    : null),
+        ),
+        const SizedBox(height: 1),
+        Text(
+          label,
+          style: TextStyle(
+              fontSize: 8.5,
+              fontWeight: isCurrent ? FontWeight.w900 : FontWeight.normal,
+              color: isCurrent ? _pink : Colors.white38),
+        ),
+      ],
+    );
+  }
 
   Color _themeColor(PlayerLevelMatchState f) =>
       Color(int.parse(f.wrestler.themeColor.replaceFirst('#', '0xff')));
@@ -1983,7 +2079,9 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
             children: [
               Expanded(
                 child: Text(
-                    _isEnergyMode ? 'エネルギーをセット（永続・毎ターン回復）' : 'カードをセット（固有技を組み立てる）',
+                    _isEnergyMode
+                        ? '⚡ エネルギーカードをセット（技を出す“燃料”・場に残り続ける）'
+                        : 'カードをセット（固有技を組み立てる）',
                     style: const TextStyle(
                         fontWeight: FontWeight.bold, fontSize: 14)),
               ),
@@ -2025,7 +2123,8 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
             child: Text(
-                '技カード${heldTechniqueCards.length}枚は手札で温存中（技選択フェイズで使用）',
+                '🥊 技カード${heldTechniqueCards.length}枚はここではセットできません。'
+                '「技を選ぶ」フェイズでそのまま繰り出します（使うと捨て札）。',
                 style: const TextStyle(fontSize: 11, color: Colors.white54)),
           ),
         const SizedBox(height: 8),
@@ -2237,7 +2336,9 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
           child: Text(
-              _isEnergyMode ? '固有技（エネルギーを消費・決着可）' : '固有技（セットを消費・決着可）',
+              _isEnergyMode
+                  ? '🌟 固有技｜手札不要・エネルギーを消費して繰り出す（決着可）'
+                  : '🌟 固有技｜セットしたカードを消費して繰り出す（決着可）',
               style: const TextStyle(
                   fontWeight: FontWeight.bold, color: _gold, fontSize: 13)),
         ),
@@ -2250,7 +2351,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
         if (!_isEnergyMode) ...[
           const Padding(
             padding: EdgeInsets.fromLTRB(12, 8, 12, 2),
-            child: Text('単体技（カード1枚で使用・コスト不要）',
+            child: Text('🥊 単体技｜カード1枚で使用（コスト不要・決着不可）',
                 style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: Colors.white70,
@@ -2265,7 +2366,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
         ] else ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
-            child: Text('技カード（手札から使用・使用後は捨て札）',
+            child: Text('🥊 技カード｜手札のカードをそのまま繰り出す（使うと捨て札）',
                 style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: Colors.white70,
@@ -2306,6 +2407,53 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     );
   }
 
+  // ===== Ver.0.9 UX改善⑦：技の説明は長押しで表示（一覧は情報を絞る） =====
+  void _showMoveDescription(MoveDefinition move) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Row(
+          children: [
+            attributeBadge(move.attribute, size: 28),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(move.name,
+                  style: const TextStyle(fontWeight: FontWeight.w900)),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 10,
+              runSpacing: 4,
+              children: [
+                _statChip('ダメージ', '${move.power}', Colors.redAccent),
+                _statChip('速度', '${move.speed}', Colors.lightBlueAccent),
+                _statChip('HEAT', '+${move.heat}', _gold),
+                if (move.offersPin)
+                  _statChip('フォール強度', '${move.pinPower}', Colors.greenAccent),
+                if (move.offersSubmission)
+                  _statChip(
+                      'ギブアップ強度', '${move.submissionPower}', Colors.greenAccent),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(move.description, style: const TextStyle(fontSize: 13)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('閉じる'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _moveTile({
     required MoveAttribute attribute,
     required String name,
@@ -2318,12 +2466,14 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     required String ctaLabel,
     required VoidCallback? onTap,
     Map<MoveAttribute, int>? energyCost,
+    VoidCallback? onLongPress,
   }) {
     final color = attributeColor(attribute);
     return Opacity(
       opacity: usable ? 1 : 0.55,
       child: GestureDetector(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Container(
           width: 158,
           padding: const EdgeInsets.all(9),
@@ -2347,6 +2497,9 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                         style: const TextStyle(
                             fontWeight: FontWeight.w900, fontSize: 13)),
                   ),
+                  if (onLongPress != null)
+                    const Icon(Icons.info_outline,
+                        size: 13, color: Colors.white38),
                 ],
               ),
               const SizedBox(height: 4),
@@ -2464,6 +2617,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       ctaLabel: 'この固有技を使う',
       onTap: usable ? () => _useMove(m) : null,
       energyCost: _isEnergyMode ? m.energyModeRequiredCards : null,
+      onLongPress: () => _showMoveDescription(m),
     );
   }
 
@@ -2494,6 +2648,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
           ? () => _act(() => engine.useBasicMove('player', card.instanceId))
           : null,
       energyCost: _isEnergyMode ? basic.energyModeRequiredCards : null,
+      onLongPress: () => _showMoveDescription(basic),
     );
   }
 
@@ -2525,6 +2680,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
           ? () => _act(() => engine.useTechniqueCard('player', card.instanceId))
           : null,
       energyCost: move.energyModeRequiredCards,
+      onLongPress: () => _showMoveDescription(move),
     );
   }
 
@@ -2977,6 +3133,7 @@ class LevelMatchResultScreen extends StatelessWidget {
   final Map<String, MoveDefinition> moves;
   @override
   Widget build(BuildContext context) {
+    final isDraw = state.winnerId == null;
     final winner = state.winnerId == 'player' ? state.player : state.cpu;
     final loser = state.winnerId == 'player' ? state.cpu : state.player;
     final json = const JsonEncoder.withIndent('  ').convert(state.toJson());
@@ -2985,13 +3142,29 @@ class LevelMatchResultScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(18),
         children: [
-          const Icon(Icons.emoji_events, color: _gold, size: 72),
+          Icon(
+            isDraw ? Icons.handshake : Icons.emoji_events,
+            color: isDraw ? Colors.white70 : _gold,
+            size: 72,
+          ),
           Text(
-            '${winner.wrestler.name} WIN',
+            isDraw
+                ? 'DRAW'
+                : '${winner.wrestler.name} WIN',
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
           ),
-          _result('敗者', loser.wrestler.name),
+          if (isDraw)
+            const Padding(
+              padding: EdgeInsets.only(top: 4, bottom: 4),
+              child: Text(
+                '決着つかず引き分け（3カウント・ギブアップのみが決着です）',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Colors.white70),
+              ),
+            )
+          else
+            _result('敗者', loser.wrestler.name),
           _result('決着方法', finishReasonLabel(state.finishReason)),
           _result('決着技', state.finishingMove ?? state.lastMove ?? 'なし'),
           _result(

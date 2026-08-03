@@ -212,7 +212,7 @@ void main() {
       expect(match.state.player.currentHp, 100 - kExhaustionHpLoss);
     });
 
-    test('安全弁: 高ターン数でHP優位側の勝利に決着', () {
+    test('安全弁: 高ターン数では引き分けで打ち切り（決着は3カウント/ギブアップのみ）', () {
       final match = engine();
       match.state.turnNumber = kMaxTurnSafetyCap + 1;
       match.state.player.currentHp = 80;
@@ -220,7 +220,7 @@ void main() {
       match.beginTurn();
       expect(match.state.isGameOver, isTrue);
       expect(match.state.finishReason, LevelFinishReason.exhaustion);
-      expect(match.state.winnerId, 'player');
+      expect(match.state.winnerId, isNull);
     });
   });
 }
