@@ -1109,6 +1109,8 @@ class _LevelEditorState extends State<LevelEditor> {
               update(counter: saved.id);
             case MoveCategory.finisher:
               update(finisher: saved.id);
+            case MoveCategory.basic:
+              break; // 単体技はレベルへ登録しない
           }
         },
       ),
@@ -1651,6 +1653,7 @@ String _categoryLabel(MoveCategory value) => switch (value) {
   MoveCategory.normal => '通常技',
   MoveCategory.counter => '返し技',
   MoveCategory.finisher => 'フィニッシャー',
+  MoveCategory.basic => '単体技',
 };
 
 String _checkLabel(AdditionalCheckType value) => switch (value) {
