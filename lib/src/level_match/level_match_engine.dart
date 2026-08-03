@@ -27,6 +27,9 @@ enum LevelMatchPhase {
 /// deckOut も Ver.0.6 で新規には出さない（山札切れは疲労へ）。exhaustion は安全弁。
 enum LevelFinishReason { hpZero, deckOut, pinfall, submission, exhaustion }
 
+/// Ver.0.7 Phase B: 相手の前ターン技に対する解決結果。
+enum ClashOutcome { counter, speedWin, speedLoss, neutral }
+
 /// Ver.0.6 バランス定数。
 const int kKickOutPenaltyStep = 5; // キックアウト成功ごとの必要HP増加
 const int kEscapePenaltyStep = 5; // ギブアップ耐久成功ごとの必要HP増加
@@ -120,6 +123,10 @@ class PlayerLevelMatchState {
   int submissionAttemptsReceived = 0;
   bool isDown = false;
   int? hpZeroReachedTurn;
+
+  // Ver.0.7 Phase B: 将来拡張用の状態（コーナー/場外）。
+  bool isCornered = false;
+  bool isOutside = false;
 
   // Ver.0.6: 累積キックアウト／ギブアップ耐久ペナルティ（返すほど重くなる）。
   int kickOutPenalty = 0;
@@ -538,15 +545,15 @@ class LevelMatchEngine {
         );
       }
     }
-    if (move.category == MoveCategory.counter) {
-      reasons.add('返し技判定はVer.0.4未対応です');
-    }
     if (move.category == MoveCategory.finisher && actor.finisherUsed) {
       reasons.add('フィニッシャーは使用済みです');
     }
     if (move.usageLimit != null &&
         (actor.moveUsageCounts[move.id] ?? 0) >= move.usageLimit!) {
       reasons.add('使用回数制限に達しています');
+    }
+    if (!_meetsRequiredState(actor, move)) {
+      reasons.add('必要な状態（${move.requiredPreviousState}）を満たしていません');
     }
     for (final condition in move.conditions) {
       if (!_evaluateMoveCondition(condition, actor)) {
@@ -572,7 +579,26 @@ class LevelMatchEngine {
     final target = state.defender;
     state.phase = LevelMatchPhase.resolveMove;
     final resistance = target.levelCard.resistances[move.attribute] ?? 0;
-    final damage = max(0, move.power - resistance);
+    var damage = max(0, move.power - resistance);
+    // Ver.0.7 Phase B: 相手の前ターン技との速度／返し比較で解決を補正。
+    final clash = clashOutcome(actor, move);
+    var clashHeat = 0;
+    var suppressFinish = false;
+    switch (clash) {
+      case ClashOutcome.counter:
+        clashHeat += 5; // 返し成立：相手の勢いを断つ
+        target
+          ..lastUsedMoveId = null
+          ..lastUsedMoveName = null
+          ..lastUsedMoveSpeed = null;
+      case ClashOutcome.speedWin:
+        clashHeat += 1; // 速度で上回り先に命中
+      case ClashOutcome.speedLoss:
+        damage = (damage / 2).floor(); // 速度負け：威力半減・決着不可
+        suppressFinish = true;
+      case ClashOutcome.neutral:
+        break;
+    }
     final hpBefore = target.currentHp;
     final heatBefore = state.sharedHeat;
     target.currentHp = max(0, target.currentHp - damage);
@@ -589,7 +615,7 @@ class LevelMatchEngine {
       actor.levelMoveSuccessCounts[actor.currentLevel] =
           (actor.levelMoveSuccessCounts[actor.currentLevel] ?? 0) + 1;
     }
-    var heatDelta = move.heat;
+    var heatDelta = move.heat + clashHeat;
     if (damage > 0 && firstAttribute) heatDelta++;
     if (actor.currentHp <= 30) heatDelta++;
     final fromFinisher = move.category == MoveCategory.finisher;
@@ -639,9 +665,33 @@ class LevelMatchEngine {
       'offersPin': move.offersPin,
       'offersSubmission': move.offersSubmission,
       'causesDown': move.causesDown,
+      'clash': clash.name,
+      'suppressFinish': suppressFinish,
     });
+    if (clash != ClashOutcome.neutral) {
+      _log(actor, 'clash', switch (clash) {
+        ClashOutcome.counter => '返し成立！ 相手の技を切り返した',
+        ClashOutcome.speedWin => '速度で上回り先に命中',
+        ClashOutcome.speedLoss => '速度負け：威力半減・決着不可',
+        ClashOutcome.neutral => '',
+      }, {
+        'outcome': clash.name,
+        'moveSpeed': move.speed,
+        'opponentLastSpeed': _opponentOf(actor).lastUsedMoveSpeed,
+      });
+    }
     evaluateUnlocks(actor);
     evaluateUnlocks(target);
+
+    // Ver.0.7: 速度負け時は決着・状態変化を発生させない。
+    if (suppressFinish) {
+      endTurn();
+      return;
+    }
+
+    // Ver.0.7 Phase B: コーナー／場外の状態付与（将来拡張の土台）。
+    if (move.causesCorner) target.isCornered = true;
+    if (move.causesOutside) target.isOutside = true;
 
     // Ver.0.5: 打撃KOはダウンへ（即勝利にしない）。
     if (move.causesDown && !target.isDown) {
@@ -795,7 +845,15 @@ class LevelMatchEngine {
     actor.hand.removeAt(cardIndex);
     actor.discardPile.add(card);
     final resistance = target.levelCard.resistances[move.attribute] ?? 0;
-    final damage = max(0, move.power - resistance);
+    var damage = max(0, move.power - resistance);
+    // Ver.0.7 Phase B: 単体技も速度比較の対象（返しは固有技のみ）。
+    final clash = clashOutcome(actor, move);
+    var clashHeat = 0;
+    if (clash == ClashOutcome.speedWin) {
+      clashHeat += 1;
+    } else if (clash == ClashOutcome.speedLoss) {
+      damage = (damage / 2).floor();
+    }
     final hpBefore = target.currentHp;
     target.currentHp = max(0, target.currentHp - damage);
     actor.damageDealtCount++;
@@ -809,7 +867,7 @@ class LevelMatchEngine {
     actor.lastUsedMoveName = move.name;
     actor.lastUsedMoveSpeed = move.speed;
     actor.lastUsedWasBasic = true;
-    var heatDelta = move.heat;
+    var heatDelta = move.heat + clashHeat;
     if (damage > 0 && firstAttribute) heatDelta++;
     state.sharedHeat += heatDelta;
     state.lastMove = move.name;
@@ -1270,6 +1328,17 @@ class LevelMatchEngine {
     }
     // 相手のキックアウトカードが尽きているならフォール技を後押し。
     if (move.offersPin && opponent.kickOutCards == 0) score += 5;
+    // Ver.0.7 Phase B: 相手の前ターン技を読む。返し/速度勝ちを優先、速度負けは避ける。
+    switch (clashOutcome(cpu, move)) {
+      case ClashOutcome.counter:
+        score += 12;
+      case ClashOutcome.speedWin:
+        score += 4;
+      case ClashOutcome.speedLoss:
+        score -= 6;
+      case ClashOutcome.neutral:
+        break;
+    }
     return score;
   }
 
@@ -1363,6 +1432,44 @@ class LevelMatchEngine {
       if (level.counterMoveId != null) level.counterMoveId!,
       if (level.finisherId != null) level.finisherId!,
     ].map((id) => moves[id]).whereType<MoveDefinition>().toList();
+  }
+
+  /// Ver.0.7 Phase B: actor が move を出したとき、相手の前ターン技に対する解決結果。
+  ClashOutcome clashOutcome(PlayerLevelMatchState actor, MoveDefinition move) {
+    final opponent = _opponentOf(actor);
+    final lastId = opponent.lastUsedMoveId;
+    if (lastId == null) return ClashOutcome.neutral;
+    final last = moves[lastId];
+    if (last == null) return ClashOutcome.neutral;
+    final canCounter =
+        move.counterTypes.contains(last.attribute) ||
+        (move.category == MoveCategory.counter &&
+            (move.counterTypes.isEmpty ||
+                move.counterTypes.contains(last.attribute)));
+    final blocked =
+        last.specialAbilities.contains('cannotCounter') ||
+        move.cannotCounterTypes.contains(last.attribute) ||
+        last.cannotCounterTypes.contains(move.attribute);
+    if (canCounter && !blocked) return ClashOutcome.counter;
+    final oppSpeed = opponent.lastUsedMoveSpeed ?? last.speed;
+    if (move.speed > oppSpeed) return ClashOutcome.speedWin;
+    if (move.speed < oppSpeed) return ClashOutcome.speedLoss;
+    return ClashOutcome.neutral;
+  }
+
+  /// requiredPreviousState を満たすか（例: 'down'=相手ダウン中）。
+  bool _meetsRequiredState(PlayerLevelMatchState actor, MoveDefinition move) {
+    final required = move.requiredPreviousState;
+    if (required == null || required.isEmpty) return true;
+    final opponent = _opponentOf(actor);
+    return switch (required) {
+      'down' || 'opponentDown' => opponent.isDown,
+      'cornered' || 'opponentCorner' => opponent.isCornered,
+      'outside' || 'opponentOutside' => opponent.isOutside,
+      'selfDown' => actor.isDown,
+      // 未対応の要求状態（topRope/running/springboardReady 等）は安全側で不可。
+      _ => false,
+    };
   }
 
   Set<MoveAttribute> _desiredAttributes(PlayerLevelMatchState actor) {

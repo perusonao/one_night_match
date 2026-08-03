@@ -19,6 +19,8 @@ MoveDefinition _move(
   int submissionPower = 0,
   bool down = false,
   int? speed,
+  List<MoveAttribute> cannotCounterTypes = const [],
+  List<String> specialAbilities = const [],
   String description = 'Ver.0.5 検討用の仮技データです。',
 }) {
   final checks = <AdditionalCheckType>[
@@ -52,6 +54,8 @@ MoveDefinition _move(
     canPin: pin,
     canSubmit: submission,
     canKO: down,
+    cannotCounterTypes: cannotCounterTypes,
+    specialAbilities: specialAbilities,
     description: description,
   );
 }
@@ -131,7 +135,8 @@ final defaultEditorMoves = <MoveDefinition>[
   _move('elbow', 'エルボー', MoveAttribute.strike, 12, 2, cost: 1),
   _move('running_knee', 'ランニングニー', MoveAttribute.strike, 18, 4, cost: 2, down: true),
   _move('high_kick', 'ハイキック', MoveAttribute.strike, 24, 5, cost: 3, down: true),
-  _move('lariat', '豪腕ラリアット', MoveAttribute.strike, 22, 3, cost: 2, down: true),
+  _move('lariat', '豪腕ラリアット', MoveAttribute.strike, 22, 3,
+      cost: 2, down: true, cannotCounterTypes: [MoveAttribute.strike]),
   // 投げ（フォール可能）。
   _move('arm_drag', 'アームドラッグ', MoveAttribute.throwMove, 12, 2,
       cost: 1, pin: true, pinPower: 3),
@@ -160,7 +165,8 @@ final defaultEditorMoves = <MoveDefinition>[
   _move('rough_slam', 'ラフ投げ', MoveAttribute.rough, 22, 2,
       cost: 2, pin: true, pinPower: 6),
   _move('low_blow', '急所攻撃', MoveAttribute.rough, 16, -1, cost: 1, down: true),
-  _move('chair_attack', 'チェアー攻撃', MoveAttribute.rough, 25, -2, cost: 2),
+  _move('chair_attack', 'チェアー攻撃', MoveAttribute.rough, 25, -2,
+      cost: 2, specialAbilities: ['cannotCounter']),
   // 飛（フォール可能）。
   _move('moonsault', 'ムーンサルトプレス', MoveAttribute.aerial, 27, 7,
       cost: 3, pin: true, pinPower: 7),
@@ -176,6 +182,8 @@ final defaultEditorMoves = <MoveDefinition>[
     discardAfterUse: _cards(),
     successRate: 65,
     additionalChecks: const [AdditionalCheckType.counterSuccess],
+    speed: 10, // 返し技は最速
+    counterTypes: const [MoveAttribute.throwMove], // 投げ技を切り返す
   ),
   // フィニッシャー（各レスラー固有・決着直結）。
   _finisher('high_speed_german', 'ハイスピード・ジャーマン', MoveAttribute.throwMove,
