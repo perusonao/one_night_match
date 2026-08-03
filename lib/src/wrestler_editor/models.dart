@@ -259,6 +259,7 @@ class MoveDefinition {
     this.canUseAsNormalMove = false,
     this.ignoreNormalSpeed = false,
     this.allowedResponses = const [],
+    this.extra = const {},
   });
 
   final String id;
@@ -312,6 +313,11 @@ class MoveDefinition {
   final bool ignoreNormalSpeed; // 通常技のSpeed勝ちを無効化
   final List<String>
   allowedResponses; // 許可レスポンス: dedicatedCounter/escape/ability/take 等
+
+  /// Ver.0.8.0: 将来拡張用の任意メタデータ（AI優先度・消費/必要HEAT・発動率・
+  /// レアリティ・エフェクト/SE/モーションID・コンボ条件・部位ダメージ・ロープブレイク等）。
+  /// 現行エンジンは未使用。増やしてもモデル改変不要。
+  final Map<String, dynamic> extra;
 
   /// 技編集時に、UI未対応のフィールドを失わないためのコピー生成。
   MoveDefinition copyWith({
@@ -383,6 +389,7 @@ class MoveDefinition {
     canUseAsNormalMove: canUseAsNormalMove,
     ignoreNormalSpeed: ignoreNormalSpeed,
     allowedResponses: allowedResponses,
+    extra: extra,
   );
 
   /// この技は「返し」として相手技に対応する性質を持つか。
@@ -457,6 +464,7 @@ class MoveDefinition {
     'canUseAsNormalMove': canUseAsNormalMove,
     'ignoreNormalSpeed': ignoreNormalSpeed,
     'allowedResponses': allowedResponses,
+    if (extra.isNotEmpty) 'extra': extra,
   };
 
   factory MoveDefinition.fromJson(Map<String, dynamic> json) => MoveDefinition(
@@ -524,6 +532,7 @@ class MoveDefinition {
     allowedResponses: List<String>.from(
       json['allowedResponses'] as List? ?? const [],
     ),
+    extra: Map<String, dynamic>.from(json['extra'] as Map? ?? const {}),
   );
 }
 

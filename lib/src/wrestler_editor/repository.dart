@@ -234,4 +234,38 @@ class LocalWrestlerRepository implements WrestlerRepository {
       jsonEncode(abilities.values.map((item) => item.toJson()).toList()),
     );
   }
+
+  // ===== Ver.0.8.0：技マスタ（Technique Master）CRUD =====
+
+  /// 技を登録／更新して永続化する。
+  Future<void> saveMove(MoveDefinition move) async {
+    await _loadCatalogs();
+    moves[move.id] = move;
+    await _writeCatalogs();
+  }
+
+  /// 技を削除する。いずれかのレスラーが使用中なら削除しない。
+  Future<void> deleteMove(String id) async {
+    await _loadCatalogs();
+    if (await moveUsageCount(id) > 0) {
+      throw StateError('この技は使用中のため削除できません');
+    }
+    moves.remove(id);
+    await _writeCatalogs();
+  }
+
+  /// 指定の技を使用しているレスラー数（固有技／通常技／返し技／フィニッシャー）。
+  Future<int> moveUsageCount(String id) async {
+    final all = await loadAll();
+    return all.where((w) {
+      for (final lv in w.levels) {
+        if (lv.moveIds.contains(id) ||
+            lv.finisherId == id ||
+            lv.counterMoveId == id) {
+          return true;
+        }
+      }
+      return w.basicMoveIds.values.contains(id);
+    }).length;
+  }
 }

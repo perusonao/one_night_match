@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'models.dart';
 import 'repository.dart';
+import 'technique_master_screens.dart';
 import 'validator.dart';
 
 const _editorPink = Color(0xffff477e);
@@ -50,6 +51,19 @@ class _WrestlerEditorListScreenState extends State<WrestlerEditorListScreen> {
         ],
       ),
       actions: [
+        IconButton(
+          tooltip: '技一覧（技マスタ）',
+          onPressed: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => TechniqueListScreen(repository: repository),
+              ),
+            );
+            if (mounted) _reload();
+          },
+          icon: const Icon(Icons.sports_martial_arts),
+        ),
         IconButton(
           tooltip: 'JSON読込',
           onPressed: _showImport,
@@ -947,10 +961,19 @@ class _LevelEditorState extends State<LevelEditor> {
                   ),
                 ],
               ),
-            TextButton.icon(
-              onPressed: () => _newMove(MoveCategory.normal),
-              icon: const Icon(Icons.add),
-              label: const Text('新規技作成'),
+            Row(
+              children: [
+                TextButton.icon(
+                  onPressed: _pickSignatures,
+                  icon: const Icon(Icons.playlist_add),
+                  label: const Text('技一覧から追加'),
+                ),
+                TextButton.icon(
+                  onPressed: () => _newMove(MoveCategory.normal),
+                  icon: const Icon(Icons.add),
+                  label: const Text('新規技作成'),
+                ),
+              ],
             ),
           ],
         ),
@@ -1002,10 +1025,11 @@ class _LevelEditorState extends State<LevelEditor> {
         ),
       ),
       _singleMove(
-        '8. フィニッシャー',
+        '8. フィニッシャー（最大1）',
         MoveCategory.finisher,
         value.finisherId,
         (id) => update(finisher: id, clearFinisher: id == null),
+        onPick: _pickFinisher,
       ),
       _EditorSection(
         title: 'カードテキスト',
@@ -1139,8 +1163,9 @@ class _LevelEditorState extends State<LevelEditor> {
     String title,
     MoveCategory category,
     String? selected,
-    ValueChanged<String?> onChanged,
-  ) => _EditorSection(
+    ValueChanged<String?> onChanged, {
+    VoidCallback? onPick,
+  }) => _EditorSection(
     title: title,
     child: Row(
       children: [
@@ -1163,7 +1188,14 @@ class _LevelEditorState extends State<LevelEditor> {
             onChanged: onChanged,
           ),
         ),
+        if (onPick != null)
+          IconButton(
+            tooltip: '技一覧から選択',
+            onPressed: onPick,
+            icon: const Icon(Icons.playlist_add),
+          ),
         IconButton(
+          tooltip: selected == null ? '新規作成' : '編集',
           onPressed: selected == null
               ? () => _newMove(category)
               : () => _editMove(selected),
@@ -1172,6 +1204,46 @@ class _LevelEditorState extends State<LevelEditor> {
       ],
     ),
   );
+
+  Future<void> _pickSignatures() async {
+    final result = await Navigator.push<Set<String>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TechniquePickerScreen(
+          repository: widget.repository,
+          allowedCategory: MoveCategory.normal,
+          preselected: value.moveIds.toSet(),
+        ),
+      ),
+    );
+    if (result == null) return;
+    var ids = result.toList();
+    if (ids.length > 2) {
+      ids = ids.take(2).toList();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('固有技は各レベル最大2つです（先頭2つを設定）')),
+        );
+      }
+    }
+    update(moves: ids);
+  }
+
+  Future<void> _pickFinisher() async {
+    final result = await Navigator.push<Set<String>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TechniquePickerScreen(
+          repository: widget.repository,
+          allowedCategory: MoveCategory.finisher,
+          multi: false,
+          preselected: value.finisherId == null ? {} : {value.finisherId!},
+        ),
+      ),
+    );
+    if (result == null || result.isEmpty) return;
+    update(finisher: result.first);
+  }
 
   Future<void> _newMove(MoveCategory category) async {
     final now = DateTime.now().microsecondsSinceEpoch;
