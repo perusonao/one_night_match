@@ -489,24 +489,23 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   // ===== Ver.0.7.5：全フェーズ共通レイアウト（①） =====
   // 相手情報 → 現在の状況 → 行動エリア → 直前ログ → 自分情報 → 次の操作。
   // 中央（現在の状況／行動）だけがフェーズで切り替わる。
+  // Ver.0.7.6：縦1画面・スクロールなし。固定の枠（相手/状況/自分/操作）の間で、
+  // 行動エリアだけが残りの高さを埋める（内部スクロールは保険で、通常は出ない）。
   Widget _unified() => Column(
     children: [
       _topBarSlim(),
+      _fighterPanelV2(state.cpu, isCpu: true),
+      _statusRow(),
+      _centerFor(),
       Expanded(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Column(
-            children: [
-              _fighterPanelV2(state.cpu, isCpu: true),
-              _statusRow(),
-              _centerFor(),
-              if (!state.isGameOver) _actionFor(),
-              _recentLogPanel(),
-              _fighterPanelV2(state.player, isCpu: false),
-            ],
-          ),
-        ),
+        child: state.isGameOver
+            ? const SizedBox.shrink()
+            : SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: _actionFor(),
+              ),
       ),
+      _fighterPanelV2(state.player, isCpu: false),
       _nextActionHint(),
       _controlBar(),
     ],
@@ -782,64 +781,116 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     );
   }
 
-  // ===== 現在の状況（②）＋実況（⑫） =====
+  // ===== 現在の状況（②）＋実況（⑫）：縦1画面用コンパクト版 =====
   Widget _centerFor() {
     final atk = state.pendingAttack;
     if (!state.isGameOver &&
         state.phase == LevelMatchPhase.responseSelection &&
         atk?.defenderId == 'player') {
       final m = engine.moves[atk!.moveId]!;
-      return Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                const Text('相手の攻撃！',
-                    style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                        color: _pink)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text('${state.player.wrestler.name}、どう返す!?',
-                      style: const TextStyle(
-                          fontSize: 12, color: Colors.white70)),
-                ),
-              ],
+      final offersPin = m.offersPin && !atk.isBasic;
+      final offersSub = m.offersSubmission && !atk.isBasic;
+      final accent = attributeColor(m.attribute);
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.all(9),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+              colors: [accent.withValues(alpha: 0.25), Colors.black26]),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: accent.withValues(alpha: 0.7)),
+        ),
+        child: Row(
+          children: [
+            attributeBadge(m.attribute, size: 40),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Text('相手の攻撃！',
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                              color: _pink)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text('${state.cpu.wrestler.name}の${m.name}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      _statChip('威力', '${m.power}', Colors.redAccent),
+                      const SizedBox(width: 12),
+                      _statChip('速度', '${m.speed}', Colors.lightBlueAccent),
+                      const SizedBox(width: 10),
+                      if (offersPin || offersSub)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _gold.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: _gold),
+                          ),
+                          child: Text(offersPin ? 'フォール技' : 'ギブアップ技',
+                              style: const TextStyle(
+                                  color: _gold,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-          _attackCard(atk, m),
-          _liveCommentary(),
-        ],
+          ],
+        ),
       );
     }
     final (head, sub, color) = _situation();
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xff241a30), Color(0xff140f1c)],
-        ),
+            colors: [Color(0xff241a30), Color(0xff140f1c)]),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Text(head,
-              style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.w900, color: color)),
-          if (sub.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(sub,
-                  style: const TextStyle(fontSize: 13, color: Colors.white70)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(head,
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: color)),
+                if (sub.isNotEmpty)
+                  Text(sub,
+                      style: const TextStyle(
+                          fontSize: 12, color: Colors.white70)),
+              ],
             ),
-          const SizedBox(height: 6),
-          _liveCommentary(),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text('🎤 ${_commentaryLines().first}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 11, color: Colors.white60)),
+          ),
         ],
       ),
     );
@@ -896,32 +947,6 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     }
     return lines.isEmpty ? const ['試合を進めよう！'] : lines;
   }
-
-  Widget _liveCommentary() => Container(
-    width: double.infinity,
-    margin: const EdgeInsets.fromLTRB(10, 4, 10, 2),
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    decoration: BoxDecoration(
-      color: Colors.black.withValues(alpha: 0.4),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: Colors.white12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('🎤 実況',
-            style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.bold, color: _pink)),
-        const SizedBox(height: 2),
-        for (final line in _commentaryLines())
-          Padding(
-            padding: const EdgeInsets.only(top: 1),
-            child: Text(line,
-                style: const TextStyle(fontSize: 12.5, height: 1.25)),
-          ),
-      ],
-    ),
-  );
 
   // ===== 行動エリア（フェーズ別） =====
   Widget _actionFor() {
@@ -1158,77 +1183,6 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     );
   }
 
-  // ===== 直前の攻防ログ（⑧⑫） =====
-  Widget _recentLogPanel() {
-    if (state.logs.isEmpty) return const SizedBox.shrink();
-    final recent = state.logs.reversed
-        .where((l) => l.message.trim().isNotEmpty)
-        .take(5)
-        .toList();
-    Color dot(String m) {
-      if (m.contains('返') || m.contains('切り返') || m.contains('潰')) {
-        return Colors.redAccent;
-      }
-      if (m.contains('HEAT')) return _gold;
-      return Colors.greenAccent;
-    }
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text('直前の攻防ログ',
-                  style:
-                      TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-              const Spacer(),
-              InkWell(
-                onTap: _showLogs,
-                child: const Text('ログ詳細',
-                    style: TextStyle(fontSize: 11, color: Colors.white54)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          for (final l in recent)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4, right: 6),
-                    child: Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                          color: dot(l.message), shape: BoxShape.circle),
-                    ),
-                  ),
-                  Text('T${l.turn} ',
-                      style: const TextStyle(
-                          fontSize: 11, color: Colors.white54)),
-                  Expanded(
-                    child: Text(l.message,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11.5)),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
   // ===== 次の操作ヒント（⑩） =====
   (IconData, String) _hintFor() {
     if (state.isGameOver) return (Icons.flag, '試合終了');
@@ -1431,120 +1385,6 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       case _RespKind.take:
         _act(() => engine.respondTake('player'));
     }
-  }
-
-  Widget _attackCard(PendingAttack atk, MoveDefinition m) {
-    final offersPin = m.offersPin && !atk.isBasic;
-    final offersSub = m.offersSubmission && !atk.isBasic;
-    final accent = attributeColor(m.attribute);
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 260),
-      transitionBuilder: (child, anim) => FadeTransition(
-        opacity: anim,
-        child: ScaleTransition(scale: anim, child: child),
-      ),
-      child: Container(
-        key: ValueKey(m.id),
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xff20182b), Color(0xff130f1a)],
-          ),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: accent.withValues(alpha: 0.8), width: 1.5),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Text(
-                  'CPU',
-                  style: TextStyle(
-                    color: _pink,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  state.cpu.wrestler.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Column(
-                  children: [
-                    attributeBadge(m.attribute, size: 40),
-                    const SizedBox(height: 2),
-                    Text(
-                      attributeFullLabel(m.attribute),
-                      style: TextStyle(fontSize: 10, color: accent),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        m.name,
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          _statChip('威力', '${m.power}', Colors.redAccent),
-                          const SizedBox(width: 14),
-                          _statChip('速度', '${m.speed}', Colors.lightBlueAccent),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            if (offersPin || offersSub) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: _gold.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: _gold),
-                    ),
-                    child: Text(
-                      offersPin ? 'フォール技' : 'ギブアップ技',
-                      style: const TextStyle(
-                        color: _gold,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    offersPin ? '倒せばフォールが狙える' : '極めればギブアップが狙える',
-                    style: const TextStyle(fontSize: 11, color: Colors.white70),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _statChip(String label, String value, Color color) => Row(
@@ -1919,59 +1759,113 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
 
   // ===== セットフェイズ（技コスト表示・セット後予測） =====
 
-  Widget _setCardPhase(PlayerLevelMatchState player) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+  Widget _setCardPhase(PlayerLevelMatchState player) {
+    // 同属性カードは ×N に集約（⑤）。
+    final groups = <MoveAttribute, List<TechniqueResourceCard>>{};
+    for (final c in player.hand) {
+      groups.putIfAbsent(c.attribute, () => []).add(c);
+    }
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 8, 0),
+          child: Row(
             children: [
               const Expanded(
-                child: Text(
-                  '1枚セット（任意）',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
+                child: Text('カードをセット（固有技を組み立てる）',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               ),
               TextButton.icon(
                 onPressed: () => _showCostSheet(player),
-                icon: const Icon(Icons.list_alt, size: 18),
-                label: const Text('全Levelコスト'),
+                icon: const Icon(Icons.list_alt, size: 16),
+                label: const Text('全コスト', style: TextStyle(fontSize: 11)),
               ),
             ],
           ),
-          Text(
-            'SET ${_attributeCounts(player.setAttributeCounts)}',
-            style: const TextStyle(fontSize: 12, color: _gold),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text('現在 SET ${_attributeCounts(player.setAttributeCounts)}',
+                style: const TextStyle(fontSize: 11, color: _gold)),
           ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 92,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final entry in groups.entries)
+              _handCardTile(
+                entry.value.first,
+                count: entry.value.length,
+                onTap: () => _previewThenSet(entry.value.first),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: () => _act(() => engine.skipSetCard('player')),
+          child: const Text('セットしない'),
+        ),
+      ],
+    );
+  }
+
+  Widget _handCardTile(
+    TechniqueResourceCard card, {
+    required int count,
+    required VoidCallback onTap,
+  }) {
+    final color = attributeColor(card.attribute);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 104,
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+              colors: [color.withValues(alpha: 0.25), Colors.black26]),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.7)),
+        ),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                for (final card in player.hand)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ActionChip(
-                      avatar: CircleAvatar(
-                        child: Text(moveAttributeLabel(card.attribute)),
-                      ),
-                      label: SizedBox(width: 64, child: Text(card.name)),
-                      onPressed: () => _previewThenSet(card),
-                    ),
-                  ),
+                attributeBadge(card.attribute, size: 26),
+                if (count > 1)
+                  Text('×$count',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w900, fontSize: 14)),
               ],
             ),
-          ),
-          OutlinedButton(
-            onPressed: () => _act(() => engine.skipSetCard('player')),
-            child: const Text('セットしない'),
-          ),
-        ],
+            const SizedBox(height: 4),
+            Text(card.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style:
+                    const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 5),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              decoration: BoxDecoration(
+                  color: _pink, borderRadius: BorderRadius.circular(6)),
+              child: const Text('セット',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   Future<void> _previewThenSet(TechniqueResourceCard card) async {
     final player = state.player;
@@ -2082,108 +1976,189 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     ),
   );
 
+  // ⑪/#3：固有技（セット消費）と単体技（1枚使用）をカードで並べ、
+  // どちらで攻めるかをその場で選べるようにする。スクロールなし（Wrapで収める）。
   Widget _movePhase(PlayerLevelMatchState player) {
-    final moveList = engine.currentMoves(player);
+    final signatures = engine
+        .currentMoves(player)
+        .where((m) => !(m.isCounterMove && !m.canUseAsNormalMove))
+        .toList();
+    final seen = <MoveAttribute>{};
+    final basics = <TechniqueResourceCard>[];
+    for (final c in player.hand) {
+      if (engine.basicMoveFor(c.attribute) != null && seen.add(c.attribute)) {
+        basics.add(c);
+      }
+    }
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Padding(
-            padding: EdgeInsets.only(left: 4, top: 4, bottom: 2),
-            child: Text(
-              '固有技（セット消費・決着可）',
-              style: TextStyle(fontWeight: FontWeight.bold, color: _gold),
-            ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(12, 2, 12, 2),
+          child: Text('固有技（セットを消費・決着可）',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, color: _gold, fontSize: 13)),
+        ),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
+          children: [for (final m in signatures) _signatureCard(player, m)],
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(12, 8, 12, 2),
+          child: Text('単体技（カード1枚で使用・コスト不要）',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white70,
+                  fontSize: 13)),
+        ),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
+          children: [for (final c in basics) _basicMoveCard(c)],
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: OutlinedButton(
+            onPressed: () => _act(() => engine.skipMove('player')),
+            child: const Text('技を使わず終了'),
           ),
         ),
-        for (final move in moveList)
-          Builder(
-            builder: (_) {
-              final availability = engine.evaluateMove(player, move);
-              final isCounter = move.isCounterMove && !move.canUseAsNormalMove;
-              final tags = <String>[
-                if (move.offersPin) 'フォール',
-                if (move.offersSubmission) 'ギブアップ',
-                if (move.causesDown) 'ダウン',
-                if (move.category == MoveCategory.finisher) 'FINISHER',
-                if (isCounter) '返し(対応専用)',
-              ];
-              return Card(
-                child: ListTile(
-                  title: Text(
-                    '${move.name}${tags.isEmpty ? "" : "  [${tags.join("/")}]"}',
-                  ),
-                  subtitle: Text(
-                    '${moveAttributeLabel(move.attribute)} / 攻撃 ${move.power} / 速度 ${move.speed} / HEAT ${move.heat >= 0 ? "+" : ""}${move.heat}\n'
-                    '必要 ${_attributeCounts(move.requiredCards)} / 現在 ${_attributeCounts(player.setAttributeCounts)}\n'
-                    '${availability.usable ? "使用可能" : "使用不可: ${availability.reasons.join(" / ")}"}',
-                  ),
-                  isThreeLine: true,
-                  trailing: FilledButton(
-                    onPressed: (availability.usable && !isCounter)
-                        ? () => _useMove(move)
-                        : null,
-                    child: Text(isCounter ? '対応専用' : '使用'),
-                  ),
-                  onTap: () => _showMove(move, availability),
-                ),
-              );
-            },
+      ],
+    );
+  }
+
+  Widget _moveTile({
+    required MoveAttribute attribute,
+    required String name,
+    required int damage,
+    required int speed,
+    required List<String> tags,
+    required bool usable,
+    String? lockedText,
+    required Color ctaColor,
+    required String ctaLabel,
+    required VoidCallback? onTap,
+  }) {
+    final color = attributeColor(attribute);
+    return Opacity(
+      opacity: usable ? 1 : 0.55,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 158,
+          padding: const EdgeInsets.all(9),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+                colors: [color.withValues(alpha: 0.22), Colors.black26]),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withValues(alpha: 0.7)),
           ),
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Padding(
-            padding: EdgeInsets.only(left: 4, top: 8, bottom: 2),
-            child: Text(
-              '単体技（手札から直接・コスト不要・決着不可）',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70),
-            ),
-          ),
-        ),
-        SizedBox(
-          height: 92,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (final card in player.hand)
-                Builder(
-                  builder: (_) {
-                    final basic = engine.basicMoveFor(card.attribute);
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ActionChip(
-                        avatar: CircleAvatar(
-                          child: Text(moveAttributeLabel(card.attribute)),
-                        ),
-                        label: SizedBox(
-                          width: 92,
-                          child: Text(
-                            basic == null
-                                ? card.name
-                                : '${basic.name}\n威力${basic.power} 速${basic.speed}',
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                        ),
-                        onPressed: basic == null
-                            ? null
-                            : () => _act(
-                                () => engine.useBasicMove(
-                                  'player',
-                                  card.instanceId,
-                                ),
-                              ),
-                      ),
-                    );
-                  },
+              Row(
+                children: [
+                  attributeBadge(attribute, size: 26),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w900, fontSize: 13)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  _statChip('ダメージ', '$damage', Colors.redAccent),
+                  const SizedBox(width: 10),
+                  _statChip('速度', '$speed', Colors.lightBlueAccent),
+                ],
+              ),
+              if (tags.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(tags.join(' / '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 9.5,
+                          color: _gold,
+                          fontWeight: FontWeight.bold)),
                 ),
+              const SizedBox(height: 5),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                decoration: BoxDecoration(
+                  color: usable ? ctaColor : Colors.white12,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(usable ? ctaLabel : (lockedText ?? '使用不可'),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        color: usable ? Colors.white : Colors.white54)),
+              ),
             ],
           ),
         ),
-        OutlinedButton(
-          onPressed: () => _act(() => engine.skipMove('player')),
-          child: const Text('技を使わず終了'),
-        ),
-      ],
+      ),
+    );
+  }
+
+  Widget _signatureCard(PlayerLevelMatchState player, MoveDefinition m) {
+    final availability = engine.evaluateMove(player, m);
+    final usable = availability.usable;
+    final tags = <String>[
+      if (m.offersPin) 'フォール',
+      if (m.offersSubmission) 'ギブアップ',
+      if (m.category == MoveCategory.finisher) 'FINISHER',
+    ];
+    String? locked;
+    if (!usable) {
+      final counts = player.setAttributeCounts;
+      final lacks = <String>[];
+      for (final e in m.requiredCards.entries) {
+        final short = e.value - (counts[e.key] ?? 0);
+        if (short > 0) lacks.add('${moveAttributeLabel(e.key)}あと$short');
+      }
+      locked = lacks.isEmpty ? 'セットが必要' : lacks.join(' ');
+    }
+    return _moveTile(
+      attribute: m.attribute,
+      name: m.name,
+      damage: m.power,
+      speed: m.speed,
+      tags: tags,
+      usable: usable,
+      lockedText: locked,
+      ctaColor: _gold,
+      ctaLabel: 'この固有技を使う',
+      onTap: usable ? () => _useMove(m) : null,
+    );
+  }
+
+  Widget _basicMoveCard(TechniqueResourceCard card) {
+    final basic = engine.basicMoveFor(card.attribute)!;
+    return _moveTile(
+      attribute: card.attribute,
+      name: basic.name,
+      damage: basic.power,
+      speed: basic.speed,
+      tags: const [],
+      usable: true,
+      ctaColor: _pink,
+      ctaLabel: 'この技で攻撃',
+      onTap: () => _act(() => engine.useBasicMove('player', card.instanceId)),
     );
   }
 
@@ -2511,24 +2486,6 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       ),
     );
   }
-
-  void _showMove(
-    MoveDefinition move,
-    MoveAvailability availability,
-  ) => showDialog<void>(
-    context: context,
-    builder: (_) => AlertDialog(
-      title: Text(move.name),
-      content: Text(
-        '属性 ${moveAttributeLabel(move.attribute)}\n攻撃力 ${move.power}\nHEAT ${move.heat}\n'
-        '必要 ${_attributeCounts(move.requiredCards)}\n破棄 ${_attributeCounts(move.discardAfterUse)}\n'
-        '${move.offersPin ? "フォール強度(基礎) ${move.pinPower}\n" : ""}'
-        '${move.offersSubmission ? "ギブアップ強度(基礎) ${move.submissionPower}\n" : ""}'
-        '追加判定 ${move.additionalChecks.map(additionalCheckLabel).join(", ")}\n'
-        '${availability.usable ? "使用可能" : availability.reasons.join("\n")}',
-      ),
-    ),
-  );
 
   void _showLogs() {
     // ターンごとにグルーピングした試合ログ。

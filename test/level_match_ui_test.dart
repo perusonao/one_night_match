@@ -58,9 +58,7 @@ void main() {
     expect(find.text('受ける'), findsWidgets);
     // Ver.0.7.5：全フェーズ共通の枠（状況・実況・次の操作）。
     expect(find.text('試合の流れ'), findsOneWidget);
-    expect(find.text('🎤 実況'), findsWidgets);
     expect(find.text('次の操作'), findsOneWidget);
-    expect(find.text('直前の攻防ログ'), findsWidgets);
     // レイアウト例外（オーバーフロー等）が出ていないこと。
     expect(tester.takeException(), isNull);
   });
