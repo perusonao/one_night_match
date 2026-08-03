@@ -14,6 +14,7 @@ enum LevelMatchPhase {
   unlockCheck,
   levelChange,
   chooseMove,
+  responseSelection,
   resolveMove,
   pinDecision,
   kickOutDecision,
@@ -27,8 +28,30 @@ enum LevelMatchPhase {
 /// deckOut も Ver.0.6 で新規には出さない（山札切れは疲労へ）。exhaustion は安全弁。
 enum LevelFinishReason { hpZero, deckOut, pinfall, submission, exhaustion }
 
-/// Ver.0.7 Phase B: 相手の前ターン技に対する解決結果。
+/// Ver.0.7 Phase B: 攻防クラッシュの結果（レスポンダー視点）。
+/// counter/speedWin = レスポンダーの勝ち、speedLoss/neutral = 攻撃側の勝ち。
 enum ClashOutcome { counter, speedWin, speedLoss, neutral }
+
+/// Ver.0.7.1: 宣言された攻撃（相手のレスポンス待ち）。
+class PendingAttack {
+  PendingAttack({
+    required this.attackerId,
+    required this.defenderId,
+    required this.moveId,
+    required this.isBasic,
+  });
+  final String attackerId;
+  final String defenderId;
+  final String moveId;
+  final bool isBasic;
+
+  Map<String, dynamic> toJson() => {
+    'attackerId': attackerId,
+    'defenderId': defenderId,
+    'moveId': moveId,
+    'isBasic': isBasic,
+  };
+}
 
 /// Ver.0.6 バランス定数。
 const int kKickOutPenaltyStep = 5; // キックアウト成功ごとの必要HP増加
@@ -243,7 +266,7 @@ class LevelMatchState {
   });
 
   final String gameId;
-  final String version = '0.6';
+  final String version = '0.7';
   final String mode = 'levelCardMatch';
   LevelMatchPhase phase = LevelMatchPhase.setup;
   final PlayerLevelMatchState player;
@@ -261,6 +284,9 @@ class LevelMatchState {
   String? unlockNotice;
   final DateTime startedAt;
   DateTime? finishedAt;
+
+  // Ver.0.7.1: 宣言中の攻撃（相手のレスポンス待ち）。
+  PendingAttack? pendingAttack;
 
   // Ver.0.5: 進行中のフォール／ギブアップ判定と決着メタ情報。
   PendingPin? pendingPin;
@@ -567,6 +593,7 @@ class LevelMatchEngine {
     return MoveAvailability(reasons.isEmpty, reasons);
   }
 
+  /// Ver.0.7.1: 固有技を「宣言」する（相手のレスポンス待ちへ）。
   void useMove(String playerId, String moveId) {
     final actor = _requireTurn(playerId);
     if (state.phase != LevelMatchPhase.chooseMove) {
@@ -574,81 +601,284 @@ class LevelMatchEngine {
     }
     final move = moves[moveId];
     if (move == null) throw StateError('技が見つかりません');
+    if (move.isCounterMove && !move.canUseAsNormalMove) {
+      throw StateError('返し技は相手の技に対応するときだけ使えます');
+    }
     final availability = evaluateMove(actor, move);
     if (!availability.usable) throw StateError(availability.reasons.join('\n'));
-    final target = state.defender;
-    state.phase = LevelMatchPhase.resolveMove;
-    final resistance = target.levelCard.resistances[move.attribute] ?? 0;
-    var damage = max(0, move.power - resistance);
-    // Ver.0.7 Phase B: 相手の前ターン技との速度／返し比較で解決を補正。
-    final clash = clashOutcome(actor, move);
-    var clashHeat = 0;
-    var suppressFinish = false;
-    switch (clash) {
-      case ClashOutcome.counter:
-        clashHeat += 5; // 返し成立：相手の勢いを断つ
-        target
-          ..lastUsedMoveId = null
-          ..lastUsedMoveName = null
-          ..lastUsedMoveSpeed = null;
-      case ClashOutcome.speedWin:
-        clashHeat += 1; // 速度で上回り先に命中
-      case ClashOutcome.speedLoss:
-        damage = (damage / 2).floor(); // 速度負け：威力半減・決着不可
-        suppressFinish = true;
-      case ClashOutcome.neutral:
-        break;
-    }
-    final hpBefore = target.currentHp;
-    final heatBefore = state.sharedHeat;
-    target.currentHp = max(0, target.currentHp - damage);
-    actor.damageDealtCount++;
-    target.damageTakenCount++;
-    final firstAttribute =
-        (actor.attributeSuccessCounts[move.attribute] ?? 0) == 0;
-    actor.attributeSuccessCounts[move.attribute] =
-        (actor.attributeSuccessCounts[move.attribute] ?? 0) + 1;
+    _declareAttack(actor, move, isBasic: false);
+  }
+
+  void _declareAttack(
+    PlayerLevelMatchState actor,
+    MoveDefinition move, {
+    required bool isBasic,
+  }) {
+    // 宣言＝コミット。使用回数を加算し、コストを消費（失敗しても戻らない）。
     actor.moveUsageCounts[move.id] = (actor.moveUsageCounts[move.id] ?? 0) + 1;
-    actor.levelUsedCounts[actor.currentLevel] =
-        (actor.levelUsedCounts[actor.currentLevel] ?? 0) + 1;
-    if (damage > 0) {
-      actor.levelMoveSuccessCounts[actor.currentLevel] =
-          (actor.levelMoveSuccessCounts[actor.currentLevel] ?? 0) + 1;
-    }
-    var heatDelta = move.heat + clashHeat;
-    if (damage > 0 && firstAttribute) heatDelta++;
-    if (actor.currentHp <= 30) heatDelta++;
-    final fromFinisher = move.category == MoveCategory.finisher;
     actor.previousMoveId = move.id;
-    actor.lastUsedMoveId = move.id;
-    actor.lastUsedMoveName = move.name;
-    actor.lastUsedMoveSpeed = move.speed;
-    actor.lastUsedWasBasic = false;
-    if (fromFinisher) {
-      heatDelta += 3;
+    if (move.category == MoveCategory.finisher) {
       actor.finisherUsed = true;
       actor.finisherUsedTurn = state.turnNumber;
+    }
+    final consumed = isBasic
+        ? const <TechniqueResourceCard>[]
+        : _consumeCost(actor, move);
+    final defender = state.defender;
+    state.pendingAttack = PendingAttack(
+      attackerId: actor.playerId,
+      defenderId: defender.playerId,
+      moveId: move.id,
+      isBasic: isBasic,
+    );
+    state.phase = LevelMatchPhase.responseSelection;
+    state.lastMove = move.name;
+    state.lastMoveId = move.id;
+    _log(
+      actor,
+      'attackDeclared',
+      '${move.name}を繰り出す（${isBasic ? "単体技" : "固有技"}・速度${move.speed}）',
+      {
+        'moveId': move.id,
+        'basic': isBasic,
+        'attribute': move.attribute.name,
+        'speed': move.speed,
+        'power': move.power,
+        'consumedSetCards': consumed.map((e) => e.toJson()).toList(),
+        'offersPin': move.offersPin && !isBasic,
+        'offersSubmission': move.offersSubmission && !isBasic,
+        'causesDown': move.causesDown && !isBasic,
+      },
+    );
+  }
+
+  List<TechniqueResourceCard> _consumeCost(
+    PlayerLevelMatchState actor,
+    MoveDefinition move,
+  ) {
+    // Ver.0.7.1: 固有技は「必要コスト」をセットから消費（再使用に再セットが必要）。
+    final cost = move.consumesSetCards ? move.requiredCards : move.discardAfterUse;
+    return _discardSetCards(actor, cost);
+  }
+
+  /// 最終ダメージを5刻みに丸める（0か最低5）。
+  int _roundDamage(int raw) {
+    if (raw <= 0) return 0;
+    final rounded = (raw / 5).round() * 5;
+    return rounded <= 0 ? 5 : rounded;
+  }
+
+  /// 攻撃 attack に対して response が勝つか（レスポンダー視点）。
+  ClashOutcome clashBetween(MoveDefinition attack, MoveDefinition response) {
+    final canCounter =
+        response.counterTypes.contains(attack.attribute) ||
+        (response.category == MoveCategory.counter &&
+            (response.counterTypes.isEmpty ||
+                response.counterTypes.contains(attack.attribute)));
+    final blocked =
+        attack.specialAbilities.contains('cannotCounter') ||
+        response.cannotCounterTypes.contains(attack.attribute) ||
+        attack.cannotCounterTypes.contains(response.attribute);
+    if (canCounter && !blocked) return ClashOutcome.counter;
+    if (response.speed > attack.speed) return ClashOutcome.speedWin;
+    if (response.speed < attack.speed) return ClashOutcome.speedLoss;
+    return ClashOutcome.neutral;
+  }
+
+  /// レスポンスとして move を使えるか。返し技は対応する攻撃がある時のみ。
+  MoveAvailability responseAvailability(
+    PlayerLevelMatchState defender,
+    MoveDefinition move, {
+    required bool isBasic,
+  }) {
+    final atk = state.pendingAttack;
+    if (atk == null) return const MoveAvailability(false, ['対応する攻撃がありません']);
+    final attack = moves[atk.moveId];
+    if (attack == null) return const MoveAvailability(false, ['攻撃技が不明です']);
+    if (move.isCounterMove && !move.canUseAsNormalMove) {
+      // 返し技は「対応成立」する時だけ使える。
+      if (clashBetween(attack, move) != ClashOutcome.counter) {
+        return const MoveAvailability(false, ['この攻撃には対応できません']);
+      }
+    }
+    if (isBasic) return const MoveAvailability(true, []);
+    return evaluateMove(defender, move);
+  }
+
+  /// 防御側：技を受ける（宣言された攻撃がそのまま成立）。
+  void respondTake(String playerId) {
+    final atk = state.pendingAttack;
+    if (state.phase != LevelMatchPhase.responseSelection || atk == null) {
+      throw StateError('対応できる局面ではありません');
+    }
+    if (atk.defenderId != playerId) throw StateError('対応できるのは防御側です');
+    _log(state.byId(playerId), 'responseTake', '${state.byId(playerId).wrestler.name}は技を受ける');
+    _resolveExchange(response: null, responder: null, responseIsBasic: false);
+  }
+
+  /// 防御側：固有技でレスポンスする。
+  void respondWithMove(String playerId, String moveId) {
+    final atk = state.pendingAttack;
+    if (state.phase != LevelMatchPhase.responseSelection || atk == null) {
+      throw StateError('対応できる局面ではありません');
+    }
+    if (atk.defenderId != playerId) throw StateError('対応できるのは防御側です');
+    final defender = state.byId(playerId);
+    final move = moves[moveId];
+    if (move == null) throw StateError('技が見つかりません');
+    final avail = responseAvailability(defender, move, isBasic: false);
+    if (!avail.usable) throw StateError(avail.reasons.join('\n'));
+    defender.moveUsageCounts[move.id] =
+        (defender.moveUsageCounts[move.id] ?? 0) + 1;
+    defender.previousMoveId = move.id;
+    if (move.category == MoveCategory.finisher) {
+      defender.finisherUsed = true;
+      defender.finisherUsedTurn = state.turnNumber;
+    }
+    _consumeCost(defender, move);
+    _resolveExchange(response: move, responder: defender, responseIsBasic: false);
+  }
+
+  /// 防御側：単体技でレスポンスする。
+  void respondWithBasic(String playerId, String cardInstanceId) {
+    final atk = state.pendingAttack;
+    if (state.phase != LevelMatchPhase.responseSelection || atk == null) {
+      throw StateError('対応できる局面ではありません');
+    }
+    if (atk.defenderId != playerId) throw StateError('対応できるのは防御側です');
+    final defender = state.byId(playerId);
+    final index = defender.hand.indexWhere(
+      (c) => c.instanceId == cardInstanceId,
+    );
+    if (index < 0) throw StateError('手札にカードがありません');
+    final card = defender.hand[index];
+    final move = basicMoveFor(card.attribute);
+    if (move == null) throw StateError('この属性の単体技がありません');
+    defender.hand.removeAt(index);
+    defender.discardPile.add(card);
+    defender.previousMoveId = move.id;
+    _resolveExchange(response: move, responder: defender, responseIsBasic: true);
+  }
+
+  void _resolveExchange({
+    required MoveDefinition? response,
+    required PlayerLevelMatchState? responder,
+    required bool responseIsBasic,
+  }) {
+    final atk = state.pendingAttack!;
+    final attacker = state.byId(atk.attackerId);
+    final defender = state.byId(atk.defenderId);
+    final attackMove = moves[atk.moveId]!;
+    state.pendingAttack = null;
+    if (response == null) {
+      _land(
+        winner: attacker,
+        loser: defender,
+        move: attackMove,
+        isBasic: atk.isBasic,
+        isCounter: false,
+        clash: ClashOutcome.neutral,
+      );
+      return;
+    }
+    final clash = clashBetween(attackMove, response);
+    final responderWins =
+        clash == ClashOutcome.counter || clash == ClashOutcome.speedWin;
+    _log(responder!, 'clashResolution', responderWins
+        ? '${response.name}が${attackMove.name}を上回った（${clash.name}）'
+        : '${attackMove.name}が${response.name}を振り切った（${clash.name}）', {
+      'attackMove': attackMove.id,
+      'attackSpeed': attackMove.speed,
+      'responseMove': response.id,
+      'responseSpeed': response.speed,
+      'outcome': clash.name,
+      'winner': responderWins ? responder.playerId : attacker.playerId,
+    });
+    if (responderWins) {
+      _land(
+        winner: responder,
+        loser: attacker,
+        move: response,
+        isBasic: responseIsBasic,
+        isCounter: clash == ClashOutcome.counter,
+        clash: clash,
+      );
+    } else {
+      _land(
+        winner: attacker,
+        loser: defender,
+        move: attackMove,
+        isBasic: atk.isBasic,
+        isCounter: false,
+        clash: clash,
+      );
+    }
+  }
+
+  /// 勝った側の技を成立させる（ダメージ＋決着分岐）。
+  void _land({
+    required PlayerLevelMatchState winner,
+    required PlayerLevelMatchState loser,
+    required MoveDefinition move,
+    required bool isBasic,
+    required bool isCounter,
+    required ClashOutcome clash,
+  }) {
+    state.phase = LevelMatchPhase.resolveMove;
+    final resistance = loser.levelCard.resistances[move.attribute] ?? 0;
+    final damage = _roundDamage(move.power - resistance);
+    final hpBefore = loser.currentHp;
+    final heatBefore = state.sharedHeat;
+    loser.currentHp = max(0, loser.currentHp - damage);
+    winner.damageDealtCount++;
+    loser.damageTakenCount++;
+    final firstAttribute =
+        (winner.attributeSuccessCounts[move.attribute] ?? 0) == 0;
+    winner.attributeSuccessCounts[move.attribute] =
+        (winner.attributeSuccessCounts[move.attribute] ?? 0) + 1;
+    winner.levelUsedCounts[winner.currentLevel] =
+        (winner.levelUsedCounts[winner.currentLevel] ?? 0) + 1;
+    if (damage > 0) {
+      winner.levelMoveSuccessCounts[winner.currentLevel] =
+          (winner.levelMoveSuccessCounts[winner.currentLevel] ?? 0) + 1;
+    }
+    final fromFinisher = move.category == MoveCategory.finisher;
+    var heatDelta = move.heat;
+    if (isCounter) {
+      heatDelta += 5;
+    } else if (clash == ClashOutcome.speedWin) {
+      heatDelta += 1;
+    }
+    if (damage > 0 && firstAttribute) heatDelta++;
+    if (winner.currentHp <= 30) heatDelta++;
+    if (fromFinisher) {
+      heatDelta += 3;
       state.pendingAnimation = move.name;
     }
-    final discarded = _discardSetCards(actor, move.discardAfterUse);
+    winner
+      ..lastUsedMoveId = move.id
+      ..lastUsedMoveName = move.name
+      ..lastUsedMoveSpeed = move.speed
+      ..lastUsedWasBasic = isBasic;
+    // 成立した技のみ表示。負けた側の直前技はリセット（Speedを持ち越さない）。
+    loser
+      ..lastUsedMoveId = null
+      ..lastUsedMoveName = null
+      ..lastUsedMoveSpeed = null;
     state.sharedHeat += heatDelta;
     state.lastMove = move.name;
     state.lastMoveId = move.id;
     state.lastDamage = damage;
-
-    // Ver.0.5: このダメージで相手HPが0に到達した記録（試合は継続する）。
-    if (target.currentHp <= 0 && target.hpZeroReachedTurn == null) {
-      target.hpZeroReachedTurn = state.turnNumber;
-      _log(target, 'hpZeroReached', '${target.wrestler.name}のHPが0に到達（試合は継続）', {
+    if (loser.currentHp <= 0 && loser.hpZeroReachedTurn == null) {
+      loser.hpZeroReachedTurn = state.turnNumber;
+      _log(loser, 'hpZeroReached', '${loser.wrestler.name}のHPが0に到達（試合は継続）', {
         'turn': state.turnNumber,
       });
     }
-
-    // ダウン判定用に、この技を受ける前のダウン状態を保持。
-    final targetWasDown = target.isDown;
-
-    _log(actor, 'useMove', '${move.name}！ $damageダメージ', {
+    final loserWasDown = loser.isDown;
+    _log(winner, 'moveResolved', '${move.name}成立！ $damageダメージ', {
       'selectedMove': move.id,
+      'basic': isBasic,
       'moveAttribute': move.attribute.name,
       'movePower': move.power,
       'targetResistance': resistance,
@@ -656,73 +886,46 @@ class LevelMatchEngine {
       'heatBefore': heatBefore,
       'heatDelta': heatDelta,
       'heatAfter': state.sharedHeat,
-      'discardedSetCards': discarded.map((item) => item.toJson()).toList(),
       'targetHpBefore': hpBefore,
-      'targetHpAfter': target.currentHp,
-      'additionalChecks': move.additionalChecks
-          .map((item) => item.name)
-          .toList(),
-      'offersPin': move.offersPin,
-      'offersSubmission': move.offersSubmission,
-      'causesDown': move.causesDown,
+      'targetHpAfter': loser.currentHp,
+      'isCounter': isCounter,
       'clash': clash.name,
-      'suppressFinish': suppressFinish,
+      'offersPin': move.offersPin && !isBasic,
+      'offersSubmission': move.offersSubmission && !isBasic,
     });
-    if (clash != ClashOutcome.neutral) {
-      _log(actor, 'clash', switch (clash) {
-        ClashOutcome.counter => '返し成立！ 相手の技を切り返した',
-        ClashOutcome.speedWin => '速度で上回り先に命中',
-        ClashOutcome.speedLoss => '速度負け：威力半減・決着不可',
-        ClashOutcome.neutral => '',
-      }, {
-        'outcome': clash.name,
-        'moveSpeed': move.speed,
-        'opponentLastSpeed': _opponentOf(actor).lastUsedMoveSpeed,
-      });
-    }
-    evaluateUnlocks(actor);
-    evaluateUnlocks(target);
-
-    // Ver.0.7: 速度負け時は決着・状態変化を発生させない。
-    if (suppressFinish) {
-      endTurn();
-      return;
-    }
-
-    // Ver.0.7 Phase B: コーナー／場外の状態付与（将来拡張の土台）。
-    if (move.causesCorner) target.isCornered = true;
-    if (move.causesOutside) target.isOutside = true;
-
-    // Ver.0.5: 打撃KOはダウンへ（即勝利にしない）。
-    if (move.causesDown && !target.isDown) {
-      target.isDown = true;
-      _log(target, 'down', '${target.wrestler.name}がダウン！', {
-        'until': 'nextTurnStart',
-        'nextPinBonus': 5,
-      });
-    }
-
-    // Ver.0.5: フォール／ギブアップへの分岐。
-    if (move.offersPin) {
-      _beginPin(
-        attacker: actor,
-        defender: target,
-        move: move,
-        damage: damage,
-        fromFinisher: fromFinisher,
-        targetWasDown: targetWasDown,
-      );
-      return;
-    }
-    if (move.offersSubmission) {
-      _beginSubmission(
-        attacker: actor,
-        defender: target,
-        move: move,
-        damage: damage,
-        fromFinisher: fromFinisher,
-      );
-      return;
+    evaluateUnlocks(winner);
+    evaluateUnlocks(loser);
+    if (!isBasic) {
+      if (move.causesCorner) loser.isCornered = true;
+      if (move.causesOutside) loser.isOutside = true;
+      if (move.causesDown && !loser.isDown) {
+        loser.isDown = true;
+        _log(loser, 'down', '${loser.wrestler.name}がダウン！', {
+          'until': 'nextTurnStart',
+          'nextPinBonus': 5,
+        });
+      }
+      if (move.offersPin) {
+        _beginPin(
+          attacker: winner,
+          defender: loser,
+          move: move,
+          damage: damage,
+          fromFinisher: fromFinisher,
+          targetWasDown: loserWasDown,
+        );
+        return;
+      }
+      if (move.offersSubmission) {
+        _beginSubmission(
+          attacker: winner,
+          defender: loser,
+          move: move,
+          damage: damage,
+          fromFinisher: fromFinisher,
+        );
+        return;
+      }
     }
     endTurn();
   }
@@ -827,7 +1030,7 @@ class LevelMatchEngine {
     return null;
   }
 
-  /// Ver.0.7: 手札のカードを単体技として直接使用する（コスト不要・決着不可）。
+  /// Ver.0.7.1: 手札のカードを単体技として「宣言」する（相手のレスポンス待ちへ）。
   void useBasicMove(String playerId, String cardInstanceId) {
     final actor = _requireTurn(playerId);
     if (state.phase != LevelMatchPhase.chooseMove) {
@@ -840,57 +1043,10 @@ class LevelMatchEngine {
     final card = actor.hand[cardIndex];
     final move = basicMoveFor(card.attribute);
     if (move == null) throw StateError('この属性の単体技がありません');
-    final target = state.defender;
-    state.phase = LevelMatchPhase.resolveMove;
+    // 宣言＝コミット：手札から捨て札へ。
     actor.hand.removeAt(cardIndex);
     actor.discardPile.add(card);
-    final resistance = target.levelCard.resistances[move.attribute] ?? 0;
-    var damage = max(0, move.power - resistance);
-    // Ver.0.7 Phase B: 単体技も速度比較の対象（返しは固有技のみ）。
-    final clash = clashOutcome(actor, move);
-    var clashHeat = 0;
-    if (clash == ClashOutcome.speedWin) {
-      clashHeat += 1;
-    } else if (clash == ClashOutcome.speedLoss) {
-      damage = (damage / 2).floor();
-    }
-    final hpBefore = target.currentHp;
-    target.currentHp = max(0, target.currentHp - damage);
-    actor.damageDealtCount++;
-    target.damageTakenCount++;
-    final firstAttribute =
-        (actor.attributeSuccessCounts[move.attribute] ?? 0) == 0;
-    actor.attributeSuccessCounts[move.attribute] =
-        (actor.attributeSuccessCounts[move.attribute] ?? 0) + 1;
-    actor.previousMoveId = move.id;
-    actor.lastUsedMoveId = move.id;
-    actor.lastUsedMoveName = move.name;
-    actor.lastUsedMoveSpeed = move.speed;
-    actor.lastUsedWasBasic = true;
-    var heatDelta = move.heat + clashHeat;
-    if (damage > 0 && firstAttribute) heatDelta++;
-    state.sharedHeat += heatDelta;
-    state.lastMove = move.name;
-    state.lastMoveId = move.id;
-    state.lastDamage = damage;
-    if (target.currentHp <= 0 && target.hpZeroReachedTurn == null) {
-      target.hpZeroReachedTurn = state.turnNumber;
-    }
-    _log(actor, 'useBasicMove', '${move.name}（単体技）！ $damageダメージ', {
-      'selectedMove': move.id,
-      'basic': true,
-      'moveAttribute': move.attribute.name,
-      'movePower': move.power,
-      'speed': move.speed,
-      'finalDamage': damage,
-      'heatDelta': heatDelta,
-      'targetHpBefore': hpBefore,
-      'targetHpAfter': target.currentHp,
-    });
-    evaluateUnlocks(actor);
-    evaluateUnlocks(target);
-    // 単体技は決着（フォール／ギブアップ／KO）を発生させない。
-    endTurn();
+    _declareAttack(actor, move, isBasic: true);
   }
 
   // ===== Ver.0.5: フォール（3カウント） =====
@@ -1139,13 +1295,18 @@ class LevelMatchEngine {
       final result = _evaluateUnlock(condition, actor, level.level);
       values.add(result.$1);
       supported = supported && result.$2;
-      details.add(result.$3);
+      // Ver.0.7.1: 各条件の成立/未成立を明示（✓/×）。
+      details.add('${result.$1 ? "✓" : "×"} ${result.$3}');
     }
     final satisfied =
         values.isNotEmpty &&
         (group.operator == ConditionOperator.and
             ? values.every((value) => value)
             : values.any((value) => value));
+    if (satisfied && supported && details.isNotEmpty) {
+      final label = group.operator == ConditionOperator.and ? 'AND成立' : 'OR成立';
+      details.insert(0, label);
+    }
     return UnlockEvaluation(
       level: level.level,
       satisfied: satisfied && supported,
@@ -1168,6 +1329,8 @@ class LevelMatchEngine {
         return state.pendingPin?.defenderId;
       case LevelMatchPhase.submissionDecision:
         return state.pendingSubmission?.defenderId;
+      case LevelMatchPhase.responseSelection:
+        return state.pendingAttack?.defenderId;
       case LevelMatchPhase.setCard:
       case LevelMatchPhase.levelChange:
       case LevelMatchPhase.chooseMove:
@@ -1198,6 +1361,8 @@ class LevelMatchEngine {
         _autoKickOut(actor);
       case LevelMatchPhase.submissionDecision:
         _autoEscape(actor);
+      case LevelMatchPhase.responseSelection:
+        _autoRespond(actor);
       case LevelMatchPhase.setCard:
         _autoSetCard(actor);
       case LevelMatchPhase.levelChange:
@@ -1206,6 +1371,58 @@ class LevelMatchEngine {
         _autoChooseMove(actor);
       default:
         break;
+    }
+  }
+
+  /// 防御側の自動レスポンス（返し＞速度勝ち＞受ける）。
+  void _autoRespond(PlayerLevelMatchState defender) {
+    final atk = state.pendingAttack!;
+    final attackMove = moves[atk.moveId]!;
+    // 候補：使用可能な固有技＋手札の単体技。
+    final signatureOptions = _currentMoves(defender)
+        .where((m) => responseAvailability(defender, m, isBasic: false).usable)
+        .toList();
+    final basicCards = defender.hand
+        .where((c) => basicMoveFor(c.attribute) != null)
+        .toList();
+    // 勝てるレスポンスを探す（counter を最優先）。
+    MoveDefinition? bestSig;
+    var bestSigScore = 0;
+    for (final m in signatureOptions) {
+      final clash = clashBetween(attackMove, m);
+      final win = clash == ClashOutcome.counter
+          ? 100
+          : clash == ClashOutcome.speedWin
+          ? 50
+          : 0;
+      final score = win + m.power;
+      if (win > 0 && score > bestSigScore) {
+        bestSigScore = score;
+        bestSig = m;
+      }
+    }
+    TechniqueResourceCard? bestBasic;
+    var bestBasicScore = 0;
+    for (final c in basicCards) {
+      final m = basicMoveFor(c.attribute)!;
+      final clash = clashBetween(attackMove, m);
+      if (clash == ClashOutcome.speedWin) {
+        final score = 50 + m.power;
+        if (score > bestBasicScore) {
+          bestBasicScore = score;
+          bestBasic = c;
+        }
+      }
+    }
+    // 攻撃が決着技（強い脅威）なら、勝てる手があれば必ず出す。
+    if (bestSig != null && bestSigScore >= bestBasicScore) {
+      _log(defender, 'cpuDecision', '返し/速度で対応: ${bestSig.name}', {});
+      respondWithMove(defender.playerId, bestSig.id);
+    } else if (bestBasic != null) {
+      _log(defender, 'cpuDecision', '単体技で対応', {});
+      respondWithBasic(defender.playerId, bestBasic.instanceId);
+    } else {
+      respondTake(defender.playerId);
     }
   }
 
@@ -1260,9 +1477,11 @@ class LevelMatchEngine {
 
   void _autoChooseMove(PlayerLevelMatchState actor) {
     final id = actor.playerId;
-    final candidates = _currentMoves(
-      actor,
-    ).where((move) => evaluateMove(actor, move).usable).toList();
+    final candidates = _currentMoves(actor)
+        // 返し技は攻撃として宣言できない（canUseAsNormalMove を除く）。
+        .where((move) => !move.isCounterMove || move.canUseAsNormalMove)
+        .where((move) => evaluateMove(actor, move).usable)
+        .toList();
     if (candidates.isEmpty) {
       // Ver.0.7: 固有技が使えなければ単体技で攻める（手札があれば）。
       final basicCard = actor.hand
@@ -1328,17 +1547,8 @@ class LevelMatchEngine {
     }
     // 相手のキックアウトカードが尽きているならフォール技を後押し。
     if (move.offersPin && opponent.kickOutCards == 0) score += 5;
-    // Ver.0.7 Phase B: 相手の前ターン技を読む。返し/速度勝ちを優先、速度負けは避ける。
-    switch (clashOutcome(cpu, move)) {
-      case ClashOutcome.counter:
-        score += 12;
-      case ClashOutcome.speedWin:
-        score += 4;
-      case ClashOutcome.speedLoss:
-        score -= 6;
-      case ClashOutcome.neutral:
-        break;
-    }
+    // Ver.0.7.1: 速い固有技ほど、相手のレスポンスに潰されにくい。
+    score += move.speed;
     return score;
   }
 
@@ -1435,27 +1645,6 @@ class LevelMatchEngine {
   }
 
   /// Ver.0.7 Phase B: actor が move を出したとき、相手の前ターン技に対する解決結果。
-  ClashOutcome clashOutcome(PlayerLevelMatchState actor, MoveDefinition move) {
-    final opponent = _opponentOf(actor);
-    final lastId = opponent.lastUsedMoveId;
-    if (lastId == null) return ClashOutcome.neutral;
-    final last = moves[lastId];
-    if (last == null) return ClashOutcome.neutral;
-    final canCounter =
-        move.counterTypes.contains(last.attribute) ||
-        (move.category == MoveCategory.counter &&
-            (move.counterTypes.isEmpty ||
-                move.counterTypes.contains(last.attribute)));
-    final blocked =
-        last.specialAbilities.contains('cannotCounter') ||
-        move.cannotCounterTypes.contains(last.attribute) ||
-        last.cannotCounterTypes.contains(move.attribute);
-    if (canCounter && !blocked) return ClashOutcome.counter;
-    final oppSpeed = opponent.lastUsedMoveSpeed ?? last.speed;
-    if (move.speed > oppSpeed) return ClashOutcome.speedWin;
-    if (move.speed < oppSpeed) return ClashOutcome.speedLoss;
-    return ClashOutcome.neutral;
-  }
 
   /// requiredPreviousState を満たすか（例: 'down'=相手ダウン中）。
   bool _meetsRequiredState(PlayerLevelMatchState actor, MoveDefinition move) {

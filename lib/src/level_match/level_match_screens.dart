@@ -29,7 +29,7 @@ class LevelMatchIntroScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('レベルカードマッチ Ver.0.6')),
+    appBar: AppBar(title: const Text('レベルカードマッチ Ver.0.7')),
     body: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 620),
@@ -50,11 +50,11 @@ class LevelMatchIntroScreen extends StatelessWidget {
               'レスラーごとに30枚デッキを自動生成',
               '手札は「単体技」で直接使用も可能（コスト不要）',
               '決着（フォール/ギブアップ/KO）は固有技のみ',
+              '技を宣言 → 相手が対応（速い技・返し・受ける）',
+              '速い技が先に命中し、遅い技を潰す',
+              '返し技は対応する相手技があるときだけ使える',
               'HPは消耗の指標（0でも試合は続く）',
-              '投げ技からフォール（3カウント）',
-              '関節技からギブアップ',
               'キックアウトは返すほど重くなる',
-              'フィニッシャーは切り札（返しにくい）',
               '山札切れは敗北でなく“疲労”（毎ターンHP減）',
             ])
               Card(
@@ -124,7 +124,7 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Ver.0.6 レスラー選択')),
+    appBar: AppBar(title: const Text('Ver.0.7 レスラー選択')),
     body: wrestlers == null
         ? const Center(child: CircularProgressIndicator())
         : ListView.builder(
@@ -509,6 +509,11 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   Widget _interactionArea() {
     final pin = state.pendingPin;
     final sub = state.pendingSubmission;
+    final atk = state.pendingAttack;
+    if (state.phase == LevelMatchPhase.responseSelection &&
+        atk?.defenderId == 'player') {
+      return _responseCard(atk!);
+    }
     if (state.phase == LevelMatchPhase.pinDecision &&
         pin?.attackerId == 'player') {
       return _pinDeclareCard(pin!);
@@ -530,6 +535,110 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       };
     }
     return _waiting();
+  }
+
+  Widget _responseCard(PendingAttack atk) {
+    final player = state.player;
+    final attackMove = engine.moves[atk.moveId]!;
+    // 応答候補（固有技＋手札の単体技）。
+    final signatures = [
+      for (final m in engine.currentMoves(player))
+        if (engine.responseAvailability(player, m, isBasic: false).usable) m,
+    ];
+    (String, Color) badge(MoveDefinition m) =>
+        switch (engine.clashBetween(attackMove, m)) {
+          ClashOutcome.counter => ('🔄返し成立', _gold),
+          ClashOutcome.speedWin => ('⚡速度勝ち', Colors.greenAccent),
+          ClashOutcome.speedLoss => ('🐢速度負け', Colors.white38),
+          ClashOutcome.neutral => ('＝互角(攻撃側優先)', Colors.white60),
+        };
+    return Card(
+      color: const Color(0xff3a1030),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '相手の攻撃：${attackMove.name}',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              '${moveAttributeLabel(attackMove.attribute)} / 威力${attackMove.power} / 速度${attackMove.speed}'
+              '${attackMove.offersPin && !atk.isBasic ? "  ▶フォール技" : ""}'
+              '${attackMove.offersSubmission && !atk.isBasic ? "  ▶ギブアップ技" : ""}',
+              style: const TextStyle(color: Colors.orangeAccent),
+            ),
+            const Divider(),
+            const Text('対応を選択', style: TextStyle(fontWeight: FontWeight.bold)),
+            for (final m in signatures)
+              Builder(
+                builder: (_) {
+                  final (label, color) = badge(m);
+                  return ListTile(
+                    dense: true,
+                    title: Text('${m.name}（速度${m.speed}）'),
+                    subtitle: Text(
+                      label,
+                      style: TextStyle(color: color, fontWeight: FontWeight.bold),
+                    ),
+                    trailing: FilledButton(
+                      onPressed: () =>
+                          _act(() => engine.respondWithMove('player', m.id)),
+                      child: const Text('対応'),
+                    ),
+                  );
+                },
+              ),
+            const SizedBox(height: 6),
+            const Text('単体技で対応（手札）', style: TextStyle(color: Colors.white70)),
+            SizedBox(
+              height: 84,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  for (final card in player.hand)
+                    Builder(
+                      builder: (_) {
+                        final basic = engine.basicMoveFor(card.attribute);
+                        if (basic == null) return const SizedBox.shrink();
+                        final (label, color) = badge(basic);
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ActionChip(
+                            avatar: CircleAvatar(
+                              child: Text(moveAttributeLabel(card.attribute)),
+                            ),
+                            label: SizedBox(
+                              width: 96,
+                              child: Text(
+                                '${basic.name}\n速${basic.speed} $label',
+                                style: TextStyle(fontSize: 10, color: color),
+                              ),
+                            ),
+                            onPressed: () => _act(
+                              () => engine.respondWithBasic(
+                                'player',
+                                card.instanceId,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            OutlinedButton.icon(
+              onPressed: () => _act(() => engine.respondTake('player')),
+              icon: const Icon(Icons.shield_outlined),
+              label: const Text('受ける（攻撃を通す）'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _waiting() => const Card(
@@ -722,43 +831,18 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
           Builder(
             builder: (_) {
               final availability = engine.evaluateMove(player, move);
-              final clash = engine.clashOutcome(player, move);
+              final isCounter = move.isCounterMove && !move.canUseAsNormalMove;
               final tags = <String>[
                 if (move.offersPin) 'フォール',
                 if (move.offersSubmission) 'ギブアップ',
                 if (move.causesDown) 'ダウン',
                 if (move.category == MoveCategory.finisher) 'FINISHER',
+                if (isCounter) '返し(対応専用)',
               ];
-              final (clashLabel, clashColor) = switch (clash) {
-                ClashOutcome.counter => ('🔄返せる', _gold),
-                ClashOutcome.speedWin => ('⚡速度勝ち', Colors.greenAccent),
-                ClashOutcome.speedLoss => ('🐢速度負け', Colors.white38),
-                ClashOutcome.neutral => ('', Colors.white),
-              };
               return Card(
-                color: clash == ClashOutcome.counter
-                    ? const Color(0xff2a2410)
-                    : clash == ClashOutcome.speedWin
-                    ? const Color(0xff10241a)
-                    : null,
                 child: ListTile(
-                  title: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${move.name}${tags.isEmpty ? "" : "  [${tags.join("/")}]"}',
-                        ),
-                      ),
-                      if (clashLabel.isNotEmpty)
-                        Text(
-                          clashLabel,
-                          style: TextStyle(
-                            color: clashColor,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                    ],
+                  title: Text(
+                    '${move.name}${tags.isEmpty ? "" : "  [${tags.join("/")}]"}',
                   ),
                   subtitle: Text(
                     '${moveAttributeLabel(move.attribute)} / 攻撃 ${move.power} / 速度 ${move.speed} / HEAT ${move.heat >= 0 ? "+" : ""}${move.heat}\n'
@@ -767,10 +851,10 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                   ),
                   isThreeLine: true,
                   trailing: FilledButton(
-                    onPressed: availability.usable
+                    onPressed: (availability.usable && !isCounter)
                         ? () => _useMove(move)
                         : null,
-                    child: const Text('使用'),
+                    child: Text(isCounter ? '対応専用' : '使用'),
                   ),
                   onTap: () => _showMove(move, availability),
                 ),
@@ -1080,57 +1164,8 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   }
 
   Future<void> _useMove(MoveDefinition move) async {
-    final finisher = move.category == MoveCategory.finisher;
-    _act(() => engine.useMove('player', move.id), continueCpu: !finisher);
-    if (finisher && mounted) {
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => Dialog.fullscreen(
-          backgroundColor: Colors.black.withValues(alpha: 0.94),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'FINISHER',
-                  style: TextStyle(color: _pink, letterSpacing: 6),
-                ),
-                Text(
-                  move.name,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w900,
-                    color: _gold,
-                  ),
-                ),
-                Text(
-                  '${state.lastDamage} DAMAGE',
-                  style: const TextStyle(fontSize: 22),
-                ),
-                Text(
-                  move.offersSubmission ? 'SUBMISSION!' : 'COVER!',
-                  style: const TextStyle(letterSpacing: 3),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('続行'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-      if (mounted) {
-        if (state.isGameOver) {
-          await _finish();
-        } else {
-          setState(() {});
-          _continueCpu();
-        }
-      }
-    }
+    // Ver.0.7.1: 技は「宣言」。相手（CPU）が自動でレスポンスして解決する。
+    _act(() => engine.useMove('player', move.id));
   }
 
   void _act(VoidCallback action, {bool continueCpu = true}) {

@@ -256,6 +256,7 @@ class MoveDefinition {
     this.causesOutside = false,
     this.requiredPreviousState,
     this.consumesSetCards = true,
+    this.canUseAsNormalMove = false,
   });
 
   final String id;
@@ -303,6 +304,11 @@ class MoveDefinition {
   final bool causesOutside;
   final String? requiredPreviousState; // 使用に必要な直前状態（例: down, topRope）
   final bool consumesSetCards; // 使用時にセットカードを消費するか
+  final bool canUseAsNormalMove; // 返し技を通常攻撃としても宣言できるか
+
+  /// この技は「返し」として相手技に対応する性質を持つか。
+  bool get isCounterMove =>
+      category == MoveCategory.counter || counterTypes.isNotEmpty;
 
   /// 単体技（コスト不要・決着不可）か。
   bool get isBasic => category == MoveCategory.basic;
@@ -369,6 +375,7 @@ class MoveDefinition {
     'causesOutside': causesOutside,
     'requiredPreviousState': requiredPreviousState,
     'consumesSetCards': consumesSetCards,
+    'canUseAsNormalMove': canUseAsNormalMove,
   };
 
   factory MoveDefinition.fromJson(Map<String, dynamic> json) => MoveDefinition(
@@ -431,6 +438,7 @@ class MoveDefinition {
     causesOutside: json['causesOutside'] as bool? ?? false,
     requiredPreviousState: json['requiredPreviousState'] as String?,
     consumesSetCards: json['consumesSetCards'] as bool? ?? true,
+    canUseAsNormalMove: json['canUseAsNormalMove'] as bool? ?? false,
   );
 }
 

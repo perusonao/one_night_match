@@ -256,6 +256,7 @@ void main() {
       match.skipSetCard('player');
       match.skipLevelChange('player');
       match.useMove('player', 'jab');
+      match.respondTake('cpu'); // Ver.0.7.1: 相手が受けると攻撃が成立
       expect(match.state.cpu.currentHp, 90);
       expect(match.state.sharedHeat, 3);
 
@@ -288,6 +289,7 @@ void main() {
       customEngine.skipSetCard('player');
       customEngine.skipLevelChange('player');
       customEngine.useMove('player', 'zero');
+      customEngine.respondTake('cpu');
       expect(customEngine.state.lastDamage, 0);
       expect(oldLevel.level, 1);
     });
@@ -303,8 +305,10 @@ void main() {
       match.skipSetCard('player');
       match.skipLevelChange('player');
       match.useMove('player', 'fin');
+      match.respondTake('cpu');
       expect(actor.finisherUsed, isTrue);
-      expect(actor.setCards, hasLength(1));
+      // Ver.0.7.1: 固有技は必要コスト（投×2）を消費 → セットは0枚に。
+      expect(actor.setCards, hasLength(0));
       expect(match.state.sharedHeat, 9);
       expect(match.evaluateMove(actor, moves['fin']!).usable, isFalse);
     });
@@ -421,7 +425,7 @@ void main() {
   test('試合JSON往復相当・壊れた履歴を1件だけ無視', () async {
     final match = engine();
     final json = jsonEncode(match.state.toJson());
-    expect(jsonDecode(json)['game']['version'], '0.6');
+    expect(jsonDecode(json)['game']['version'], '0.7');
     SharedPreferences.setMockInitialValues({
       LevelMatchHistoryStore.key: ['broken', json],
     });
@@ -442,7 +446,7 @@ void main() {
     expect(find.text('レスラーを選ぶ'), findsOneWidget);
     await tester.tap(find.text('レスラーを選ぶ'));
     await tester.pumpAndSettle();
-    expect(find.text('Ver.0.6 レスラー選択'), findsOneWidget);
+    expect(find.text('Ver.0.7 レスラー選択'), findsOneWidget);
     expect(find.text('火神アカリ'), findsOneWidget);
     expect(find.text('✓ 対戦可能'), findsWidgets);
   });
