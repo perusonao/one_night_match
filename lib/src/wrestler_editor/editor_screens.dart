@@ -445,6 +445,9 @@ class _WrestlerEditScreenState extends State<WrestlerEditScreen>
   late final tags = TextEditingController(text: widget.initial.tags.join(', '));
   late EditorWrestlerType type = widget.initial.type;
   late List<WrestlerLevelDefinition> levels = List.of(widget.initial.levels);
+  // Ver.0.7.7: レスラー固有の通常技（属性→技ID）。
+  late Map<MoveAttribute, String> basicMoveIds =
+      Map.of(widget.initial.basicMoveIds);
   int selectedLevel = 0;
   List<String> errors = const [];
 
@@ -463,6 +466,7 @@ class _WrestlerEditScreenState extends State<WrestlerEditScreen>
         .where((item) => item.isNotEmpty)
         .toList(),
     levels: levels,
+    basicMoveIds: basicMoveIds,
     updatedAt: DateTime.now().toUtc(),
   );
 
@@ -606,6 +610,7 @@ class _WrestlerEditScreenState extends State<WrestlerEditScreen>
                 onChanged: (value) =>
                     setState(() => levels[selectedLevel] = value),
               ),
+            _basicMovesSection(),
             _EditorSection(
               title: '9. プレビュー・JSON',
               child: Wrap(
@@ -631,6 +636,106 @@ class _WrestlerEditScreenState extends State<WrestlerEditScreen>
       ),
     ),
   );
+
+  // Ver.0.7.7: 通常技（技カード1枚で使用）を属性別にセットする画面。
+  Widget _basicMovesSection() => _EditorSection(
+    title: '通常技（技カード1枚で使用・属性別）',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(bottom: 8),
+          child: Text(
+            '手札のカード1枚をそのまま出せる技です。未設定の属性は共通の通常技を使います。',
+            style: TextStyle(fontSize: 12, color: Colors.white70),
+          ),
+        ),
+        for (final attr in MoveAttribute.values)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 40,
+                  child: Text(
+                    moveAttributeLabel(attr),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Expanded(
+                  child: DropdownButtonFormField<String?>(
+                    isExpanded: true,
+                    initialValue: basicMoveIds[attr],
+                    decoration: const InputDecoration(labelText: '通常技'),
+                    items: [
+                      const DropdownMenuItem(
+                        value: null,
+                        child: Text('共通の通常技'),
+                      ),
+                      ...widget.repository.moves.values
+                          .where(
+                            (m) =>
+                                m.category == MoveCategory.basic &&
+                                m.attribute == attr,
+                          )
+                          .map(
+                            (m) => DropdownMenuItem(
+                              value: m.id,
+                              child: Text(m.name),
+                            ),
+                          ),
+                    ],
+                    onChanged: (id) => setState(() {
+                      if (id == null) {
+                        basicMoveIds.remove(attr);
+                      } else {
+                        basicMoveIds[attr] = id;
+                      }
+                    }),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '通常技を編集／新規作成',
+                  onPressed: () => _openBasicMove(attr, basicMoveIds[attr]),
+                  icon: const Icon(Icons.edit),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+
+  Future<void> _openBasicMove(MoveAttribute attr, String? existingId) async {
+    final existing =
+        existingId == null ? null : widget.repository.moves[existingId];
+    final now = DateTime.now().microsecondsSinceEpoch;
+    // 共通技(basic_*)と衝突しないよう nt_ 接頭辞で作成。
+    final move = existing ??
+        MoveDefinition(
+          id: 'nt_${attr.name}_$now',
+          name: '',
+          category: MoveCategory.basic,
+          attribute: attr,
+          power: 0,
+          heat: 0,
+          requiredCards: {for (final v in MoveAttribute.values) v: 0},
+          discardAfterUse: {for (final v in MoveAttribute.values) v: 0},
+          consumesSetCards: false,
+        );
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MoveEditScreen(
+          initial: move,
+          onSaved: (saved) {
+            widget.repository.moves[saved.id] = saved;
+            setState(() => basicMoveIds[saved.attribute] = saved.id);
+          },
+        ),
+      ),
+    );
+  }
 
   Widget _field(
     TextEditingController controller,
@@ -794,7 +899,7 @@ class _LevelEditorState extends State<LevelEditor> {
         ),
       ),
       _EditorSection(
-        title: '5. 通常技（最大2種類）',
+        title: '5. 固有技（技カードをセットして使用・最大2種類）',
         child: Column(
           children: [
             for (var index = 0; index < 2; index++)
@@ -807,7 +912,7 @@ class _LevelEditorState extends State<LevelEditor> {
                           ? value.moveIds[index]
                           : null,
                       decoration: InputDecoration(
-                        labelText: '通常技 ${index + 1}',
+                        labelText: '固有技 ${index + 1}',
                       ),
                       items: [
                         const DropdownMenuItem(value: null, child: Text('未設定')),
@@ -1161,6 +1266,15 @@ class _MoveEditScreenState extends State<MoveEditScreen> {
   late Map<MoveAttribute, int> discard = Map.of(widget.initial.discardAfterUse);
   late bool markUsed = widget.initial.markUsedAfterUse;
   late bool canReset = widget.initial.canResetUsedState;
+  // Ver.0.7.7: 新モデルの主要フィールドも編集可能に。
+  late final speed = TextEditingController(text: '${widget.initial.speed}');
+  late final pinPower =
+      TextEditingController(text: '${widget.initial.pinPower}');
+  late final submissionPower =
+      TextEditingController(text: '${widget.initial.submissionPower}');
+  late bool canPin = widget.initial.canPin;
+  late bool canSubmit = widget.initial.canSubmit;
+  late bool canKO = widget.initial.canKO;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -1201,8 +1315,36 @@ class _MoveEditScreenState extends State<MoveEditScreen> {
             ),
             _text(power, '攻撃力（0以上）', number: true),
             _text(heat, 'HEAT増減（負数可）', signed: true),
+            _text(speed, '速度（大きいほど速い）', number: true),
+            Row(
+              children: [
+                Expanded(child: _text(pinPower, 'フォール強度', number: true)),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: _text(submissionPower, 'ギブアップ強度', number: true)),
+              ],
+            ),
+            SwitchListTile(
+              value: canPin,
+              dense: true,
+              title: const Text('フォール可能（投げ技など）'),
+              onChanged: (v) => setState(() => canPin = v),
+            ),
+            SwitchListTile(
+              value: canSubmit,
+              dense: true,
+              title: const Text('ギブアップ可能（関節技など）'),
+              onChanged: (v) => setState(() => canSubmit = v),
+            ),
+            SwitchListTile(
+              value: canKO,
+              dense: true,
+              title: const Text('ダウンを奪える（打撃など）'),
+              onChanged: (v) => setState(() => canKO = v),
+            ),
             const _GuideText(),
-            _cardCounts('必要技カード', required, (map) => required = map),
+            _cardCounts('必要技カード（＝固有技のセットコスト）', required,
+                (map) => required = map),
             _text(successRate, '成功率（0〜100、未設定可）', number: true),
             DropdownButtonFormField(
               initialValue: check,
@@ -1300,7 +1442,8 @@ class _MoveEditScreenState extends State<MoveEditScreen> {
   );
 
   void _save() {
-    final move = MoveDefinition(
+    // copyWith で UI 未対応フィールド（cannotCounter・consumesSetCards 等）を保持。
+    final move = widget.initial.copyWith(
       id: id.text.trim(),
       name: name.text.trim(),
       category: category,
@@ -1328,6 +1471,14 @@ class _MoveEditScreenState extends State<MoveEditScreen> {
       imagePath: image.text.isEmpty ? null : image.text,
       markUsedAfterUse: markUsed,
       canResetUsedState: canReset,
+      speed: int.tryParse(speed.text) ?? widget.initial.speed,
+      pinPower: int.tryParse(pinPower.text) ?? 0,
+      submissionPower: int.tryParse(submissionPower.text) ?? 0,
+      canPin: canPin,
+      canSubmit: canSubmit,
+      canKO: canKO,
+      canAttemptPin: canPin,
+      canAttemptSubmission: canSubmit,
     );
     final problems = <String>[
       if (move.id.isEmpty) '技IDは必須です',
