@@ -27,6 +27,11 @@ void main() {
     m.skipLevelChange('player');
   }
 
+  void cpuToChoose(LevelMatchEngine m) {
+    m.skipSetCard('cpu');
+    m.skipLevelChange('cpu');
+  }
+
   test('energyモード：セットしたカードはenergyZoneへ入りsetCardsは空のまま', () {
     final m = energyEngine();
     final card = m.state.player.hand.first;
@@ -83,26 +88,14 @@ void main() {
     }
   });
 
-  test('energyモード：無料通常技は廃止（エネルギー無しでは使用不可）', () {
-    final m = energyEngine();
-    toChoose(m);
-    final card = m.state.player.hand.firstWhere(
-      (c) => m.basicMoveFor(c.attribute, m.state.player) != null,
-    );
-    expect(
-      () => m.useBasicMove('player', card.instanceId),
-      throwsStateError,
-    );
-  });
-
-  test('energyモード：必要エネルギーを払えば単体技を使用できる', () {
+  test('energyモード：単体技(basic_*)は完全に廃止（エネルギーがあっても使用不可）', () {
     final m = energyEngine();
     final player = m.state.player;
     final card = player.hand.firstWhere(
       (c) => m.basicMoveFor(c.attribute, player) != null,
     );
     final basic = m.basicMoveFor(card.attribute, player)!;
-    // 必要枚数ぶんエネルギーをReadyで用意する。
+    // 必要枚数ぶんエネルギーをReadyで用意しても、単体技自体が使用不可。
     for (final entry in basic.energyModeRequiredCards.entries) {
       for (var i = 0; i < entry.value; i++) {
         player.energyZone.add(
@@ -115,9 +108,92 @@ void main() {
       }
     }
     toChoose(m);
-    m.useBasicMove('player', card.instanceId);
-    // 使用後、対応するエネルギーはUsedになっている。
-    expect(player.readyEnergyCounts[basic.attribute] ?? 0, 0);
+    expect(
+      () => m.useBasicMove('player', card.instanceId),
+      throwsStateError,
+    );
+  });
+
+  test('energyモード：単体技は対応（迎撃）としても使えない', () {
+    final m = energyEngine(playerStarts: false);
+    final player = m.state.player;
+    final cpu = m.state.cpu;
+    final cpuThrow = moves['misaki_bodyslam']!;
+    cpu.energyZone.add(
+      EnergyCardState(instanceId: 'cpu-e', attribute: MoveAttribute.throwMove, name: '投エネルギー'),
+    );
+    cpuToChoose(m);
+    m.useMove('cpu', cpuThrow.id);
+    expect(m.state.phase, LevelMatchPhase.responseSelection);
+    final basic = m.basicMoveFor(MoveAttribute.strike, player)!;
+    expect(
+      m.responseAvailability(player, basic, isBasic: true).usable,
+      isFalse,
+    );
+  });
+
+  test('energyモード：固有技はReadyエネルギーを消費して使用でき、消費後はUsedになる', () {
+    final m = energyEngine();
+    final player = m.state.player;
+    // アカリLv1固有技 akari_dropkick は 打×1 のコスト。
+    final sig = moves['akari_dropkick']!;
+    expect(sig.energyModeRequiredCards[MoveAttribute.strike], 1);
+    player.energyZone.add(
+      EnergyCardState(instanceId: 'e-strike', attribute: MoveAttribute.strike, name: '打エネルギー'),
+    );
+    toChoose(m);
+    expect(m.evaluateMove(player, sig).usable, isTrue);
+    m.useMove('player', sig.id);
+    expect(player.readyEnergyCounts[MoveAttribute.strike] ?? 0, 0);
+    expect(player.energyZone.single.ready, isFalse);
+    // ログにエネルギー消費の内訳が記録されている（未使用属性も0として含む）。
+    final log = m.state.logs.firstWhere((l) => l.action == 'attackDeclared');
+    expect((log.details['energyCost'] as Map)['strike'], 1);
+    expect(log.details['energySpent'], ['e-strike']);
+    expect((log.details['readyEnergyBefore'] as Map)['strike'], 1);
+    expect((log.details['readyEnergyAfter'] as Map)['strike'], 0);
+  });
+
+  test('energyモード：返し技（counterカテゴリ）は返エネルギーが必要で、無ければ対応不可', () {
+    final m = energyEngine(playerStarts: false);
+    final player = m.state.player;
+    final cpu = m.state.cpu;
+    // レベル3まで上げてcounter_brainbusterを解禁。
+    player.currentLevel = 3;
+    player.unlockedLevels.addAll({2, 3});
+    // CPUに投げ技を使わせるため、投エネルギーを用意して固有技を宣言させる。
+    final cpuThrow = moves['misaki_bodyslam']!;
+    cpu.energyZone.add(
+      EnergyCardState(instanceId: 'cpu-throw', attribute: MoveAttribute.throwMove, name: '投エネルギー'),
+    );
+    cpuToChoose(m);
+    m.useMove('cpu', cpuThrow.id);
+    expect(m.state.phase, LevelMatchPhase.responseSelection);
+    final counterMove = moves['counter_brainbuster']!;
+    expect(counterMove.energyModeRequiredCards[MoveAttribute.counter], 1);
+    // 返エネルギーが無ければ「対応できません」。
+    expect(
+      m.responseAvailability(player, counterMove, isBasic: false).usable,
+      isFalse,
+    );
+    // 返エネルギーを用意すれば対応でき、使用後はUsedになる。
+    player.energyZone.add(
+      EnergyCardState(instanceId: 'e-counter', attribute: MoveAttribute.counter, name: '返エネルギー'),
+    );
+    expect(
+      m.responseAvailability(player, counterMove, isBasic: false).usable,
+      isTrue,
+    );
+    m.respondWithMove('player', counterMove.id);
+    // 消費直後の内訳はログで検証する（返し成立でCPUのターンが終わり、
+    // 直後にplayerの自ターンが始まってエネルギーが全回復するため、
+    // 消費「後」の状態を試合状態から直接見るとアンタップ済みになってしまう）。
+    final log =
+        m.state.logs.firstWhere((l) => l.action == 'respondEnergyConsumed');
+    expect(log.details['isCounterMove'], isTrue);
+    expect(log.details['energySpent'], ['e-counter']);
+    expect((log.details['readyEnergyBefore'] as Map)['counter'], 1);
+    expect((log.details['readyEnergyAfter'] as Map)['counter'], 0);
   });
 
   test('energyモード：classicのsetCards経済には一切影響しない（既定はclassic）', () {

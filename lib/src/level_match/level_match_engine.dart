@@ -216,7 +216,7 @@ class PlayerLevelMatchState {
 
   /// Ver.0.8.0: エネルギーゾーンのうちReady（使用可能）な枚数を属性別に集計。
   Map<MoveAttribute, int> get readyEnergyCounts {
-    final map = <MoveAttribute, int>{};
+    final map = <MoveAttribute, int>{for (final a in MoveAttribute.values) a: 0};
     for (final e in energyZone) {
       if (e.ready) map[e.attribute] = (map[e.attribute] ?? 0) + 1;
     }
@@ -737,10 +737,15 @@ class LevelMatchEngine {
       actor.finisherUsedTurn = state.turnNumber;
     }
     List<TechniqueResourceCard> consumed = const <TechniqueResourceCard>[];
+    List<String>? energySpent;
+    Map<MoveAttribute, int>? readyBefore;
+    Map<MoveAttribute, int>? readyAfter;
     if (state.resourceMode == MatchResourceMode.energy) {
       // Ver.0.8.0 energyモード：単体技も固有技も等しくエネルギーを消費する
-      // （「無料通常技」の廃止）。
-      _consumeEnergy(actor, move.energyModeRequiredCards);
+      // （「無料通常技」の廃止）。検証・観戦用に消費前後の内訳を記録する。
+      readyBefore = Map.of(actor.readyEnergyCounts);
+      energySpent = _consumeEnergy(actor, move.energyModeRequiredCards);
+      readyAfter = Map.of(actor.readyEnergyCounts);
     } else if (!isBasic) {
       consumed = _consumeCost(actor, move);
     }
@@ -765,6 +770,12 @@ class LevelMatchEngine {
         'speed': move.speed,
         'power': move.power,
         'consumedSetCards': consumed.map((e) => e.toJson()).toList(),
+        if (state.resourceMode == MatchResourceMode.energy) ...{
+          'energyCost': _attributeJson(move.energyModeRequiredCards),
+          'energySpent': energySpent,
+          'readyEnergyBefore': _attributeJson(readyBefore!),
+          'readyEnergyAfter': _attributeJson(readyAfter!),
+        },
         'offersPin': move.offersPin && !isBasic,
         'offersSubmission': move.offersSubmission && !isBasic,
         'causesDown': move.causesDown && !isBasic,
@@ -783,13 +794,19 @@ class LevelMatchEngine {
 
   /// Ver.0.8.0 energyモード：ReadyなエネルギーをUsedに変える（消費）。
   /// evaluateMove/responseAvailability で事前に支払い可能と確認済みの前提。
-  void _consumeEnergy(PlayerLevelMatchState actor, Map<MoveAttribute, int> cost) {
+  /// 消費したエネルギーカードのinstanceIdを返す（ログ検証用）。
+  List<String> _consumeEnergy(
+    PlayerLevelMatchState actor,
+    Map<MoveAttribute, int> cost,
+  ) {
+    final spent = <String>[];
     for (final entry in cost.entries) {
       var remaining = entry.value;
       for (final e in actor.energyZone) {
         if (remaining <= 0) break;
         if (e.attribute == entry.key && e.ready) {
           e.ready = false;
+          spent.add(e.instanceId);
           remaining--;
         }
       }
@@ -797,14 +814,7 @@ class LevelMatchEngine {
         throw StateError('${moveAttributeLabel(entry.key)}エネルギーが不足しています');
       }
     }
-  }
-
-  bool _canAffordEnergy(PlayerLevelMatchState actor, Map<MoveAttribute, int> cost) {
-    final ready = actor.readyEnergyCounts;
-    for (final entry in cost.entries) {
-      if ((ready[entry.key] ?? 0) < entry.value) return false;
-    }
-    return true;
+    return spent;
   }
 
   /// 最終ダメージを5刻みに丸める（0か最低5）。
@@ -858,11 +868,11 @@ class LevelMatchEngine {
       }
     }
     if (isBasic) {
-      // フィニッシャーへ単体技で割り込むのは不可（上でカバー済み）。
-      if (state.resourceMode == MatchResourceMode.energy &&
-          !_canAffordEnergy(defender, move.energyModeRequiredCards)) {
-        return const MoveAvailability(false, ['エネルギーが不足しています']);
+      // Ver.0.8.0 energyモード：単体技での対応は廃止（固有技のみ）。
+      if (state.resourceMode == MatchResourceMode.energy) {
+        return const MoveAvailability(false, ['エネルギーモードでは単体技で対応できません']);
       }
+      // フィニッシャーへ単体技で割り込むのは不可（上でカバー済み）。
       return const MoveAvailability(true, []);
     }
     return evaluateMove(defender, move);
@@ -899,7 +909,24 @@ class LevelMatchEngine {
       defender.finisherUsedTurn = state.turnNumber;
     }
     if (state.resourceMode == MatchResourceMode.energy) {
-      _consumeEnergy(defender, move.energyModeRequiredCards);
+      // Ver.0.8.0：迎撃（速度勝ち）・返し技（counterカテゴリ）とも、
+      // 支払ったエネルギー内訳をログへ残す（返専用エネルギーの検証用）。
+      final readyBefore = Map.of(defender.readyEnergyCounts);
+      final spent = _consumeEnergy(defender, move.energyModeRequiredCards);
+      final readyAfter = Map.of(defender.readyEnergyCounts);
+      _log(
+        defender,
+        'respondEnergyConsumed',
+        '${move.name}で対応（${move.isCounterMove ? "返し技" : "迎撃"}）',
+        {
+          'moveId': move.id,
+          'isCounterMove': move.isCounterMove,
+          'energyCost': _attributeJson(move.energyModeRequiredCards),
+          'energySpent': spent,
+          'readyEnergyBefore': _attributeJson(readyBefore),
+          'readyEnergyAfter': _attributeJson(readyAfter),
+        },
+      );
     } else {
       _consumeCost(defender, move);
     }
@@ -913,6 +940,11 @@ class LevelMatchEngine {
       throw StateError('対応できる局面ではありません');
     }
     if (atk.defenderId != playerId) throw StateError('対応できるのは防御側です');
+    // Ver.0.8.0 energyモード：単体技での対応（迎撃）も廃止。
+    // 対応は固有技（同属性エネルギーでの迎撃 or 返専用エネルギーでの返し技）のみ。
+    if (state.resourceMode == MatchResourceMode.energy) {
+      throw StateError('エネルギーモードでは単体技で対応できません（固有技のみ）');
+    }
     final defender = state.byId(playerId);
     final index = defender.hand.indexWhere(
       (c) => c.instanceId == cardInstanceId,
@@ -925,16 +957,9 @@ class LevelMatchEngine {
     final card = defender.hand[index];
     final move = basicMoveFor(card.attribute, defender);
     if (move == null) throw StateError('この属性の単体技がありません');
-    if (state.resourceMode == MatchResourceMode.energy &&
-        !_canAffordEnergy(defender, move.energyModeRequiredCards)) {
-      throw StateError('エネルギーが不足しているため対応できません');
-    }
     defender.hand.removeAt(index);
     defender.discardPile.add(card);
     defender.previousMoveId = move.id;
-    if (state.resourceMode == MatchResourceMode.energy) {
-      _consumeEnergy(defender, move.energyModeRequiredCards);
-    }
     _resolveExchange(response: move, responder: defender, responseIsBasic: true);
   }
 
@@ -1226,6 +1251,12 @@ class LevelMatchEngine {
     if (state.phase != LevelMatchPhase.chooseMove) {
       throw StateError('技選択フェイズではありません');
     }
+    // Ver.0.8.0 energyモード：無料の単体技（basic_*）は廃止。攻撃は固有技のみ。
+    // 手札のカードはエネルギーゾーンへセットする専用リソースとなり、
+    // 技として直接使う用途とは完全に分離される。
+    if (state.resourceMode == MatchResourceMode.energy) {
+      throw StateError('エネルギーモードでは単体技は使用できません（固有技のみ）');
+    }
     final cardIndex = actor.hand.indexWhere(
       (item) => item.instanceId == cardInstanceId,
     );
@@ -1233,11 +1264,6 @@ class LevelMatchEngine {
     final card = actor.hand[cardIndex];
     final move = basicMoveFor(card.attribute, actor);
     if (move == null) throw StateError('この属性の単体技がありません');
-    // Ver.0.8.0 energyモード：無料通常技は廃止。エネルギーで支払えない場合は使用不可。
-    if (state.resourceMode == MatchResourceMode.energy &&
-        !_canAffordEnergy(actor, move.energyModeRequiredCards)) {
-      throw StateError('エネルギーが不足しているため使用できません');
-    }
     // 宣言＝コミット：手札から捨て札へ。
     actor.hand.removeAt(cardIndex);
     actor.discardPile.add(card);
@@ -1577,16 +1603,12 @@ class LevelMatchEngine {
     final signatureOptions = _currentMoves(defender)
         .where((m) => responseAvailability(defender, m, isBasic: false).usable)
         .toList();
-    final basicCards = defender.hand
-        .where((c) {
-          final basic = basicMoveFor(c.attribute, defender);
-          if (basic == null) return false;
-          if (state.resourceMode == MatchResourceMode.energy) {
-            return _canAffordEnergy(defender, basic.energyModeRequiredCards);
-          }
-          return true;
-        })
-        .toList();
+    // Ver.0.8.0 energyモード：単体技での対応は廃止のため候補にしない。
+    final basicCards = state.resourceMode == MatchResourceMode.energy
+        ? const <TechniqueResourceCard>[]
+        : defender.hand
+            .where((c) => basicMoveFor(c.attribute, defender) != null)
+            .toList();
     // 勝てるレスポンスを探す（counter を最優先）。
     MoveDefinition? bestSig;
     var bestSigScore = 0;
@@ -1788,19 +1810,15 @@ class LevelMatchEngine {
     }
     if (candidates.isEmpty) {
       // Ver.0.7: 固有技が使えなければ単体技で攻める（手札があれば）。
-      final basicCard = actor.hand
-          .cast<TechniqueResourceCard?>()
-          .firstWhere(
-            (card) {
-              final basic = basicMoveFor(card!.attribute, actor);
-              if (basic == null) return false;
-              if (state.resourceMode == MatchResourceMode.energy) {
-                return _canAffordEnergy(actor, basic.energyModeRequiredCards);
-              }
-              return true;
-            },
-            orElse: () => null,
-          );
+      // Ver.0.8.0 energyモード：無料の単体技は廃止のため対象外（固有技のみ）。
+      final basicCard = state.resourceMode == MatchResourceMode.energy
+          ? null
+          : actor.hand
+              .cast<TechniqueResourceCard?>()
+              .firstWhere(
+                (card) => basicMoveFor(card!.attribute, actor) != null,
+                orElse: () => null,
+              );
       if (basicCard != null) {
         _log(actor, 'cpuDecision', '単体技で攻める', {'card': basicCard.attribute.name});
         useBasicMove(id, basicCard.instanceId);
