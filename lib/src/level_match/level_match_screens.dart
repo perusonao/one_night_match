@@ -17,6 +17,85 @@ import 'level_match_finish_models.dart';
 const _pink = Color(0xffff477e);
 const _gold = Color(0xffffc857);
 
+// ===== Ver.0.7.2 UI改善：属性カラー統一（⑩） =====
+/// 技属性の識別色（カード・アイコン・ラベルで共通利用）。
+Color attributeColor(MoveAttribute a) => switch (a) {
+  MoveAttribute.strike => const Color(0xffe4443a), // 🟥 打撃
+  MoveAttribute.throwMove => const Color(0xff2f6df6), // 🟦 投げ
+  MoveAttribute.submission => const Color(0xff2ea44f), // 🟩 関節
+  MoveAttribute.aerial => const Color(0xff9b5de5), // 🟪 飛び
+  MoveAttribute.rough => const Color(0xff3a3742), // ⚫ ラフ
+  MoveAttribute.counter => const Color(0xffe8b23a), // 🟨 返し
+};
+
+/// 属性のフル表記（技カードのサブラベル用）。
+String attributeFullLabel(MoveAttribute a) => switch (a) {
+  MoveAttribute.strike => '打撃',
+  MoveAttribute.throwMove => '投技',
+  MoveAttribute.submission => '関節技',
+  MoveAttribute.aerial => '飛技',
+  MoveAttribute.rough => 'ラフ',
+  MoveAttribute.counter => '返し技',
+};
+
+/// 属性バッジ（丸に一文字＋属性色）。
+Widget attributeBadge(MoveAttribute a, {double size = 34}) => Container(
+  width: size,
+  height: size,
+  alignment: Alignment.center,
+  decoration: BoxDecoration(
+    color: attributeColor(a),
+    shape: BoxShape.circle,
+    boxShadow: [
+      BoxShadow(color: attributeColor(a).withValues(alpha: 0.5), blurRadius: 6),
+    ],
+  ),
+  child: Text(
+    moveAttributeLabel(a),
+    style: TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.w900,
+      fontSize: size * 0.42,
+    ),
+  ),
+);
+
+const _recommendPrefKey = 'onm_show_recommend';
+
+/// 対応フェイズの選択肢の種別。
+enum _RespKind { signature, basic, take }
+
+/// 対応フェイズで提示する1つの選択肢（返し技／単体技／受ける）。
+class _RespOption {
+  _RespOption({
+    required this.kind,
+    required this.label,
+    required this.speed,
+    required this.outcome,
+    required this.score,
+    this.move,
+    this.cardId,
+    this.attribute,
+  });
+  final _RespKind kind;
+  final String label;
+  final int speed;
+  final ClashOutcome? outcome; // take は null
+  final int score; // 並べ替え用（勝てる手ほど高い）
+  final MoveDefinition? move;
+  final String? cardId;
+  final MoveAttribute? attribute;
+
+  bool get isTake => kind == _RespKind.take;
+  bool get wins =>
+      outcome == ClashOutcome.counter || outcome == ClashOutcome.speedWin;
+  String get key => switch (kind) {
+    _RespKind.take => 'take',
+    _RespKind.basic => 'basic:$cardId',
+    _RespKind.signature => 'sig:${move!.id}',
+  };
+}
+
 /// Ver.0.3 演出：CPUターンの進行速度。ルールには影響しない。
 enum MatchSpeed { fast, normal, slow, manual }
 
@@ -351,6 +430,10 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   String? _commentary; // 実況テキスト
   String? _cpuThought; // CPUの思考
 
+  // Ver.0.7.2 UI改善用。
+  bool _showRecommend = true; // おすすめ表示（⑤）
+  String? _selResponseKey; // 現在フォーカス中の対応（⑥⑦）
+
   LevelMatchCostPreview get _preview => LevelMatchCostPreview(
     wrestler: state.player.wrestler,
     moves: engine.moves,
@@ -364,7 +447,13 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       final loaded = MatchSpeed.values
           .cast<MatchSpeed?>()
           .firstWhere((s) => s!.name == raw, orElse: () => null);
-      if (mounted && loaded != null) setState(() => _speed = loaded);
+      final rec = prefs.getBool(_recommendPrefKey) ?? true;
+      if (mounted) {
+        setState(() {
+          if (loaded != null) _speed = loaded;
+          _showRecommend = rec;
+        });
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) => _drive());
     });
   }
@@ -408,51 +497,79 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   Widget build(BuildContext context) {
     final player = state.player;
     final cpu = state.cpu;
+    final atk = state.pendingAttack;
+    // Ver.0.7.2 UI改善：プレイヤーが対応する局面は専用の“中継風”画面を出す。
+    final inPlayerResponse = !state.isGameOver &&
+        state.phase == LevelMatchPhase.responseSelection &&
+        atk?.defenderId == 'player';
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('LEVEL CARD MATCH'),
-        actions: [
-          TextButton.icon(
-            onPressed: _pickSpeed,
-            icon: const Icon(Icons.speed, size: 18),
-            label: Text(
-              matchSpeedLabel(_speed).replaceAll('（推奨）', ''),
-              style: const TextStyle(fontSize: 12),
-            ),
-          ),
-          IconButton(
-            tooltip: 'ログ全文',
-            onPressed: _showLogs,
-            icon: Badge(
-              label: Text('${state.logs.length}'),
-              child: const Icon(Icons.receipt_long),
-            ),
-          ),
-        ],
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: Column(
-            children: [
-              _fighterPanel(cpu, isCpu: true),
-              _matchCenter(),
-              _commentaryBanner(),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(10, 4, 10, 120),
-                  children: [
-                    _fighterPanel(player, isCpu: false),
-                    if (!state.isGameOver) _interactionArea(),
-                  ],
-                ),
-              ),
-            ],
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: inPlayerResponse
+                ? _responsePhaseView(atk!)
+                : _standardLayout(player, cpu),
           ),
         ),
       ),
     );
   }
+
+  Widget _standardLayout(
+    PlayerLevelMatchState player,
+    PlayerLevelMatchState cpu,
+  ) => Column(
+    children: [
+      _slimAppBar(),
+      _fighterPanel(cpu, isCpu: true),
+      _matchCenter(),
+      _commentaryBanner(),
+      Expanded(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(10, 4, 10, 120),
+          children: [
+            _fighterPanel(player, isCpu: false),
+            if (!state.isGameOver) _interactionArea(),
+          ],
+        ),
+      ),
+    ],
+  );
+
+  Widget _slimAppBar() => Padding(
+    padding: const EdgeInsets.fromLTRB(6, 6, 6, 0),
+    child: Row(
+      children: [
+        IconButton(
+          tooltip: '戻る',
+          onPressed: () => Navigator.of(context).maybePop(),
+          icon: const Icon(Icons.arrow_back),
+        ),
+        const Text(
+          'LEVEL CARD MATCH',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const Spacer(),
+        TextButton.icon(
+          onPressed: _pickSpeed,
+          icon: const Icon(Icons.speed, size: 18),
+          label: Text(
+            matchSpeedLabel(_speed).replaceAll('（推奨）', ''),
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
+        IconButton(
+          tooltip: 'ログ全文',
+          onPressed: _showLogs,
+          icon: Badge(
+            label: Text('${state.logs.length}'),
+            child: const Icon(Icons.receipt_long),
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _fighterPanel(
     PlayerLevelMatchState fighter, {
@@ -659,11 +776,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   Widget _interactionArea() {
     final pin = state.pendingPin;
     final sub = state.pendingSubmission;
-    final atk = state.pendingAttack;
-    if (state.phase == LevelMatchPhase.responseSelection &&
-        atk?.defenderId == 'player') {
-      return _responseCard(atk!);
-    }
+    // 対応フェイズ（防御側＝プレイヤー）は build() 側の専用画面で扱う。
     if (state.phase == LevelMatchPhase.pinDecision &&
         pin?.attackerId == 'player') {
       return _pinDeclareCard(pin!);
@@ -687,105 +800,960 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     return _waiting();
   }
 
-  Widget _responseCard(PendingAttack atk) {
+  // ===== Ver.0.7.2 UI改善：対応フェイズ（中継風レイアウト） =====
+
+  /// 対応候補を構築（返し技＞速い単体技＞受ける）。おすすめ計算にも使う。
+  List<_RespOption> _buildResponseOptions(PendingAttack atk) {
     final player = state.player;
     final attackMove = engine.moves[atk.moveId]!;
-    // 応答候補（固有技＋手札の単体技）。
-    final signatures = [
-      for (final m in engine.currentMoves(player))
-        if (engine.responseAvailability(player, m, isBasic: false).usable) m,
-    ];
-    (String, Color) badge(MoveDefinition m) =>
-        switch (engine.clashBetween(attackMove, m)) {
-          ClashOutcome.counter => ('🔄返し成立', _gold),
-          ClashOutcome.speedWin => ('⚡速度勝ち', Colors.greenAccent),
-          ClashOutcome.speedLoss => ('🐢速度負け', Colors.white38),
-          ClashOutcome.neutral => ('＝互角(攻撃側優先)', Colors.white60),
-        };
-    return Card(
-      color: const Color(0xff3a1030),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
+    int scoreOf(ClashOutcome o, int power) => switch (o) {
+      ClashOutcome.counter => 300 + power,
+      ClashOutcome.speedWin => 200 + power,
+      ClashOutcome.neutral => 20 + power,
+      ClashOutcome.speedLoss => power,
+    };
+    final options = <_RespOption>[];
+    // 返し技／固有技での対応。
+    for (final m in engine.currentMoves(player)) {
+      if (!engine.responseAvailability(player, m, isBasic: false).usable) {
+        continue;
+      }
+      final o = engine.clashBetween(attackMove, m);
+      options.add(_RespOption(
+        kind: _RespKind.signature,
+        label: m.name,
+        speed: m.speed,
+        outcome: o,
+        score: scoreOf(o, m.power),
+        move: m,
+        attribute: m.attribute,
+      ));
+    }
+    // 単体技（手札）での対応。属性ごとに1枚へ集約。
+    final seen = <MoveAttribute>{};
+    for (final card in player.hand) {
+      if (!seen.add(card.attribute)) continue;
+      final basic = engine.basicMoveFor(card.attribute);
+      if (basic == null) continue;
+      final o = engine.clashBetween(attackMove, basic);
+      options.add(_RespOption(
+        kind: _RespKind.basic,
+        label: basic.name,
+        speed: basic.speed,
+        outcome: o,
+        score: scoreOf(o, basic.power) - 5, // 固有技をわずかに優先
+        move: basic,
+        cardId: card.instanceId,
+        attribute: card.attribute,
+      ));
+    }
+    // 勝てる手（返し・速度勝ち）を先頭に。
+    options.sort((a, b) => b.score.compareTo(a.score));
+    // 受けるは常に最後（⑪）。
+    options.add(_RespOption(
+      kind: _RespKind.take,
+      label: '受ける',
+      speed: 0,
+      outcome: null,
+      score: -1,
+      attribute: null,
+    ));
+    return options;
+  }
+
+  Future<void> _toggleRecommend() async {
+    setState(() => _showRecommend = !_showRecommend);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_recommendPrefKey, _showRecommend);
+  }
+
+  void _commitResponse(_RespOption opt) {
+    _selResponseKey = null;
+    switch (opt.kind) {
+      case _RespKind.signature:
+        _act(() => engine.respondWithMove('player', opt.move!.id));
+      case _RespKind.basic:
+        _act(() => engine.respondWithBasic('player', opt.cardId!));
+      case _RespKind.take:
+        _act(() => engine.respondTake('player'));
+    }
+  }
+
+  Widget _responsePhaseView(PendingAttack atk) {
+    final player = state.player;
+    final attackMove = engine.moves[atk.moveId]!;
+    final options = _buildResponseOptions(atk);
+    final recommended = options.firstWhere(
+      (o) => o.wins,
+      orElse: () => options.firstWhere((o) => o.isTake),
+    );
+    final selectedKey = _selResponseKey ?? recommended.key;
+    final selected = options.firstWhere(
+      (o) => o.key == selectedKey,
+      orElse: () => recommended,
+    );
+    // 1画面完結を目指しつつ、極端に低い画面では安全側でスクロールを許す。
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _topBar(),
+          _attackHeadline(atk, attackMove),
+          _attackCard(atk, attackMove),
+          _responseTelop(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
+            child: Row(
+              children: [
+                const Text(
+                  '対応してください',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _showResponseHelp,
+                  icon: const Icon(Icons.help_outline, size: 16),
+                  label: const Text('ルール・ヘルプ', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 218,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              children: [
+                for (final o in options)
+                  _responseOptionCard(
+                    o,
+                    isSelected: o.key == selectedKey,
+                    isRecommended: _showRecommend && o.key == recommended.key,
+                  ),
+              ],
+            ),
+          ),
+          _speedPredictBar(selected, attackMove),
+          _playerMini(player),
+          _bottomBar(selected),
+        ],
+      ),
+    );
+  }
+
+  Widget _attackHeadline(PendingAttack atk, MoveDefinition attackMove) => Padding(
+    padding: const EdgeInsets.fromLTRB(14, 6, 14, 2),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        const Text(
+          '相手の攻撃！',
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w900,
+            color: _pink,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            '${state.player.wrestler.name}、どう返す!?',
+            style: const TextStyle(fontSize: 13, color: Colors.white70),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _attackCard(PendingAttack atk, MoveDefinition m) {
+    final offersPin = m.offersPin && !atk.isBasic;
+    final offersSub = m.offersSubmission && !atk.isBasic;
+    final accent = attributeColor(m.attribute);
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 260),
+      transitionBuilder: (child, anim) => FadeTransition(
+        opacity: anim,
+        child: ScaleTransition(scale: anim, child: child),
+      ),
+      child: Container(
+        key: ValueKey(m.id),
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xff20182b), Color(0xff130f1a)],
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: accent.withValues(alpha: 0.8), width: 1.5),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '相手の攻撃：${attackMove.name}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            Row(
+              children: [
+                const Text(
+                  'CPU',
+                  style: TextStyle(
+                    color: _pink,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  state.cpu.wrestler.name,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
             ),
-            Text(
-              '${moveAttributeLabel(attackMove.attribute)} / 威力${attackMove.power} / 速度${attackMove.speed}'
-              '${attackMove.offersPin && !atk.isBasic ? "  ▶フォール技" : ""}'
-              '${attackMove.offersSubmission && !atk.isBasic ? "  ▶ギブアップ技" : ""}',
-              style: const TextStyle(color: Colors.orangeAccent),
-            ),
-            const Divider(),
-            const Text('対応を選択', style: TextStyle(fontWeight: FontWeight.bold)),
-            for (final m in signatures)
-              Builder(
-                builder: (_) {
-                  final (label, color) = badge(m);
-                  return ListTile(
-                    dense: true,
-                    title: Text('${m.name}（速度${m.speed}）'),
-                    subtitle: Text(
-                      label,
-                      style: TextStyle(color: color, fontWeight: FontWeight.bold),
-                    ),
-                    trailing: FilledButton(
-                      onPressed: () =>
-                          _act(() => engine.respondWithMove('player', m.id)),
-                      child: const Text('対応'),
-                    ),
-                  );
-                },
-              ),
             const SizedBox(height: 6),
-            const Text('単体技で対応（手札）', style: TextStyle(color: Colors.white70)),
-            SizedBox(
-              height: 84,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  for (final card in player.hand)
-                    Builder(
-                      builder: (_) {
-                        final basic = engine.basicMoveFor(card.attribute);
-                        if (basic == null) return const SizedBox.shrink();
-                        final (label, color) = badge(basic);
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ActionChip(
-                            avatar: CircleAvatar(
-                              child: Text(moveAttributeLabel(card.attribute)),
-                            ),
-                            label: SizedBox(
-                              width: 96,
-                              child: Text(
-                                '${basic.name}\n速${basic.speed} $label',
-                                style: TextStyle(fontSize: 10, color: color),
-                              ),
-                            ),
-                            onPressed: () => _act(
-                              () => engine.respondWithBasic(
-                                'player',
-                                card.instanceId,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+            Row(
+              children: [
+                Column(
+                  children: [
+                    attributeBadge(m.attribute, size: 40),
+                    const SizedBox(height: 2),
+                    Text(
+                      attributeFullLabel(m.attribute),
+                      style: TextStyle(fontSize: 10, color: accent),
                     ),
+                  ],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        m.name,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          _statChip('威力', '${m.power}', Colors.redAccent),
+                          const SizedBox(width: 14),
+                          _statChip('速度', '${m.speed}', Colors.lightBlueAccent),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (offersPin || offersSub) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _gold.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: _gold),
+                    ),
+                    child: Text(
+                      offersPin ? 'フォール技' : 'ギブアップ技',
+                      style: const TextStyle(
+                        color: _gold,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    offersPin ? '倒せばフォールが狙える' : '極めればギブアップが狙える',
+                    style: const TextStyle(fontSize: 11, color: Colors.white70),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statChip(String label, String value, Color color) => Row(
+    crossAxisAlignment: CrossAxisAlignment.baseline,
+    textBaseline: TextBaseline.alphabetic,
+    children: [
+      Text(label, style: const TextStyle(fontSize: 11, color: Colors.white54)),
+      const SizedBox(width: 3),
+      Text(
+        value,
+        style: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w900,
+          color: color,
+        ),
+      ),
+    ],
+  );
+
+  Widget _responseTelop() {
+    final text = _commentary ??
+        '${state.cpu.wrestler.name}の${engine.moves[state.pendingAttack!.moveId]!.name}！';
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Text(
+        '📣 $text',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
+  Widget _responseOptionCard(
+    _RespOption o, {
+    required bool isSelected,
+    required bool isRecommended,
+  }) {
+    final Color accent;
+    final String outcomeLabel;
+    final String outcomeDetail;
+    if (o.isTake) {
+      accent = Colors.redAccent;
+      outcomeLabel = '防御';
+      outcomeDetail = 'ダメージを受けます\n何もせず攻撃を受ける\nリスクのある選択です';
+    } else {
+      switch (o.outcome!) {
+        case ClashOutcome.counter:
+          accent = Colors.greenAccent;
+          outcomeLabel = '返し成立！';
+          outcomeDetail = '切り返してダメージを与え、\n相手の攻撃を無効化します';
+        case ClashOutcome.speedWin:
+          accent = Colors.greenAccent;
+          outcomeLabel = '速度勝ち！';
+          outcomeDetail = 'この技で攻撃をつぶし、\n相手の攻撃を無効化します';
+        case ClashOutcome.neutral:
+          accent = Colors.white54;
+          outcomeLabel = '互角';
+          outcomeDetail = '攻撃側が優先されます\nダメージを与えられます';
+        case ClashOutcome.speedLoss:
+          accent = Colors.white38;
+          outcomeLabel = '速度負け';
+          outcomeDetail = '攻撃は通りますが、\nダメージは与えられます';
+      }
+    }
+    final borderColor = isSelected ? _gold : accent.withValues(alpha: 0.7);
+    return GestureDetector(
+      onTap: () => setState(() => _selResponseKey = o.key),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 168,
+        margin: EdgeInsets.symmetric(
+          horizontal: 6,
+          vertical: isSelected ? 2 : 10,
+        ),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              accent.withValues(alpha: 0.16),
+              Colors.black.withValues(alpha: 0.4),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor, width: isSelected ? 2.5 : 1.5),
+          boxShadow: isSelected
+              ? [BoxShadow(color: _gold.withValues(alpha: 0.5), blurRadius: 12)]
+              : null,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 20,
+                child: isRecommended
+                    ? Container(
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _gold,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          '★ おすすめ！',
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 12,
+                          ),
+                        ),
+                      )
+                    : null,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                o.label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              if (o.attribute != null)
+                Center(child: attributeBadge(o.attribute!, size: 26))
+              else
+                const Icon(Icons.shield, color: Colors.redAccent, size: 26),
+              const Spacer(),
+              if (!o.isTake)
+                Text(
+                  '速度 ${o.speed}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              const Divider(height: 12),
+              Text(
+                outcomeLabel,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: accent,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                outcomeDetail,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 10.5, color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _speedPredictBar(_RespOption sel, MoveDefinition attackMove) {
+    // 速度比較の色（勝ち=緑 / 分け=黄 / 負け=赤）。
+    Color cmpColor;
+    String yourSpeed;
+    if (sel.isTake) {
+      cmpColor = Colors.redAccent;
+      yourSpeed = '-';
+    } else {
+      yourSpeed = '${sel.speed}';
+      if (sel.outcome == ClashOutcome.counter ||
+          sel.outcome == ClashOutcome.speedWin) {
+        cmpColor = Colors.greenAccent;
+      } else if (sel.speed == attackMove.speed) {
+        cmpColor = _gold;
+      } else {
+        cmpColor = Colors.redAccent;
+      }
+    }
+    // 結果予測（⑥）。
+    final List<String> predict;
+    if (sel.isTake) {
+      predict = ['攻撃が通ります', 'ダメージ ${attackMove.power}', 'フォール阻止なし'];
+    } else {
+      switch (sel.outcome!) {
+        case ClashOutcome.counter:
+          predict = ['返し成立', 'ダメージ ${sel.move!.power}', '攻撃無効', 'フォール阻止'];
+        case ClashOutcome.speedWin:
+          predict = ['速度勝ち', 'ダメージ ${sel.move!.power}', '攻撃無効'];
+        case ClashOutcome.neutral:
+          predict = ['互角（攻撃側優先）', '攻撃が通ります'];
+        case ClashOutcome.speedLoss:
+          predict = ['速度負け', '攻撃が通ります'];
+      }
+    }
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: IntrinsicHeight(
+        child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            flex: 5,
+            child: _panelBox(
+              title: '速度比較',
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _speedSide('あなた', yourSpeed, cmpColor),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: Text('VS', style: TextStyle(color: Colors.white54)),
+                  ),
+                  _speedSide('相手', '${attackMove.speed}',
+                      Colors.lightBlueAccent),
                 ],
               ),
             ),
-            const SizedBox(height: 6),
-            OutlinedButton.icon(
-              onPressed: () => _act(() => engine.respondTake('player')),
-              icon: const Icon(Icons.shield_outlined),
-              label: const Text('受ける（攻撃を通す）'),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            flex: 4,
+            child: _panelBox(
+              title: '結果予測',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    predict.first,
+                    style: TextStyle(
+                      color: cmpColor,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                    ),
+                  ),
+                  Text(
+                    predict.skip(1).join(' / '),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 10.5, color: Colors.white70),
+                  ),
+                ],
+              ),
             ),
+          ),
+        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _speedSide(String label, String value, Color color) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(label, style: const TextStyle(fontSize: 10, color: Colors.white54)),
+      Text(
+        value,
+        style: TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.w900,
+          color: color,
+        ),
+      ),
+    ],
+  );
+
+  Widget _panelBox({required String title, required Widget child}) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.35),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: Colors.white12),
+    ),
+    child: Column(
+      children: [
+        Text(title, style: const TextStyle(fontSize: 11, color: _gold)),
+        const SizedBox(height: 2),
+        child,
+      ],
+    ),
+  );
+
+  Widget _bottomBar(_RespOption selected) => Container(
+    padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+    child: Row(
+      children: [
+        _barIcon(Icons.menu, 'メニュー', () => Navigator.of(context).maybePop()),
+        _barIcon(Icons.chat_bubble_outline, 'ログ', _showLogs),
+        _barIcon(Icons.settings, '設定', _showSettings),
+        const SizedBox(width: 6),
+        Expanded(
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: selected.isTake ? Colors.redAccent : _pink,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            onPressed: () => _commitResponse(selected),
+            icon: const Icon(Icons.double_arrow),
+            label: Text(
+              selected.isTake ? '受ける' : '${selected.label}で対応',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _barIcon(IconData icon, String label, VoidCallback onTap) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 20),
+              Text(label, style: const TextStyle(fontSize: 9)),
+            ],
+          ),
+        ),
+      );
+
+  // ===== 上部バー：TURN + HEATゲージ + 詳細情報（①⑧⑨） =====
+  Widget _topBar() => Container(
+    padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+    child: Row(
+      children: [
+        Column(
+          children: [
+            const Text('TURN',
+                style: TextStyle(fontSize: 9, color: Colors.white54)),
+            Text('${state.turnNumber}',
+                style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w900)),
           ],
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: _heatGauge()),
+        const SizedBox(width: 8),
+        OutlinedButton(
+          onPressed: _showDetailSheet,
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            visualDensity: VisualDensity.compact,
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('詳細情報', style: TextStyle(fontSize: 11)),
+              Icon(Icons.keyboard_arrow_down, size: 16),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
+  ({bool unlocked, int remaining, int threshold, bool has}) _finisherHeatInfo(
+    PlayerLevelMatchState p,
+  ) {
+    WrestlerLevelDefinition? finLevel;
+    for (final l in p.wrestler.levels) {
+      final id = l.finisherId;
+      if (id != null && engine.moves[id]?.category == MoveCategory.finisher) {
+        finLevel = l;
+        break;
+      }
+    }
+    if (finLevel == null) {
+      return (unlocked: false, remaining: 0, threshold: 0, has: false);
+    }
+    var threshold = 20;
+    for (final c in finLevel.unlockCondition?.conditions ?? const []) {
+      if (c.type == UnlockConditionType.heatAtLeast) {
+        threshold = c.value ?? threshold;
+      }
+    }
+    final unlocked = p.unlockedLevels.contains(finLevel.level);
+    final remaining = (threshold - state.sharedHeat).clamp(0, threshold);
+    return (unlocked: unlocked, remaining: remaining, threshold: threshold, has: true);
+  }
+
+  Widget _heatGauge() {
+    final info = _finisherHeatInfo(state.player);
+    final max = info.has && info.threshold > 0 ? info.threshold : 20;
+    final heat = state.sharedHeat;
+    const segments = 10;
+    final filled = ((heat / max) * segments).clamp(0, segments).round();
+    final ready = info.has && (info.unlocked || info.remaining == 0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text('HEAT',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    color: _gold)),
+            const SizedBox(width: 6),
+            Text('$heat / $max',
+                style: const TextStyle(fontSize: 11, color: Colors.white70)),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Row(
+          children: [
+            for (var i = 0; i < segments; i++)
+              Expanded(
+                child: Container(
+                  height: 9,
+                  margin: const EdgeInsets.only(right: 2),
+                  decoration: BoxDecoration(
+                    color: i < filled
+                        ? Color.lerp(_gold, _pink, i / segments)!
+                        : Colors.white12,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        if (info.has)
+          Text(
+            ready ? 'フィニッシャー解放！' : 'あと${info.remaining}でフィニッシャー解放',
+            style: TextStyle(
+              fontSize: 9.5,
+              color: ready ? Colors.greenAccent : _gold,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ===== 自分レスラーの簡易パネル（⑨） =====
+  Widget _playerMini(PlayerLevelMatchState p) {
+    final color = Color(int.parse(
+      p.wrestler.themeColor.replaceFirst('#', '0xff'),
+    ));
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [color.withValues(alpha: 0.25), Colors.black26],
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: color,
+            child: Text(
+              p.wrestler.name.isEmpty ? '?' : p.wrestler.name.substring(0, 1),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(p.wrestler.name,
+                        style:
+                            const TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 8),
+                    Text('Lv.${p.currentLevel}',
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.white70)),
+                    const Spacer(),
+                    Text('HP ${p.currentHp}/${p.wrestler.maxHp}',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    minHeight: 6,
+                    value: p.wrestler.maxHp == 0
+                        ? 0
+                        : p.currentHp / p.wrestler.maxHp,
+                    backgroundColor: Colors.white12,
+                    color: _pink,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text('手札 ${p.hand.length}枚',
+                        style: const TextStyle(fontSize: 11)),
+                    const SizedBox(width: 12),
+                    Text('HEAT ${state.sharedHeat}',
+                        style: const TextStyle(fontSize: 11, color: _gold)),
+                    const Spacer(),
+                    InkWell(
+                      onTap: _showDetailSheet,
+                      child: const Row(
+                        children: [
+                          Text('詳細ステータス',
+                              style: TextStyle(
+                                  fontSize: 11, color: Colors.white70)),
+                          Icon(Icons.keyboard_arrow_up,
+                              size: 14, color: Colors.white70),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===== 詳細情報シート（KO/RB/FIN/山札 等を集約） =====
+  void _showDetailSheet() {
+    Widget stat(PlayerLevelMatchState f, bool isCpu) => Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${isCpu ? "CPU  " : ""}${f.wrestler.name}',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              children: [
+                Text('Lv.${f.currentLevel}'),
+                Text('HP ${f.currentHp}/${f.wrestler.maxHp}'),
+                Text('解放 ${(f.unlockedLevels.toList()..sort()).join(",")}'),
+                Text('山札 ${f.deck.length}'),
+                Text('手札 ${f.hand.length}'),
+                Text('KO ${f.kickOutCards}',
+                    style: const TextStyle(color: _gold)),
+                Text('RB ${f.ropeBreakCards}',
+                    style: const TextStyle(color: _gold)),
+                Text('FIN ${f.finisherUsed ? "USED" : "READY"}',
+                    style: TextStyle(
+                        color: f.finisherUsed
+                            ? Colors.white38
+                            : Colors.greenAccent)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text('SET ${_attributeCounts(f.setAttributeCounts)}',
+                style: const TextStyle(color: _gold, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('詳細ステータス',
+                  style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              stat(state.cpu, true),
+              stat(state.player, false),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showSettings() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (_, setSheet) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('設定',
+                    style: TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+              SwitchListTile(
+                value: _showRecommend,
+                title: const Text('おすすめ表示'),
+                subtitle: const Text('最も有利な対応に「おすすめ！」を出す（初心者向け）'),
+                onChanged: (_) {
+                  _toggleRecommend();
+                  setSheet(() {});
+                },
+              ),
+              const Divider(),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('演出速度',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+              for (final s in MatchSpeed.values)
+                ListTile(
+                  dense: true,
+                  leading: Icon(
+                    s == _speed
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: s == _speed ? _pink : null,
+                  ),
+                  title: Text(matchSpeedLabel(s)),
+                  onTap: () async {
+                    setState(() => _speed = s);
+                    setSheet(() {});
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString(_speedPrefKey, s.name);
+                    if (s != MatchSpeed.manual) _manualGate?.complete();
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showResponseHelp() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text('対応のしかた',
+                  style:
+                      TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              SizedBox(height: 10),
+              Text('① 返し技：相手の技を切り返す。成功すれば攻撃無効＋反撃。'),
+              SizedBox(height: 6),
+              Text('② 対応技：速度が相手より速ければ攻撃をつぶせる（速度勝ち）。'),
+              SizedBox(height: 6),
+              Text('③ 受ける：何もせず攻撃を通す。最後の選択肢。'),
+              SizedBox(height: 10),
+              Text('カードをタップすると「速度比較」と「結果予測」が下に出ます。',
+                  style: TextStyle(color: Colors.white70, fontSize: 13)),
+            ],
+          ),
         ),
       ),
     );
