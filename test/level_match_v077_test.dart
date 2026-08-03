@@ -39,6 +39,8 @@ void main() {
     }
   });
 
+  _editorModelTests();
+
   test('Ver.0.7.7: 各レスラーの固有技・通常技・フィニッシャーが揃う', () {
     for (final w in defaultEditorWrestlers) {
       // 固有技6種（L1-L3 各2）。
@@ -51,5 +53,28 @@ void main() {
       // 固有の通常技を持つ。
       expect(w.basicMoveIds, isNotEmpty);
     }
+  });
+}
+
+// ===== Ver.0.7.7 エディタ関連の回帰 =====
+void _editorModelTests() {
+  test('MoveDefinition.copyWith はUI未対応フィールドを保持する', () {
+    final moves = {for (final m in defaultEditorMoves) m.id: m};
+    final jack = moves['jack_roughslam']!;
+    expect(jack.specialAbilities, contains('cannotCounter'));
+    // 威力だけ変更しても、cannotCounter・速度・consumesSetCards は保持。
+    final edited = jack.copyWith(power: 30);
+    expect(edited.power, 30);
+    expect(edited.specialAbilities, contains('cannotCounter'));
+    expect(edited.speed, jack.speed);
+    expect(edited.consumesSetCards, jack.consumesSetCards);
+  });
+
+  test('WrestlerDefinition.basicMoveIds は JSON 往復で保持される', () {
+    final akari =
+        defaultEditorWrestlers.firstWhere((w) => w.id == 'wrestler_akari');
+    expect(akari.basicMoveIds[MoveAttribute.strike], 'akari_nt_strike');
+    final round = WrestlerDefinition.fromJson(akari.toJson());
+    expect(round.basicMoveIds, akari.basicMoveIds);
   });
 }
