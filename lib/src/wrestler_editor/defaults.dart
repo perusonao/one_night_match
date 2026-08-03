@@ -138,25 +138,25 @@ final defaultEditorMoves = <MoveDefinition>[
   _move('dropkick', 'ドロップキック', MoveAttribute.strike, 14, 3, cost: 1),
   _move('elbow', 'エルボー', MoveAttribute.strike, 12, 2, cost: 1),
   _move('running_knee', 'ランニングニー', MoveAttribute.strike, 18, 4, cost: 2, down: true),
-  _move('high_kick', 'ハイキック', MoveAttribute.strike, 24, 5, cost: 3, down: true),
-  _move('lariat', '豪腕ラリアット', MoveAttribute.strike, 22, 3,
+  _move('high_kick', 'ハイキック', MoveAttribute.strike, 24, 5, cost: 3, down: true, speed: 8),
+  _move('lariat', '豪腕ラリアット', MoveAttribute.strike, 18, 3,
       cost: 2, down: true, cannotCounterTypes: [MoveAttribute.strike]),
   // 投げ（フォール可能）。
   _move('arm_drag', 'アームドラッグ', MoveAttribute.throwMove, 12, 2,
-      cost: 1, pin: true, pinPower: 3),
-  _move('body_slam', 'ボディスラム', MoveAttribute.throwMove, 15, 3,
       cost: 1, pin: true, pinPower: 4),
+  _move('body_slam', 'ボディスラム', MoveAttribute.throwMove, 15, 3,
+      cost: 1, pin: true, pinPower: 2),
   _move('neckbreaker', 'ネックブリーカー', MoveAttribute.throwMove, 20, 4,
       cost: 2, pin: true, pinPower: 5),
   _move('brainbuster', 'ブレーンバスター', MoveAttribute.throwMove, 22, 5,
-      cost: 2, pin: true, pinPower: 6),
-  _move('backdrop', 'バックドロップ', MoveAttribute.throwMove, 22, 5,
-      cost: 2, pin: true, pinPower: 5),
+      cost: 2, pin: true, pinPower: 6, speed: 7),
+  _move('backdrop', 'バックドロップ', MoveAttribute.throwMove, 18, 5,
+      cost: 2, pin: true, pinPower: 3),
   _move('dragon_suplex', 'ドラゴンスープレックス', MoveAttribute.throwMove, 28, 6,
-      cost: 3, pin: true, pinPower: 8),
-  // Ver.0.7.2: 豪田ミサキ弱体化（フォール性能を抑制）。
-  _move('powerbomb', 'パワーボム', MoveAttribute.throwMove, 24, 6,
-      cost: 3, pin: true, pinPower: 6),
+      cost: 3, pin: true, pinPower: 9, speed: 7),
+  // Ver.0.7.2/0.7.3: 豪田ミサキ弱体化（フォール性能を抑制）。
+  _move('powerbomb', 'パワーボム', MoveAttribute.throwMove, 20, 6,
+      cost: 3, pin: true, pinPower: 3),
   // 関節（ギブアップ可能）。
   _move('armbar', '腕ひしぎ十字固め', MoveAttribute.submission, 18, 4,
       cost: 2, submission: true, submissionPower: 5),
@@ -167,16 +167,18 @@ final defaultEditorMoves = <MoveDefinition>[
   _move('cross_face', 'クロスフェイス', MoveAttribute.submission, 24, 5,
       cost: 3, submission: true, submissionPower: 8),
   // 凶（ヒール）。Ver.0.7.2: ジャックの“嫌らしさ” = 返しにくく高威力の妨害技。
-  _move('rough_slam', 'ラフ投げ', MoveAttribute.rough, 26, 2,
-      cost: 2, pin: true, pinPower: 10, speed: 7,
+  // Ver.0.7.3: ジャックの妨害技を高速化。cannotCounterに加えSpeedでも潰されにくくし、
+  // “嫌らしく主導権を握る”個性を機能させる（速い単体技に一方的に負けない）。
+  _move('rough_slam', 'ラフ投げ', MoveAttribute.rough, 22, 2,
+      cost: 2, pin: true, pinPower: 8, speed: 9,
       specialAbilities: ['cannotCounter']),
-  _move('low_blow', '急所攻撃', MoveAttribute.rough, 18, -1,
-      cost: 1, down: true, speed: 8, specialAbilities: ['cannotCounter']),
-  _move('chair_attack', 'チェアー攻撃', MoveAttribute.rough, 26, -2,
-      cost: 2, pin: true, pinPower: 8, speed: 6,
+  _move('low_blow', '急所攻撃', MoveAttribute.rough, 16, -1,
+      cost: 1, down: true, speed: 9, specialAbilities: ['cannotCounter']),
+  _move('chair_attack', 'チェアー攻撃', MoveAttribute.rough, 22, -2,
+      cost: 2, pin: true, pinPower: 7, speed: 9,
       specialAbilities: ['cannotCounter']),
-  _move('neckbreaker_heel', '毒霧ネックブリーカー', MoveAttribute.rough, 24, 1,
-      cost: 2, pin: true, pinPower: 9, speed: 6,
+  _move('neckbreaker_heel', '毒霧ネックブリーカー', MoveAttribute.rough, 22, 1,
+      cost: 2, pin: true, pinPower: 7, speed: 8,
       specialAbilities: ['cannotCounter']),
   // 飛（フォール可能）。
   _move('moonsault', 'ムーンサルトプレス', MoveAttribute.aerial, 27, 7,
@@ -197,14 +199,16 @@ final defaultEditorMoves = <MoveDefinition>[
     counterTypes: const [MoveAttribute.throwMove], // 投げ技を切り返す
   ),
   // フィニッシャー（各レスラー固有・決着直結）。
-  _finisher('high_speed_german', 'ハイスピード・ジャーマン', MoveAttribute.throwMove,
-      pinfall: true, strength: 8),
+  // Ver.0.7.3: アカリのフィニッシャーを strike に。彼女のデッキ傾向（打撃/空中）と
+  // 属性を一致させ、切り札を組み立て可能にする（決着ルートを機能させる）。
+  _finisher('high_speed_german', 'ハイスピード・ジャーマン', MoveAttribute.strike,
+      pinfall: true, strength: 15),
   _finisher('gouda_driver', '豪田ドライバー', MoveAttribute.throwMove,
-      pinfall: true, strength: 12),
+      pinfall: true, strength: 7),
   _finisher('silver_lock', '白銀式クロスロック', MoveAttribute.submission,
-      pinfall: false, strength: 12),
+      pinfall: false, strength: 13),
   _finisher('black_butterfly', 'ブラック・バタフライ', MoveAttribute.rough,
-      pinfall: true, strength: 14),
+      pinfall: true, strength: 11),
   // Ver.0.7 単体技（全レスラー共通・手札から直接使用）。
   ...defaultBasicMoves,
 ];
@@ -341,6 +345,13 @@ const _blueprints = <_WrestlerBlueprint>[
   ),
 ];
 
+/// Ver.0.7.3: レスラー別の最大HP（キックアウト耐久＝フォール応酬の強さ）。
+const _maxHpById = <String, int>{
+  'wrestler_akari': 125, // 打たれ強い主人公
+  'wrestler_misaki': 82, // 一撃は重いが打たれ弱い女帝
+  'wrestler_reina': 104, // 粘って関節で仕留めるテクニシャン
+};
+
 final defaultEditorWrestlers = <WrestlerDefinition>[
   for (final item in _blueprints)
     WrestlerDefinition(
@@ -348,7 +359,9 @@ final defaultEditorWrestlers = <WrestlerDefinition>[
       name: item.name,
       subtitle: item.subtitle,
       type: item.type,
-      maxHp: 100,
+      // Ver.0.7.3: 体力を個性化。HPはキックアウト耐久（フォール応酬）に効くため、
+      // 打たれ強いアカリを厚く、一撃屋ミサキを薄くしてバランスを取る。
+      maxHp: _maxHpById[item.id] ?? 100,
       description: 'Ver.0.5 フォール・ギブアップ試作版の仮データです。既存Ver.0.2対戦には接続されません。',
       themeColor: item.color,
       tags: [wrestlerTypeLabel(item.type), '仮データ'],

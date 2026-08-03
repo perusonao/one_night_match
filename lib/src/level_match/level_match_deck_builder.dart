@@ -220,16 +220,18 @@ class LevelMatchDeckBuilder {
   /// レスラータイプ別の属性重みバイアス（1.0=中立）。
   Map<MoveAttribute, double> _typeBias(EditorWrestlerType type) => switch (type) {
     // Ver.0.7.2: 強者を過度に増幅しないよう控えめに。ジャック(heel)は厚めに。
-    EditorWrestlerType.power => {MoveAttribute.throwMove: 1.15},
+    EditorWrestlerType.power => {MoveAttribute.throwMove: 1.05},
     EditorWrestlerType.heel => {MoveAttribute.rough: 1.6},
     EditorWrestlerType.technician => {MoveAttribute.submission: 1.4},
     EditorWrestlerType.highSpeed => {
       MoveAttribute.strike: 1.3,
       MoveAttribute.aerial: 1.4,
     },
+    // Ver.0.7.3: アカリは打撃技＋打撃フィニッシャー主体。空中カードは死札に
+    // なりやすいので打撃へ寄せ、切り札の組み立てと手数を安定させる。
     EditorWrestlerType.babyface => {
-      MoveAttribute.strike: 1.25,
-      MoveAttribute.aerial: 1.25,
+      MoveAttribute.strike: 1.5,
+      MoveAttribute.throwMove: 1.2,
     },
     EditorWrestlerType.striker => {MoveAttribute.strike: 1.4},
     _ => const {},

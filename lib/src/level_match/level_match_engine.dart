@@ -54,8 +54,10 @@ class PendingAttack {
 }
 
 /// Ver.0.6 バランス定数。
-const int kKickOutPenaltyStep = 5; // キックアウト成功ごとの必要HP増加
-const int kEscapePenaltyStep = 5; // ギブアップ耐久成功ごとの必要HP増加
+// Ver.0.7.3: 応酬ごとの必要HP増加を強め、フォール/ギブアップ合戦が
+// 長引かず終盤へ収束するように（平均ターン短縮＝“間延び”是正）。
+const int kKickOutPenaltyStep = 7; // キックアウト成功ごとの必要HP増加
+const int kEscapePenaltyStep = 7; // ギブアップ耐久成功ごとの必要HP増加
 const int kKickOutHeatGain = 5; // キックアウト成功時のHEAT
 const int kEscapeHeatGain = 3; // ギブアップ耐久成功時のHEAT
 const int kFinisherKickOutHpCost = 40; // フィニッシャーのHPキックアウト固定コスト
@@ -1443,9 +1445,73 @@ class LevelMatchEngine {
     }
   }
 
+  /// Ver.0.7.3: actor が今バンクを進めるべきフィニッシャー
+  /// （現Levelに登録済み・未使用）。無ければ null。
+  MoveDefinition? _finisherToBank(PlayerLevelMatchState actor) {
+    if (actor.finisherUsed) return null;
+    final id = actor.levelCard.finisherId;
+    if (id == null) return null;
+    final fin = moves[id];
+    if (fin == null || fin.category != MoveCategory.finisher) return null;
+    return fin;
+  }
+
+  /// Ver.0.7.3: いま切り札を狙うべき局面か。
+  /// 序中盤は通常攻防で試合を作り、相手が弱ってきたら“決め”に切り替える。
+  bool _shouldPursueFinisher(PlayerLevelMatchState actor) {
+    // 現Levelに依存せず「フィニッシャーを持ち・未使用」で判定する
+    // （L3へ上がる前から“狙う”意思を持てるようにする）。
+    if (actor.finisherUsed) return false;
+    if (_finisherLevelOf(actor) == null) return false;
+    final opponent = _opponentOf(actor);
+    // Ver.0.7.3: “決めに行く”のを終盤に寄せる。序中盤は通常攻防で試合を作り、
+    // 相手が十分削れてから切り札を狙う（試合の間延び・切り札過多を抑制）。
+    return opponent.currentHp <= 40 || state.sharedHeat >= 65;
+  }
+
+  /// フィニッシャーの必須カードがまだ揃っていない（バンク継続が必要）か。
+  bool _needsMoreForFinisher(PlayerLevelMatchState actor, MoveDefinition fin) {
+    return _finisherCardsShort(actor, fin) > 0;
+  }
+
+  /// フィニッシャー成立まであと何枚必要か（不足合計）。
+  int _finisherCardsShort(PlayerLevelMatchState actor, MoveDefinition fin) {
+    final counts = actor.setAttributeCounts;
+    var short = 0;
+    for (final entry in fin.requiredCards.entries) {
+      final lack = entry.value - (counts[entry.key] ?? 0);
+      if (lack > 0) short += lack;
+    }
+    return short;
+  }
+
+  /// Ver.0.7.3: フィニッシャーが解禁されているレベル（無ければ null）。
+  int? _finisherLevelOf(PlayerLevelMatchState actor) {
+    for (final level in actor.wrestler.levels) {
+      final id = level.finisherId;
+      if (id != null && (moves[id]?.category == MoveCategory.finisher)) {
+        return level.level;
+      }
+    }
+    return null;
+  }
+
   void _autoSetCard(PlayerLevelMatchState actor) {
     final id = actor.playerId;
-    final desired = _desiredAttributes(actor);
+    // Ver.0.7.3: フィニッシャー始動中は、不足している必須属性を最優先でバンクする。
+    final fin = _finisherToBank(actor);
+    final Set<MoveAttribute> desired;
+    if (fin != null &&
+        _shouldPursueFinisher(actor) &&
+        _needsMoreForFinisher(actor, fin)) {
+      final counts = actor.setAttributeCounts;
+      desired = {
+        for (final entry in fin.requiredCards.entries)
+          if ((counts[entry.key] ?? 0) < entry.value) entry.key,
+      };
+    } else {
+      desired = _desiredAttributes(actor);
+    }
     final candidates = actor.hand
         .where((card) => desired.contains(card.attribute))
         .toList();
@@ -1472,6 +1538,21 @@ class LevelMatchEngine {
             .where((level) => level != actor.currentLevel)
             .toList()
           ..sort();
+    // Ver.0.7.3: フィニッシャー登録レベルが解禁されたら、そこへ上がって切り札を狙う。
+    // （切り札は威力・信頼性が高く、決着に直結する。多少の火力減は許容。）
+    final finLevel = _finisherLevelOf(actor);
+    if (finLevel != null &&
+        !actor.finisherUsed &&
+        _shouldPursueFinisher(actor) &&
+        actor.currentLevel != finLevel &&
+        actor.unlockedLevels.contains(finLevel)) {
+      _log(actor, 'cpuDecision', 'フィニッシャーを狙いLevel $finLevelへ', {
+        'candidates': options,
+        'selectionReason': 'setupFinisher',
+      });
+      changeLevel(id, finLevel);
+      return;
+    }
     int? best;
     var bestDamage = _bestDamage(actor, actor.currentLevel);
     for (final level in options) {
@@ -1499,6 +1580,27 @@ class LevelMatchEngine {
         .where((move) => !move.isCounterMove || move.canUseAsNormalMove)
         .where((move) => evaluateMove(actor, move).usable)
         .toList();
+    // Ver.0.7.3: フィニッシャー始動中は、必須属性カードを消費する固有技を温存し、
+    // 切り札のバンクを優先する（切り札そのものは揃えば使う）。揃うまでは
+    // 別属性の固有技か単体技（コスト消費なし）で攻める。
+    final fin = _finisherToBank(actor);
+    // 切り札まで残り1枚のときだけ、必須属性を消費する固有技を温存する
+    // （序中盤は通常攻防で試合を作り、停滞＝“単体技しか出せない”期間を短くする）。
+    if (fin != null &&
+        _shouldPursueFinisher(actor) &&
+        _finisherCardsShort(actor, fin) == 1) {
+      final needed = <MoveAttribute>{
+        for (final entry in fin.requiredCards.entries)
+          if ((actor.setAttributeCounts[entry.key] ?? 0) < entry.value)
+            entry.key,
+      };
+      candidates.removeWhere((move) {
+        if (move.id == fin.id) return false;
+        final cost =
+            move.consumesSetCards ? move.requiredCards : move.discardAfterUse;
+        return cost.keys.any(needed.contains);
+      });
+    }
     if (candidates.isEmpty) {
       // Ver.0.7: 固有技が使えなければ単体技で攻める（手札があれば）。
       final basicCard = actor.hand
