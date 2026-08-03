@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../screens.dart' show TitleScreen;
 import '../game.dart' show GameCatalog;
@@ -14,6 +16,39 @@ import 'level_match_finish_models.dart';
 
 const _pink = Color(0xffff477e);
 const _gold = Color(0xffffc857);
+
+/// Ver.0.3 演出：CPUターンの進行速度。ルールには影響しない。
+enum MatchSpeed { fast, normal, slow, manual }
+
+String matchSpeedLabel(MatchSpeed s) => switch (s) {
+  MatchSpeed.fast => '高速',
+  MatchSpeed.normal => '通常（推奨）',
+  MatchSpeed.slow => 'ゆっくり',
+  MatchSpeed.manual => '手動送り',
+};
+
+const _speedPrefKey = 'onm_match_speed';
+
+/// 1ステップあたりの基本ウェイト。
+Duration matchStepDelay(MatchSpeed s) => switch (s) {
+  MatchSpeed.fast => const Duration(milliseconds: 130),
+  MatchSpeed.normal => const Duration(milliseconds: 560),
+  MatchSpeed.slow => const Duration(milliseconds: 950),
+  MatchSpeed.manual => Duration.zero,
+};
+
+/// 山場（フォール/キックアウト/解放）で追加する“ため”。
+const _dramaticActions = {
+  'attackDeclared',
+  'pinAttempt',
+  'kickOut',
+  'threeCount',
+  'submissionAttempt',
+  'submissionEscape',
+  'submissionFinish',
+  'unlockLevel',
+  'clashResolution',
+};
 
 String finishReasonLabel(LevelFinishReason? reason) => switch (reason) {
   LevelFinishReason.pinfall => '3カウント',
@@ -308,7 +343,13 @@ class LevelMatchBattleScreen extends StatefulWidget {
 class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   LevelMatchEngine get engine => widget.engine;
   LevelMatchState get state => engine.state;
-  bool cpuBusy = false;
+  bool _driving = false;
+
+  // Ver.0.3 演出用の状態（ルールには影響しない）。
+  MatchSpeed _speed = MatchSpeed.normal;
+  Completer<void>? _manualGate;
+  String? _commentary; // 実況テキスト
+  String? _cpuThought; // CPUの思考
 
   LevelMatchCostPreview get _preview => LevelMatchCostPreview(
     wrestler: state.player.wrestler,
@@ -318,7 +359,49 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _continueCpu());
+    SharedPreferences.getInstance().then((prefs) {
+      final raw = prefs.getString(_speedPrefKey);
+      final loaded = MatchSpeed.values
+          .cast<MatchSpeed?>()
+          .firstWhere((s) => s!.name == raw, orElse: () => null);
+      if (mounted && loaded != null) setState(() => _speed = loaded);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _drive());
+    });
+  }
+
+  Future<void> _pickSpeed() async {
+    final chosen = await showModalBottomSheet<MatchSpeed>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                '演出速度',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+            for (final s in MatchSpeed.values)
+              ListTile(
+                leading: Icon(
+                  s == _speed ? Icons.radio_button_checked : Icons.radio_button_off,
+                  color: s == _speed ? _pink : null,
+                ),
+                title: Text(matchSpeedLabel(s)),
+                onTap: () => Navigator.pop(context, s),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null) return;
+    setState(() => _speed = chosen);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_speedPrefKey, chosen.name);
+    // 手動待機中に高速へ切替えたら解除して再開。
+    if (chosen != MatchSpeed.manual) _manualGate?.complete();
   }
 
   @override
@@ -329,6 +412,14 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       appBar: AppBar(
         title: const Text('LEVEL CARD MATCH'),
         actions: [
+          TextButton.icon(
+            onPressed: _pickSpeed,
+            icon: const Icon(Icons.speed, size: 18),
+            label: Text(
+              matchSpeedLabel(_speed).replaceAll('（推奨）', ''),
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
           IconButton(
             tooltip: 'ログ全文',
             onPressed: _showLogs,
@@ -346,6 +437,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
             children: [
               _fighterPanel(cpu, isCpu: true),
               _matchCenter(),
+              _commentaryBanner(),
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(10, 4, 10, 120),
@@ -505,6 +597,64 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       ],
     ),
   );
+
+  Widget _commentaryBanner() {
+    final showThought = _cpuThought != null && _driving;
+    final manual = _manualGate != null;
+    if (_commentary == null && !_driving && !manual) {
+      return const SizedBox.shrink();
+    }
+    // 山場の演出：フォールカウントを強調。
+    final isCount = _commentary != null &&
+        (_commentary!.contains('ONE') ||
+            _commentary!.contains('THREE') ||
+            _commentary!.contains('2.9'));
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isCount ? _pink.withValues(alpha: 0.22) : Colors.black26,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isCount ? _pink : Colors.white24,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_commentary != null)
+            Text(
+              _commentary!,
+              style: TextStyle(
+                fontSize: isCount ? 22 : 14,
+                fontWeight: isCount ? FontWeight.w900 : FontWeight.w600,
+                color: isCount ? _gold : Colors.white,
+              ),
+            ),
+          if (showThought)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                '🤖 CPU: $_cpuThought',
+                style: const TextStyle(fontSize: 11, color: Colors.white70),
+              ),
+            ),
+          if (manual)
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: () {
+                  _manualGate?.complete();
+                },
+                icon: const Icon(Icons.play_arrow, size: 18),
+                label: const Text('次へ'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _interactionArea() {
     final pin = state.pendingPin;
@@ -1174,7 +1324,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       if (state.isGameOver) {
         _finish();
       } else if (continueCpu) {
-        _continueCpu();
+        _drive();
       }
     } on Object catch (error) {
       ScaffoldMessenger.of(
@@ -1183,17 +1333,57 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     }
   }
 
-  Future<void> _continueCpu() async {
-    if (cpuBusy || state.isGameOver || !engine.cpuActionPending) return;
-    cpuBusy = true;
-    await Future<void>.delayed(const Duration(milliseconds: 350));
+  /// CPUの判断を1ステップずつ、速度設定に応じて演出しながら進める。
+  Future<void> _drive() async {
+    if (_driving || !mounted || state.isGameOver) return;
+    _driving = true;
     while (mounted && engine.cpuActionPending && !state.isGameOver) {
-      setState(engine.runCpuTurn);
-      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await _pace();
+      if (!mounted) break;
+      final before = state.logs.length;
+      setState(engine.autoAdvance);
+      _updateCommentary(before);
+      await _dramaticPause(before);
     }
-    cpuBusy = false;
+    _driving = false;
     if (mounted) setState(() {});
     if (state.isGameOver && mounted) await _finish();
+  }
+
+  Future<void> _pace() async {
+    if (_speed == MatchSpeed.manual) {
+      final gate = Completer<void>();
+      setState(() => _manualGate = gate);
+      await gate.future;
+      if (mounted) setState(() => _manualGate = null);
+    } else {
+      await Future<void>.delayed(matchStepDelay(_speed));
+    }
+  }
+
+  void _updateCommentary(int fromIndex) {
+    if (fromIndex >= state.logs.length) return;
+    final fresh = state.logs.sublist(fromIndex);
+    for (final log in fresh.reversed) {
+      if (log.action == 'cpuDecision') {
+        _cpuThought = log.message;
+      }
+    }
+    // 実況として最も意味のある行を選ぶ（cpuDecisionは思考欄へ）。
+    final headline = fresh.lastWhere(
+      (l) => l.action != 'cpuDecision',
+      orElse: () => fresh.last,
+    );
+    setState(() => _commentary = headline.message);
+  }
+
+  Future<void> _dramaticPause(int fromIndex) async {
+    if (_speed == MatchSpeed.manual || _speed == MatchSpeed.fast) return;
+    if (fromIndex >= state.logs.length) return;
+    final fresh = state.logs.sublist(fromIndex);
+    if (fresh.any((l) => _dramaticActions.contains(l.action))) {
+      await Future<void>.delayed(matchStepDelay(_speed));
+    }
   }
 
   Future<void> _finish() async {
@@ -1259,23 +1449,58 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     ),
   );
 
-  void _showLogs() => showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    builder: (_) => DraggableScrollableSheet(
-      expand: false,
-      builder: (_, controller) => ListView(
-        controller: controller,
-        children: [
-          for (final log in state.logs.reversed)
-            ListTile(
-              title: Text('T${log.turn} ${log.message}'),
-              subtitle: Text('${log.phase} / ${log.action}'),
+  void _showLogs() {
+    // ターンごとにグルーピングした試合ログ。
+    final byTurn = <int, List<LevelMatchLogEntry>>{};
+    for (final log in state.logs) {
+      byTurn.putIfAbsent(log.turn, () => []).add(log);
+    }
+    final turns = byTurn.keys.toList()..sort((a, b) => b.compareTo(a));
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        builder: (_, controller) => ListView(
+          controller: controller,
+          padding: const EdgeInsets.all(12),
+          children: [
+            const Text(
+              '試合ログ',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-        ],
+            for (final turn in turns)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'TURN $turn',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: _gold,
+                        ),
+                      ),
+                      for (final log in byTurn[turn]!)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            '・${log.message}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _LevelCostTile extends StatelessWidget {
