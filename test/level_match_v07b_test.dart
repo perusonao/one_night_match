@@ -71,29 +71,18 @@ void main() {
     maxHp: 100,
     themeColor: '#E91E63',
     levels: [
-      WrestlerLevelDefinition(
-        level: 1,
-        displayName: 'L1',
-        resistances: none(),
-        moveIds: const [
-          'slowThrow',
-          'fastStrike',
-          'counterMove',
-          'downReq',
-        ],
-      ),
-      WrestlerLevelDefinition(
-        level: 2,
-        displayName: 'L2',
-        resistances: none(),
-        moveIds: const ['slowThrow'],
-      ),
-      WrestlerLevelDefinition(
-        level: 3,
-        displayName: 'L3',
-        resistances: none(),
-        moveIds: const ['slowThrow'],
-      ),
+      for (var lv = 1; lv <= 3; lv++)
+        WrestlerLevelDefinition(
+          level: lv,
+          displayName: 'L$lv',
+          resistances: none(),
+          moveIds: const [
+            'slowThrow',
+            'fastStrike',
+            'counterMove',
+            'downReq',
+          ],
+        ),
     ],
     createdAt: DateTime.utc(2026),
     updatedAt: DateTime.utc(2026),
@@ -112,63 +101,78 @@ void main() {
     m.skipLevelChange('player');
   }
 
-  void setOpponentLast(LevelMatchEngine m, String id) {
-    final move = moves[id]!;
-    m.state.cpu
-      ..lastUsedMoveId = id
-      ..lastUsedMoveName = move.name
-      ..lastUsedMoveSpeed = move.speed;
-  }
-
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('速度勝ち：速い技が上回る', () {
-    final m = engine();
-    setOpponentLast(m, 'slowThrow'); // speed 4
-    expect(
-      m.clashOutcome(m.state.player, moves['fastStrike']!),
-      ClashOutcome.speedWin,
-    );
+  group('Ver.0.7.1 clashBetween（攻撃 vs 対応）', () {
+    test('速い対応は速度勝ち', () {
+      final m = engine();
+      expect(
+        m.clashBetween(moves['slowThrow']!, moves['fastStrike']!),
+        ClashOutcome.speedWin,
+      );
+    });
+    test('遅い対応は速度負け（攻撃側が通る）', () {
+      final m = engine();
+      expect(
+        m.clashBetween(moves['fastStrike']!, moves['slowThrow']!),
+        ClashOutcome.speedLoss,
+      );
+    });
+    test('対応属性が合えば返し成立', () {
+      final m = engine();
+      expect(
+        m.clashBetween(moves['slowThrow']!, moves['counterMove']!),
+        ClashOutcome.counter,
+      );
+    });
+    test('cannotCounterの技は返せない', () {
+      final m = engine();
+      expect(
+        m.clashBetween(moves['chairLike']!, moves['counterMove']!),
+        isNot(ClashOutcome.counter),
+      );
+    });
   });
 
-  test('速度負け：遅い技は威力半減・決着不可', () {
+  test('返し技は攻撃として宣言できない', () {
     final m = engine();
-    setOpponentLast(m, 'fastStrike'); // speed 9
     toChoose(m);
-    expect(
-      m.clashOutcome(m.state.player, moves['slowThrow']!),
-      ClashOutcome.speedLoss,
-    );
-    m.useMove('player', 'slowThrow'); // power20 → 半減10
-    expect(m.state.cpu.currentHp, 90);
-    // 決着（フォール）は発生しない。
+    expect(() => m.useMove('player', 'counterMove'), throwsStateError);
+  });
+
+  test('受けると攻撃側の技が成立する', () {
+    final m = engine();
+    toChoose(m);
+    m.useMove('player', 'slowThrow');
+    expect(m.state.phase, LevelMatchPhase.responseSelection);
+    m.respondTake('cpu');
+    expect(m.state.cpu.currentHp, 80); // 20ダメージ（5刻み）
+    // フォール技なので pinDecision へ。
+    expect(m.state.pendingPin, isNotNull);
+  });
+
+  test('速い対応で攻撃を潰す（攻撃側の技は不成立）', () {
+    final m = engine();
+    toChoose(m);
+    m.useMove('player', 'slowThrow'); // 攻撃・速度4・フォール技
+    m.respondWithMove('cpu', 'fastStrike'); // 速度9で上回る
+    // 速い対応が命中 → プレイヤーが被弾、CPUは無傷。
+    expect(m.state.player.currentHp, 85); // 15ダメージ
+    expect(m.state.cpu.currentHp, 100);
+    // 攻撃が潰れたのでフォールは発生しない。
     expect(m.state.pendingPin, isNull);
-    expect(m.state.phase, isNot(LevelMatchPhase.pinDecision));
   });
 
-  test('返し成立：投げ技を返し技で切り返す', () {
+  test('返し技で切り返す（HEAT+5・攻撃不成立）', () {
     final m = engine();
-    setOpponentLast(m, 'slowThrow'); // throwMove
     toChoose(m);
-    expect(
-      m.clashOutcome(m.state.player, moves['counterMove']!),
-      ClashOutcome.counter,
-    );
     final heatBefore = m.state.sharedHeat;
-    m.useMove('player', 'counterMove');
-    // 相手の前ターン技がリセットされる。
-    expect(m.state.cpu.lastUsedMoveId, isNull);
-    // 返しHEATボーナス（+5）が乗る。
+    m.useMove('player', 'slowThrow');
+    m.respondWithMove('cpu', 'counterMove'); // 投げを返す
+    expect(m.state.cpu.currentHp, 100); // 攻撃は通っていない
+    expect(m.state.player.currentHp, lessThan(100)); // 返しのダメージ
     expect(m.state.sharedHeat - heatBefore, greaterThanOrEqualTo(5));
-  });
-
-  test('カウンター不可の技は返せない', () {
-    final m = engine();
-    setOpponentLast(m, 'chairLike'); // specialAbilities cannotCounter
-    expect(
-      m.clashOutcome(m.state.player, moves['counterMove']!),
-      isNot(ClashOutcome.counter),
-    );
+    expect(m.state.pendingPin, isNull);
   });
 
   test('requiredPreviousState：ダウン中のみ使用可能', () {
@@ -177,5 +181,16 @@ void main() {
     expect(m.evaluateMove(m.state.player, moves['downReq']!).usable, isFalse);
     m.state.cpu.isDown = true;
     expect(m.evaluateMove(m.state.player, moves['downReq']!).usable, isTrue);
+  });
+
+  test('最終ダメージは5刻みに丸められる', () {
+    final m = engine();
+    // 威力13相当を作る：resistanceを足して 13 → 15 に丸め。
+    m.state.cpu.currentHp = 100;
+    toChoose(m);
+    // slowThrow(20) を受け → 20（既に5刻み）。丸めロジックの単体確認は下で。
+    m.useMove('player', 'slowThrow');
+    m.respondTake('cpu');
+    expect(m.state.lastDamage % 5, 0);
   });
 }

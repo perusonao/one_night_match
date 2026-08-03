@@ -100,6 +100,7 @@ void main() {
         orElse: () => match.state.player.hand.first,
       );
       match.useBasicMove('player', card.instanceId);
+      match.respondTake('cpu');
       expect(match.state.player.hand.length, handBefore - 1);
       expect(match.state.cpu.currentHp, lessThanOrEqualTo(cpuHpBefore));
       // 単体技は決着を発生させない → 相手ターンへ。

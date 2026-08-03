@@ -101,6 +101,7 @@ void main() {
       advanceToMove(match, throwSet: 1);
       final heatBefore = match.state.sharedHeat;
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       match.declarePin('player');
       match.state.cpu.currentHp = 90;
       match.kickOut('cpu', DefenseMethod.hp);
@@ -113,6 +114,7 @@ void main() {
       // 1回目
       advanceToMove(match, throwSet: 1);
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       match.declarePin('player');
       match.state.cpu.currentHp = 90;
       match.kickOut('cpu', DefenseMethod.hp);
@@ -127,6 +129,7 @@ void main() {
       match.skipSetCard('player');
       match.skipLevelChange('player');
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       final pin = match.state.pendingPin!;
       expect(
         pin.hpKickOutCost,
@@ -142,6 +145,7 @@ void main() {
       ..unlockedLevels.add(3);
     advanceToMove(match, throwSet: 3);
     match.useMove('player', 'finPin');
+    match.respondTake('cpu');
     final pin = match.state.pendingPin!;
     expect(pin.fromFinisher, isTrue);
     expect(pin.hpKickOutCost, kFinisherKickOutHpCost);

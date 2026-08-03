@@ -245,6 +245,7 @@ void main() {
       match.state.cpu.currentHp = 5;
       advanceToMove(match, set: {MoveAttribute.strike: 1});
       match.useMove('player', 'downMove'); // 打撃はフォールに移行しない
+      match.respondTake('cpu');
       expect(match.state.cpu.currentHp, 0);
       expect(match.state.isGameOver, isFalse);
       expect(match.state.cpu.hpZeroReachedTurn, isNotNull);
@@ -255,6 +256,7 @@ void main() {
       match.state.cpu.currentHp = 1;
       advanceToMove(match, set: {MoveAttribute.strike: 1});
       match.useMove('player', 'downMove');
+      match.respondTake('cpu');
       expect(match.state.cpu.currentHp, 0);
     });
 
@@ -263,6 +265,7 @@ void main() {
       match.state.cpu.currentHp = 0;
       advanceToMove(match, set: {MoveAttribute.throwMove: 1});
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       match.declarePin('player');
       expect(
         () => match.kickOut('cpu', DefenseMethod.hp),
@@ -279,6 +282,7 @@ void main() {
       advanceToMove(match, set: {MoveAttribute.throwMove: 1});
       final heat = match.state.sharedHeat;
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       expect(match.state.pendingPin, isNotNull);
       expect(match.state.phase, LevelMatchPhase.pinDecision);
       match.declinePin('player');
@@ -290,6 +294,7 @@ void main() {
       final match = engine();
       advanceToMove(match, set: {MoveAttribute.throwMove: 1});
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       match.declarePin('player');
       final cost = match.state.pendingPin!.hpKickOutCost;
       match.state.cpu.currentHp = cost; // ちょうど耐えられる
@@ -302,6 +307,7 @@ void main() {
       final match = engine();
       advanceToMove(match, set: {MoveAttribute.throwMove: 1});
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       match.declarePin('player');
       match.kickOut('cpu', DefenseMethod.accept);
       expect(match.state.isGameOver, isTrue);
@@ -317,6 +323,7 @@ void main() {
         ..unlockedLevels.add(3);
       advanceToMove(match, set: {MoveAttribute.throwMove: 3});
       match.useMove('player', 'finPin');
+      match.respondTake('cpu');
       expect(match.state.phase, LevelMatchPhase.kickOutDecision);
       expect(match.state.pinAttemptCount, 1);
       expect(match.state.pendingPin!.fromFinisher, isTrue);
@@ -328,6 +335,7 @@ void main() {
       match.state.cpu.isDown = true;
       advanceToMove(match, set: {MoveAttribute.throwMove: 1});
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       expect(match.state.pendingPin!.strength.downBonus, 5);
     });
   });
@@ -337,6 +345,7 @@ void main() {
       final match = engine();
       advanceToMove(match, set: {MoveAttribute.submission: 1});
       match.useMove('player', 'subMove');
+      match.respondTake('cpu');
       expect(match.state.pendingSubmission, isNotNull);
       expect(match.state.phase, LevelMatchPhase.submissionDecision);
       expect(match.state.submissionAttemptCount, 1);
@@ -346,6 +355,7 @@ void main() {
       final match = engine();
       advanceToMove(match, set: {MoveAttribute.submission: 1});
       match.useMove('player', 'subMove');
+      match.respondTake('cpu');
       match.escapeSubmission('cpu', DefenseMethod.card);
       expect(match.state.cpu.submissionEscapeCount, 1);
       expect(match.state.ropeBreakTotalCount, 1);
@@ -356,6 +366,7 @@ void main() {
       final match = engine();
       advanceToMove(match, set: {MoveAttribute.submission: 1});
       match.useMove('player', 'subMove');
+      match.respondTake('cpu');
       match.state.cpu.ropeBreakCards = 0;
       match.state.cpu.currentHp = 1; // 足りない
       expect(
@@ -371,6 +382,7 @@ void main() {
       final match = engine();
       advanceToMove(match, set: {MoveAttribute.submission: 1});
       match.useMove('player', 'subMove');
+      match.respondTake('cpu');
       match.escapeSubmission('cpu', DefenseMethod.accept);
       expect(match.state.isGameOver, isTrue);
       expect(match.state.finishReason, LevelFinishReason.submission);
@@ -386,6 +398,7 @@ void main() {
       final match = engine();
       advanceToMove(match, set: {MoveAttribute.strike: 1});
       match.useMove('player', 'downMove');
+      match.respondTake('cpu');
       // ダウンイベントが記録される。
       expect(match.state.logs.any((log) => log.action == 'down'), isTrue);
       // useMove は endTurn 済み → CPUの手番開始で解除される。
@@ -398,6 +411,7 @@ void main() {
       match.state.cpu.isDown = true;
       advanceToMove(match, set: {MoveAttribute.throwMove: 1});
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       expect(match.state.pendingPin!.strength.downBonus, 5);
     });
   });
@@ -407,6 +421,7 @@ void main() {
       final match = engine();
       advanceToMove(match, set: {MoveAttribute.throwMove: 1});
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       match.declarePin('player');
       expect(match.cpuActionPending, isTrue);
       match.runCpuTurn();
@@ -450,11 +465,12 @@ void main() {
       final match = engine();
       advanceToMove(match, set: {MoveAttribute.throwMove: 1});
       match.useMove('player', 'throwPin');
+      match.respondTake('cpu');
       match.declarePin('player');
       match.kickOut('cpu', DefenseMethod.accept);
       final json = jsonDecode(jsonEncode(match.state.toJson())) as Map;
       final game = json['game'] as Map;
-      expect(game['version'], '0.6');
+      expect(game['version'], '0.7');
       expect(game['finishReason'], 'pinfall');
       expect(game['pinAttempts'], 1);
       expect(game['finishingMove'], '投げ技');
