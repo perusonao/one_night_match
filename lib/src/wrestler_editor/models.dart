@@ -261,6 +261,8 @@ class MoveDefinition {
     this.allowedResponses = const [],
     this.extra = const {},
     this.heatCost = 0,
+    this.rank = 1,
+    this.deckPoints = 0,
   });
 
   final String id;
@@ -323,6 +325,21 @@ class MoveDefinition {
   /// Ver.0.8.0: HEATマナ制での消費HEAT（0=カテゴリから自動推定）。
   final int heatCost;
 
+  /// Ver.0.8.0: 技の格（★1〜★5）。ダメージではなく“格”を表す。
+  final int rank;
+
+  /// Ver.0.8.0: デッキ構築ポイント（0=ランクから自動＝ランク値）。
+  final int deckPoints;
+
+  /// デッキ構築で使う実効ポイント（未設定ならランク＝ポイント）。
+  int get displayDeckPoints => deckPoints > 0 ? deckPoints : rank.clamp(1, 5);
+
+  /// 必要エネルギー（属性→枚数）。現行の requiredCards をそのまま用いる。
+  Map<MoveAttribute, int> get energyCost => {
+    for (final e in requiredCards.entries)
+      if (e.value > 0) e.key: e.value,
+  };
+
   /// 表示・HEATマナ制で使う消費HEAT。未設定(0)ならカテゴリから推定。
   int get displayHeatCost {
     if (heatCost > 0) return heatCost;
@@ -362,6 +379,8 @@ class MoveDefinition {
     bool? canAttemptPin,
     bool? canAttemptSubmission,
     int? heatCost,
+    int? rank,
+    int? deckPoints,
   }) => MoveDefinition(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -407,6 +426,8 @@ class MoveDefinition {
     allowedResponses: allowedResponses,
     extra: extra,
     heatCost: heatCost ?? this.heatCost,
+    rank: rank ?? this.rank,
+    deckPoints: deckPoints ?? this.deckPoints,
   );
 
   /// この技は「返し」として相手技に対応する性質を持つか。
@@ -483,6 +504,8 @@ class MoveDefinition {
     'allowedResponses': allowedResponses,
     if (extra.isNotEmpty) 'extra': extra,
     if (heatCost > 0) 'heatCost': heatCost,
+    if (rank != 1) 'rank': rank,
+    if (deckPoints > 0) 'deckPoints': deckPoints,
   };
 
   factory MoveDefinition.fromJson(Map<String, dynamic> json) => MoveDefinition(
@@ -552,6 +575,8 @@ class MoveDefinition {
     ),
     extra: Map<String, dynamic>.from(json['extra'] as Map? ?? const {}),
     heatCost: (json['heatCost'] as num?)?.toInt() ?? 0,
+    rank: (json['rank'] as num?)?.toInt() ?? 1,
+    deckPoints: (json['deckPoints'] as num?)?.toInt() ?? 0,
   );
 }
 
@@ -807,6 +832,13 @@ class WrestlerDefinition {
         },
       );
 }
+
+/// Ver.0.8.0: デッキ構築の総ポイント上限（設定で変更可能）。
+const int kDefaultDeckPointCap = 60;
+
+/// 技リストの合計デッキポイント（デッキエディタのカウンタ用）。
+int deckTotalPoints(Iterable<MoveDefinition> moves) =>
+    moves.fold<int>(0, (sum, m) => sum + m.displayDeckPoints);
 
 String moveAttributeLabel(MoveAttribute value) => switch (value) {
   MoveAttribute.strike => '打',
