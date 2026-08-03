@@ -340,6 +340,15 @@ class MoveDefinition {
       if (e.value > 0) e.key: e.value,
   };
 
+  /// Ver.0.8.0 energyモードでの実効コスト。requiredCards が全て0（＝通常技等、
+  /// classicモードでは無料だった技）の場合のみ、自属性1枚を既定コストとする。
+  /// 数値バランスの再調整ではなく、「無料技を廃止する」という土台の仕組み。
+  Map<MoveAttribute, int> get energyModeRequiredCards {
+    final total = requiredCards.values.fold<int>(0, (a, b) => a + b);
+    if (total > 0) return requiredCards;
+    return {attribute: 1};
+  }
+
   /// 表示・HEATマナ制で使う消費HEAT。未設定(0)ならカテゴリから推定。
   int get displayHeatCost {
     if (heatCost > 0) return heatCost;
