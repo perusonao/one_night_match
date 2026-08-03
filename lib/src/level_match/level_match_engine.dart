@@ -26,7 +26,12 @@ enum LevelMatchPhase {
 /// 決着理由。Ver.0.5 で pinfall / submission を追加。
 /// hpZero は旧Ver.0.4ログ互換のため残すが、Ver.0.5では新規に出力しない。
 /// deckOut も Ver.0.6 で新規には出さない（山札切れは疲労へ）。exhaustion は安全弁。
-enum LevelFinishReason { hpZero, deckOut, pinfall, submission, exhaustion }
+enum LevelFinishReason { hpZero, deckOut, pinfall, submission, exhaustion, decision }
+
+/// Ver.0.8.0: リソース方式（将来の特殊ルール拡張の土台）。
+/// setCards = 現行のセットカード制（Ver.0.7バランス）。
+/// heatMana = MTG風の毎ターン回復HEATマナ制（新ルールモード）。
+enum MatchResourceMode { setCards, heatMana }
 
 /// Ver.0.7 Phase B: 攻防クラッシュの結果（レスポンダー視点）。
 /// counter/speedWin = レスポンダーの勝ち、speedLoss/neutral = 攻撃側の勝ち。
@@ -278,6 +283,27 @@ class LevelMatchState {
   int sharedHeat = 0;
   String? winnerId;
   LevelFinishReason? finishReason;
+
+  // Ver.0.8.0: 試合時間ルール（0=無制限）。1ターン=30秒。
+  static const int secondsPerTurn = 30;
+  int matchTimeSeconds = 0;
+  MatchResourceMode resourceMode = MatchResourceMode.setCards;
+
+  bool get isTimed => matchTimeSeconds > 0;
+  int? get turnLimit => isTimed ? matchTimeSeconds ~/ secondsPerTurn : null;
+
+  /// 残り時間（秒）。無制限なら null。ターン開始前に完了したターン数で計算。
+  int? get remainingSeconds {
+    if (!isTimed) return null;
+    final elapsed = (turnNumber - 1) * secondsPerTurn;
+    final left = matchTimeSeconds - elapsed;
+    return left < 0 ? 0 : left;
+  }
+
+  bool get isFinalMinute {
+    final r = remainingSeconds;
+    return r != null && r <= 60;
+  }
   final List<LevelMatchLogEntry> logs = [];
   String? pendingAnimation;
   String? lastMove;
@@ -324,6 +350,9 @@ class LevelMatchState {
       'finishMoveId': finishMoveId ?? lastMoveId,
       'turns': turnNumber,
       'finalHeat': sharedHeat,
+      'matchTimeSeconds': matchTimeSeconds,
+      'remainingSeconds': remainingSeconds,
+      'resourceMode': resourceMode.name,
       'lastMove': lastMove,
       'pinAttempts': pinAttemptCount,
       'kickOuts': kickOutTotalCount,
@@ -353,6 +382,8 @@ class LevelMatchEngine {
     required Map<String, MoveDefinition> moves,
     Random? random,
     bool playerStarts = true,
+    int matchTimeSeconds = 0,
+    MatchResourceMode resourceMode = MatchResourceMode.setCards,
   }) {
     final rng = random ?? Random();
     final playerDeckBuild = deckBuilder.build(
@@ -391,7 +422,9 @@ class LevelMatchEngine {
       cpu: cpu,
       activePlayerId: playerStarts ? 'player' : 'cpu',
       startedAt: DateTime.now().toUtc(),
-    );
+    )
+      ..matchTimeSeconds = matchTimeSeconds
+      ..resourceMode = resourceMode;
     final engine = LevelMatchEngine(state: state, moves: moves, random: rng);
     for (final side in [player, cpu]) {
       engine._log(side, 'deckGenerated', '${side.wrestler.name}のデッキを自動生成', {
@@ -431,6 +464,13 @@ class LevelMatchEngine {
     state.phase = LevelMatchPhase.draw;
     _log(actor, 'turnStart', '${actor.wrestler.name}のターン開始');
     evaluateUnlocks(actor);
+
+    // Ver.0.8.0: 試合時間切れ → 判定決着（時間制限ルール時のみ）。
+    final limit = state.turnLimit;
+    if (limit != null && state.turnNumber > limit) {
+      _judgeDecision();
+      return;
+    }
 
     // Ver.0.6: 無限試合を避ける安全弁（通常到達しない高ターン数）。
     if (state.turnNumber > kMaxTurnSafetyCap) {
@@ -1476,6 +1516,8 @@ class LevelMatchEngine {
     if (actor.finisherUsed) return false;
     if (_finisherLevelOf(actor) == null) return false;
     final opponent = _opponentOf(actor);
+    // Ver.0.8.0: 残り1分未満なら積極的に勝負へ（時間制限ルール時）。
+    if (state.isFinalMinute) return true;
     // Ver.0.7.3: “決めに行く”のを終盤に寄せる。序中盤は通常攻防で試合を作り、
     // 相手が十分削れてから切り札を狙う（試合の間延び・切り札過多を抑制）。
     return opponent.currentHp <= 40 || state.sharedHeat >= 65;
@@ -1697,6 +1739,7 @@ class LevelMatchEngine {
     // カード切れで返せない見込みならHP高でも仕掛ける。
     final shouldPin =
         pin.fromFinisher ||
+        state.isFinalMinute || // Ver.0.8.0: 残り1分未満は必ず仕掛ける。
         defender.currentHp <= 70 ||
         (defender.kickOutCards == 0 &&
             defender.currentHp < pin.hpKickOutCost);
@@ -1993,6 +2036,25 @@ class LevelMatchEngine {
       }
     }
     return discarded;
+  }
+
+  /// Ver.0.8.0: 時間切れ判定。①残り体力 ②与ダメージ回数 ③ランダムの順で勝者決定。
+  void _judgeDecision() {
+    final p = state.player, c = state.cpu;
+    final PlayerLevelMatchState winner;
+    if (p.currentHp != c.currentHp) {
+      winner = p.currentHp > c.currentHp ? p : c;
+    } else if (p.damageDealtCount != c.damageDealtCount) {
+      winner = p.damageDealtCount > c.damageDealtCount ? p : c;
+    } else {
+      winner = random.nextBool() ? p : c;
+    }
+    state.finishingMove = '時間切れ判定';
+    _log(winner, 'timeOver', '時間切れ！ 判定は${winner.wrestler.name}', {
+      'playerHp': p.currentHp,
+      'cpuHp': c.currentHp,
+    });
+    _finish(winner, LevelFinishReason.decision);
   }
 
   void _finish(PlayerLevelMatchState winner, LevelFinishReason reason) {

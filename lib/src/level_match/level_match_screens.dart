@@ -133,6 +133,7 @@ String finishReasonLabel(LevelFinishReason? reason) => switch (reason) {
   LevelFinishReason.pinfall => '3カウント',
   LevelFinishReason.submission => 'ギブアップ',
   LevelFinishReason.exhaustion => '消耗の果て',
+  LevelFinishReason.decision => '時間切れ判定',
   LevelFinishReason.deckOut => 'デッキ切れ(旧仕様)',
   LevelFinishReason.hpZero => 'HP0(旧仕様)',
   null => '-',
@@ -391,11 +392,14 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
     );
   }
 
-  void _start(WrestlerDefinition player) {
+  Future<void> _start(WrestlerDefinition player) async {
+    final seconds = await _pickMatchTime();
+    if (seconds == null || !mounted) return;
     final candidates = wrestlers!
         .where((item) => item.id != player.id && _problems(item).isEmpty)
         .toList();
     final cpu = candidates.isEmpty ? player : candidates.first;
+    if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -405,11 +409,44 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
             cpuWrestler: cpu,
             moves: repository.moves,
             playerStarts: true,
+            matchTimeSeconds: seconds,
           ),
         ),
       ),
     );
   }
+
+  Future<int?> _pickMatchTime() => showModalBottomSheet<int>(
+    context: context,
+    builder: (_) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('試合時間を選択',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ),
+          for (final option in const [
+            ('無制限', 0),
+            ('15分一本勝負', 900),
+            ('30分一本勝負', 1800),
+            ('60分一本勝負', 3600),
+          ])
+            ListTile(
+              leading: Icon(
+                option.$2 == 0 ? Icons.all_inclusive : Icons.timer_outlined,
+              ),
+              title: Text(option.$1),
+              subtitle: option.$2 == 0
+                  ? const Text('時間切れなし')
+                  : Text('${option.$2 ~/ 30}ターン / 1ターン=30秒'),
+              onTap: () => Navigator.pop(context, option.$2),
+            ),
+        ],
+      ),
+    ),
+  );
 }
 
 class LevelMatchBattleScreen extends StatefulWidget {
@@ -716,6 +753,10 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                     fontSize: 18, fontWeight: FontWeight.w900)),
           ],
         ),
+        if (state.isTimed) ...[
+          const SizedBox(width: 10),
+          _timeDisplay(),
+        ],
         const SizedBox(width: 10),
         Expanded(flex: 5, child: _matchFlowGauge()),
         const SizedBox(width: 10),
@@ -723,6 +764,38 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       ],
     ),
   );
+
+  Widget _timeDisplay() {
+    final secs = state.remainingSeconds ?? 0;
+    final mm = (secs ~/ 60).toString();
+    final ss = (secs % 60).toString().padLeft(2, '0');
+    final low = secs <= 60;
+    final warn = secs <= 180;
+    final color = low
+        ? Colors.redAccent
+        : (warn ? _gold : Colors.white);
+    return Column(
+      children: [
+        Text('TIME',
+            style: TextStyle(
+                fontSize: 9,
+                color: low ? Colors.redAccent : Colors.white54)),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (warn)
+              Icon(Icons.alarm,
+                  size: 13, color: color.withValues(alpha: low ? 1 : 0.8)),
+            Text('$mm:$ss',
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    color: color)),
+          ],
+        ),
+      ],
+    );
+  }
 
   double _matchProgress() {
     final p = state.player, c = state.cpu;

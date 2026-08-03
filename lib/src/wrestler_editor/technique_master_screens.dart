@@ -328,8 +328,9 @@ class _TechniqueListScreenState extends State<TechniqueListScreen> {
                       techniqueTypeColor(m.attribute)),
                   _stat('Dmg', '${m.power}'),
                   _stat('Spd', '${m.speed}'),
+                  _badge('HEAT${m.displayHeatCost}', const Color(0xff9b5de5)),
                   if (m.heat != 0)
-                    _stat('HEAT', '${m.heat >= 0 ? "+" : ""}${m.heat}'),
+                    _stat('増減', '${m.heat >= 0 ? "+" : ""}${m.heat}'),
                   for (final f in finishes) _badge(f.$1, f.$2),
                 ],
               ),
