@@ -209,6 +209,72 @@ final defaultEditorMoves = <MoveDefinition>[
       pinfall: false, strength: 13),
   _finisher('black_butterfly', 'ブラック・バタフライ', MoveAttribute.rough,
       pinfall: true, strength: 11),
+
+  // ===== Ver.0.7.7：レスラー別に整理した固有技（重複・名前衝突を解消） =====
+  // 性能は従来と同一。IDと技名だけをレスラー固有にして個性を明確化。
+  // 火神アカリ（正統派・打撃/投げ）
+  _move('akari_dropkick', '紅蓮ドロップキック', MoveAttribute.strike, 14, 3, cost: 1),
+  _move('akari_armdrag', 'フェニックス・アームドラッグ', MoveAttribute.throwMove, 12, 2,
+      cost: 1, pin: true, pinPower: 4),
+  _move('akari_knee', 'ライジングニー', MoveAttribute.strike, 18, 4,
+      cost: 2, down: true),
+  _move('akari_brainbuster', '紅蓮ブレーンバスター', MoveAttribute.throwMove, 22, 5,
+      cost: 2, pin: true, pinPower: 6, speed: 7),
+  _move('akari_highkick', 'ソウルハイキック', MoveAttribute.strike, 24, 5,
+      cost: 3, down: true, speed: 8),
+  _move('akari_dragon', '紅蓮ドラゴンスープレックス', MoveAttribute.throwMove, 28, 6,
+      cost: 3, pin: true, pinPower: 9, speed: 7),
+  // 豪田ミサキ（パワー・打撃/投げ）
+  _move('misaki_elbow', '鉄拳エルボー', MoveAttribute.strike, 12, 2, cost: 1),
+  _move('misaki_bodyslam', 'ゴウダ・スラム', MoveAttribute.throwMove, 15, 3,
+      cost: 1, pin: true, pinPower: 2),
+  _move('misaki_lariat', '豪腕ラリアット', MoveAttribute.strike, 18, 3,
+      cost: 2, down: true, cannotCounterTypes: [MoveAttribute.strike]),
+  _move('misaki_powerbomb', 'アイアン・パワーボム', MoveAttribute.throwMove, 20, 6,
+      cost: 3, pin: true, pinPower: 3),
+  _move('misaki_knee', '圧殺ニー', MoveAttribute.strike, 18, 4,
+      cost: 2, down: true),
+  _move('misaki_backdrop', '鋼鉄バックドロップ', MoveAttribute.throwMove, 18, 5,
+      cost: 2, pin: true, pinPower: 3),
+  // 白銀レイナ（テクニシャン・関節主体）
+  _move('reina_dropkick', '銀閃ドロップキック', MoveAttribute.strike, 14, 3, cost: 1),
+  _move('reina_armbar', '銀の腕ひしぎ十字固め', MoveAttribute.submission, 18, 4,
+      cost: 2, submission: true, submissionPower: 5),
+  _move('reina_brainbuster', '白銀ブレーンバスター', MoveAttribute.throwMove, 22, 5,
+      cost: 2, pin: true, pinPower: 6, speed: 7),
+  _move('reina_figurefour', '銀糸の足4の字固め', MoveAttribute.submission, 21, 5,
+      cost: 2, submission: true, submissionPower: 6),
+  _move('reina_camel', '氷結キャメルクラッチ', MoveAttribute.submission, 19, 4,
+      cost: 2, submission: true, submissionPower: 5),
+  _move('reina_crossface', '白銀クロスフェイス', MoveAttribute.submission, 24, 5,
+      cost: 3, submission: true, submissionPower: 8),
+  // 黒蝶ジャック（ヒール・凶技主体／返しにくく速い）
+  _move('jack_elbow', '闇討ちエルボー', MoveAttribute.strike, 12, 2, cost: 1),
+  _move('jack_roughslam', 'ラフスラム', MoveAttribute.rough, 22, 2,
+      cost: 2, pin: true, pinPower: 8, speed: 9,
+      specialAbilities: ['cannotCounter']),
+  _move('jack_lowblow', '急所ロー', MoveAttribute.rough, 16, -1,
+      cost: 1, down: true, speed: 9, specialAbilities: ['cannotCounter']),
+  _move('jack_neckbreaker', '毒霧ネックブリーカー', MoveAttribute.rough, 22, 1,
+      cost: 2, pin: true, pinPower: 7, speed: 8,
+      specialAbilities: ['cannotCounter']),
+  _move('jack_chair', '凶器チェアーショット', MoveAttribute.rough, 22, -2,
+      cost: 2, pin: true, pinPower: 7, speed: 9,
+      specialAbilities: ['cannotCounter']),
+  _move('jack_ddt', 'ブラッディDDT', MoveAttribute.rough, 22, 2,
+      cost: 2, pin: true, pinPower: 8, speed: 9,
+      specialAbilities: ['cannotCounter']),
+
+  // ===== Ver.0.7.7：レスラー固有の通常技（共通技と同性能・名前で個性化） =====
+  _basic('akari_nt_strike', '火炎チョップ', MoveAttribute.strike, 5, 5, 9),
+  _basic('akari_nt_throw', '紅蓮ボディスラム', MoveAttribute.throwMove, 10, 5, 6),
+  _basic('misaki_nt_strike', '鉄拳ジャブ', MoveAttribute.strike, 5, 5, 9),
+  _basic('misaki_nt_throw', 'アイアン・スラム', MoveAttribute.throwMove, 10, 5, 6),
+  _basic('reina_nt_sub', '銀のグラウンド固め', MoveAttribute.submission, 5, 5, 6),
+  _basic('reina_nt_strike', '白銀チョップ', MoveAttribute.strike, 5, 5, 9),
+  _basic('jack_nt_rough', '反則パンチ', MoveAttribute.rough, 8, 3, 7),
+  _basic('jack_nt_strike', '闇討ちジャブ', MoveAttribute.strike, 5, 5, 9),
+
   // Ver.0.7 単体技（全レスラー共通・手札から直接使用）。
   ...defaultBasicMoves,
 ];
@@ -280,6 +346,7 @@ class _WrestlerBlueprint {
     required this.level1,
     required this.level2,
     required this.level3,
+    this.basics = const {},
   });
   final String id;
   final String name;
@@ -291,6 +358,9 @@ class _WrestlerBlueprint {
   final List<String> level1;
   final List<String> level2;
   final List<String> level3;
+
+  /// レスラー固有の通常技（属性→技ID）。未指定の属性は共通の通常技を使う。
+  final Map<MoveAttribute, String> basics;
 }
 
 const _blueprints = <_WrestlerBlueprint>[
@@ -302,9 +372,13 @@ const _blueprints = <_WrestlerBlueprint>[
     color: '#E53935',
     ability: 'burning_spirit',
     finisher: 'high_speed_german',
-    level1: ['dropkick', 'arm_drag'],
-    level2: ['running_knee', 'brainbuster'],
-    level3: ['high_kick', 'dragon_suplex'],
+    level1: ['akari_dropkick', 'akari_armdrag'],
+    level2: ['akari_knee', 'akari_brainbuster'],
+    level3: ['akari_highkick', 'akari_dragon'],
+    basics: {
+      MoveAttribute.strike: 'akari_nt_strike',
+      MoveAttribute.throwMove: 'akari_nt_throw',
+    },
   ),
   _WrestlerBlueprint(
     id: 'wrestler_misaki',
@@ -314,9 +388,13 @@ const _blueprints = <_WrestlerBlueprint>[
     color: '#F9A825',
     ability: 'power_pressure',
     finisher: 'gouda_driver',
-    level1: ['elbow', 'body_slam'],
-    level2: ['lariat', 'powerbomb'],
-    level3: ['running_knee', 'backdrop'],
+    level1: ['misaki_elbow', 'misaki_bodyslam'],
+    level2: ['misaki_lariat', 'misaki_powerbomb'],
+    level3: ['misaki_knee', 'misaki_backdrop'],
+    basics: {
+      MoveAttribute.strike: 'misaki_nt_strike',
+      MoveAttribute.throwMove: 'misaki_nt_throw',
+    },
   ),
   _WrestlerBlueprint(
     id: 'wrestler_reina',
@@ -326,9 +404,13 @@ const _blueprints = <_WrestlerBlueprint>[
     color: '#8E8EAA',
     ability: 'silver_technique',
     finisher: 'silver_lock',
-    level1: ['dropkick', 'armbar'],
-    level2: ['brainbuster', 'figure_four'],
-    level3: ['camel_clutch', 'cross_face'],
+    level1: ['reina_dropkick', 'reina_armbar'],
+    level2: ['reina_brainbuster', 'reina_figurefour'],
+    level3: ['reina_camel', 'reina_crossface'],
+    basics: {
+      MoveAttribute.submission: 'reina_nt_sub',
+      MoveAttribute.strike: 'reina_nt_strike',
+    },
   ),
   _WrestlerBlueprint(
     id: 'wrestler_jack',
@@ -338,10 +420,14 @@ const _blueprints = <_WrestlerBlueprint>[
     color: '#9C27B0',
     ability: 'heel_instinct',
     finisher: 'black_butterfly',
-    // Ver.0.7.2: 返しにくい妨害技で主導権を握る“嫌らしい”構成。
-    level1: ['elbow', 'rough_slam'],
-    level2: ['low_blow', 'neckbreaker_heel'],
-    level3: ['chair_attack', 'rough_slam'],
+    // Ver.0.7.2/0.7.7: 返しにくい妨害技で主導権を握る“嫌らしい”構成。L3の重複を解消。
+    level1: ['jack_elbow', 'jack_roughslam'],
+    level2: ['jack_lowblow', 'jack_neckbreaker'],
+    level3: ['jack_chair', 'jack_ddt'],
+    basics: {
+      MoveAttribute.rough: 'jack_nt_rough',
+      MoveAttribute.strike: 'jack_nt_strike',
+    },
   ),
 ];
 
@@ -383,6 +469,7 @@ final defaultEditorWrestlers = <WrestlerDefinition>[
           finisher: item.finisher,
         ),
       ],
+      basicMoveIds: item.basics,
       createdAt: DateTime.utc(2026, 8, 1),
       updatedAt: DateTime.utc(2026, 8, 1),
     ),

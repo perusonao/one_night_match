@@ -601,6 +601,7 @@ class WrestlerDefinition {
     required this.createdAt,
     required this.updatedAt,
     this.dataVersion = 1,
+    this.basicMoveIds = const {},
   });
   final String id;
   final String name;
@@ -616,6 +617,9 @@ class WrestlerDefinition {
   final DateTime updatedAt;
   final int dataVersion;
 
+  /// Ver.0.7.7: レスラー固有の通常技（属性→技ID）。空なら共通の通常技を使う。
+  final Map<MoveAttribute, String> basicMoveIds;
+
   WrestlerDefinition copyWith({
     String? id,
     String? name,
@@ -629,6 +633,7 @@ class WrestlerDefinition {
     List<WrestlerLevelDefinition>? levels,
     DateTime? createdAt,
     DateTime? updatedAt,
+    Map<MoveAttribute, String>? basicMoveIds,
   }) => WrestlerDefinition(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -643,6 +648,7 @@ class WrestlerDefinition {
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     dataVersion: dataVersion,
+    basicMoveIds: basicMoveIds ?? this.basicMoveIds,
   );
 
   Map<String, dynamic> toJson() => {
@@ -659,6 +665,10 @@ class WrestlerDefinition {
     'createdAt': createdAt.toUtc().toIso8601String(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
     'dataVersion': dataVersion,
+    if (basicMoveIds.isNotEmpty)
+      'basicMoveIds': {
+        for (final e in basicMoveIds.entries) e.key.name: e.value,
+      },
   };
 
   String toPrettyJson() => const JsonEncoder.withIndent('  ').convert(toJson());
@@ -690,6 +700,11 @@ class WrestlerDefinition {
             DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
             DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
         dataVersion: (json['dataVersion'] as num?)?.toInt() ?? 1,
+        basicMoveIds: {
+          for (final e in (json['basicMoveIds'] as Map? ?? const {}).entries)
+            enumValue(MoveAttribute.values, e.key, 'basicMoveIds'):
+                e.value as String,
+        },
       );
 }
 

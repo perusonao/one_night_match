@@ -771,7 +771,7 @@ class LevelMatchEngine {
       throw StateError('フィニッシャーには単体技で割り込めません');
     }
     final card = defender.hand[index];
-    final move = basicMoveFor(card.attribute);
+    final move = basicMoveFor(card.attribute, defender);
     if (move == null) throw StateError('この属性の単体技がありません');
     defender.hand.removeAt(index);
     defender.discardPile.add(card);
@@ -1040,13 +1040,25 @@ class LevelMatchEngine {
   }
 
   /// 手札のカードから探せる単体技（属性が一致する MoveCategory.basic）。
-  MoveDefinition? basicMoveFor(MoveAttribute attribute) {
+  MoveDefinition? basicMoveFor(
+    MoveAttribute attribute, [
+    PlayerLevelMatchState? actor,
+  ]) {
+    // Ver.0.7.7: レスラー固有の通常技があれば優先（無ければ共通の通常技）。
+    final ownId = actor?.wrestler.basicMoveIds[attribute];
+    if (ownId != null) {
+      final own = moves[ownId];
+      if (own != null) return own;
+    }
+    // 共通の通常技（id が basic_ で始まる）を優先し、無ければ最初の該当技。
+    MoveDefinition? any;
     for (final move in moves.values) {
       if (move.category == MoveCategory.basic && move.attribute == attribute) {
-        return move;
+        if (move.id.startsWith('basic_')) return move;
+        any ??= move;
       }
     }
-    return null;
+    return any;
   }
 
   /// Ver.0.7.1: 手札のカードを単体技として「宣言」する（相手のレスポンス待ちへ）。
@@ -1060,7 +1072,7 @@ class LevelMatchEngine {
     );
     if (cardIndex < 0) throw StateError('手札にカードがありません');
     final card = actor.hand[cardIndex];
-    final move = basicMoveFor(card.attribute);
+    final move = basicMoveFor(card.attribute, actor);
     if (move == null) throw StateError('この属性の単体技がありません');
     // 宣言＝コミット：手札から捨て札へ。
     actor.hand.removeAt(cardIndex);
@@ -1402,7 +1414,7 @@ class LevelMatchEngine {
         .where((m) => responseAvailability(defender, m, isBasic: false).usable)
         .toList();
     final basicCards = defender.hand
-        .where((c) => basicMoveFor(c.attribute) != null)
+        .where((c) => basicMoveFor(c.attribute, defender) != null)
         .toList();
     // 勝てるレスポンスを探す（counter を最優先）。
     MoveDefinition? bestSig;
@@ -1423,7 +1435,7 @@ class LevelMatchEngine {
     TechniqueResourceCard? bestBasic;
     var bestBasicScore = 0;
     for (final c in basicCards) {
-      final m = basicMoveFor(c.attribute)!;
+      final m = basicMoveFor(c.attribute, defender)!;
       final clash = clashBetween(attackMove, m);
       if (clash == ClashOutcome.speedWin) {
         final score = 50 + m.power;
@@ -1606,7 +1618,7 @@ class LevelMatchEngine {
       final basicCard = actor.hand
           .cast<TechniqueResourceCard?>()
           .firstWhere(
-            (card) => basicMoveFor(card!.attribute) != null,
+            (card) => basicMoveFor(card!.attribute, actor) != null,
             orElse: () => null,
           );
       if (basicCard != null) {
