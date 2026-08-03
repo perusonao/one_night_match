@@ -344,9 +344,35 @@ class MoveDefinition {
   /// classicモードでは無料だった技）の場合のみ、自属性1枚を既定コストとする。
   /// 数値バランスの再調整ではなく、「無料技を廃止する」という土台の仕組み。
   Map<MoveAttribute, int> get energyModeRequiredCards {
+    // Ver.0.8.0: energyOverrides.energyCost があれば最優先（classicのrequiredCards
+    // ＝セットコストとは独立にenergyモード専用のコストを設定できる）。
+    final overrides = extra['energyOverrides'];
+    if (overrides is Map && overrides['energyCost'] is Map) {
+      final raw = overrides['energyCost'] as Map;
+      return {
+        for (final a in MoveAttribute.values)
+          a: (raw[a.name] as num?)?.toInt() ?? 0,
+      };
+    }
     final total = requiredCards.values.fold<int>(0, (a, b) => a + b);
     if (total > 0) return requiredCards;
     return {attribute: 1};
+  }
+
+  /// Ver.0.8.0: energyモード専用のバランス上書き（technique-master modelを
+  /// 複製せず extra を使う）。classicの数値・技マスタ本体には一切影響しない。
+  /// 例: extra['energyOverrides'] = {'canPin': false, 'pinPower': 0}
+  MoveDefinition get resolvedForEnergyMode {
+    final overrides = extra['energyOverrides'];
+    if (overrides is! Map) return this;
+    return copyWith(
+      power: (overrides['power'] as num?)?.toInt(),
+      heat: (overrides['heat'] as num?)?.toInt(),
+      pinPower: (overrides['pinPower'] as num?)?.toInt(),
+      submissionPower: (overrides['submissionPower'] as num?)?.toInt(),
+      canPin: overrides['canPin'] as bool?,
+      canSubmit: overrides['canSubmit'] as bool?,
+    );
   }
 
   /// 表示・HEATマナ制で使う消費HEAT。未設定(0)ならカテゴリから推定。
