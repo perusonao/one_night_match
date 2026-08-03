@@ -63,7 +63,7 @@ Widget attributeBadge(MoveAttribute a, {double size = 34}) => Container(
 const _recommendPrefKey = 'onm_show_recommend';
 
 /// 対応フェイズの選択肢の種別。
-enum _RespKind { signature, basic, take }
+enum _RespKind { signature, basic, techniqueCard, take }
 
 /// 対応フェイズで提示する1つの選択肢（返し技／単体技／受ける）。
 class _RespOption {
@@ -92,6 +92,7 @@ class _RespOption {
   String get key => switch (kind) {
     _RespKind.take => 'take',
     _RespKind.basic => 'basic:$cardId',
+    _RespKind.techniqueCard => 'tech:$cardId',
     _RespKind.signature => 'sig:${move!.id}',
   };
 }
@@ -1514,24 +1515,46 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
         attribute: m.attribute,
       ));
     }
-    // 単体技（手札）での対応。Ver.0.8.0 energyモードでは廃止（固有技のみ）。
-    // 属性ごとに1枚へ集約。
-    final seen = <MoveAttribute>{};
-    for (final card in _isEnergyMode ? const <TechniqueResourceCard>[] : player.hand) {
-      if (!seen.add(card.attribute)) continue;
-      final basic = engine.basicMoveFor(card.attribute, player);
-      if (basic == null) continue;
-      final o = engine.clashBetween(attackMove, basic);
-      options.add(_RespOption(
-        kind: _RespKind.basic,
-        label: basic.name,
-        speed: basic.speed,
-        outcome: o,
-        score: scoreOf(o, basic.power) - 5, // 固有技をわずかに優先
-        move: basic,
-        cardId: card.instanceId,
-        attribute: card.attribute,
-      ));
+    if (_isEnergyMode) {
+      // Ver.0.8.0：技カード（手札）での迎撃。フィニッシャーには不可。
+      if (!attackMove.ignoreNormalSpeed) {
+        for (final card in player.hand) {
+          if (card.isEnergyOnly) continue;
+          final move = engine.moves[card.techniqueMoveId];
+          if (move == null) continue;
+          if (!_energyAffordable(player, move)) continue;
+          final o = engine.clashBetween(attackMove, move);
+          options.add(_RespOption(
+            kind: _RespKind.techniqueCard,
+            label: move.name,
+            speed: move.speed,
+            outcome: o,
+            score: scoreOf(o, move.power) - 5, // 固有技をわずかに優先
+            move: move,
+            cardId: card.instanceId,
+            attribute: card.attribute,
+          ));
+        }
+      }
+    } else {
+      // 単体技（手札）での対応。属性ごとに1枚へ集約。
+      final seen = <MoveAttribute>{};
+      for (final card in player.hand) {
+        if (!seen.add(card.attribute)) continue;
+        final basic = engine.basicMoveFor(card.attribute, player);
+        if (basic == null) continue;
+        final o = engine.clashBetween(attackMove, basic);
+        options.add(_RespOption(
+          kind: _RespKind.basic,
+          label: basic.name,
+          speed: basic.speed,
+          outcome: o,
+          score: scoreOf(o, basic.power) - 5, // 固有技をわずかに優先
+          move: basic,
+          cardId: card.instanceId,
+          attribute: card.attribute,
+        ));
+      }
     }
     // 勝てる手（返し・速度勝ち）を先頭に。
     options.sort((a, b) => b.score.compareTo(a.score));
@@ -1560,6 +1583,8 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
         _act(() => engine.respondWithMove('player', opt.move!.id));
       case _RespKind.basic:
         _act(() => engine.respondWithBasic('player', opt.cardId!));
+      case _RespKind.techniqueCard:
+        _act(() => engine.respondWithTechniqueCard('player', opt.cardId!));
       case _RespKind.take:
         _act(() => engine.respondTake('player'));
     }
@@ -1938,9 +1963,16 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   // ===== セットフェイズ（技コスト表示・セット後予測） =====
 
   Widget _setCardPhase(PlayerLevelMatchState player) {
+    // Ver.0.8.0 energyモード：技カード（isEnergyOnly=false）はセット不可
+    // （使用専用）。セット候補はエネルギーカードのみ。
+    final setable = _isEnergyMode
+        ? player.hand.where((c) => c.isEnergyOnly)
+        : player.hand;
+    final heldTechniqueCards =
+        _isEnergyMode ? player.hand.where((c) => !c.isEnergyOnly).toList() : const [];
     // 同属性カードは ×N に集約（⑤）。
     final groups = <MoveAttribute, List<TechniqueResourceCard>>{};
-    for (final c in player.hand) {
+    for (final c in setable) {
       groups.putIfAbsent(c.attribute, () => []).add(c);
     }
     return Column(
@@ -1989,6 +2021,13 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
               ),
           ],
         ),
+        if (_isEnergyMode && heldTechniqueCards.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+            child: Text(
+                '技カード${heldTechniqueCards.length}枚は手札で温存中（技選択フェイズで使用）',
+                style: const TextStyle(fontSize: 11, color: Colors.white54)),
+          ),
         const SizedBox(height: 8),
         OutlinedButton(
           onPressed: () => _act(() => engine.skipSetCard('player')),
@@ -2172,15 +2211,23 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
         .currentMoves(player)
         .where((m) => !(m.isCounterMove && !m.canUseAsNormalMove))
         .toList();
-    // Ver.0.8.0 energyモード：無料の単体技は廃止。攻撃は固有技のみ
-    // （手札カードはエネルギーゾーン専用リソースとして完全に分離される）。
+    // Ver.0.8.0 energyモード：無料の単体技(basic_*)は廃止。手札カードは
+    // ①技エネルギーカード（場にセット専用）と②技カード（使用・使用後は捨て札）
+    // の2種類に分かれる。攻撃は「固有技」または「技カード」のいずれか。
     final seen = <MoveAttribute>{};
     final basics = <TechniqueResourceCard>[];
+    final techniqueCards = <TechniqueResourceCard>[];
     if (!_isEnergyMode) {
       for (final c in player.hand) {
         if (engine.basicMoveFor(c.attribute, player) != null &&
             seen.add(c.attribute)) {
           basics.add(c);
+        }
+      }
+    } else {
+      for (final c in player.hand) {
+        if (!c.isEnergyOnly && engine.moves[c.techniqueMoveId] != null) {
+          techniqueCards.add(c);
         }
       }
     }
@@ -2215,12 +2262,39 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
             runSpacing: 8,
             children: [for (final c in basics) _basicMoveCard(c)],
           ),
-        ] else if (signatures.every((m) => !engine.evaluateMove(player, m).usable))
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Text('使用できる固有技がありません。エネルギーが貯まるまで待ちましょう。',
-                style: TextStyle(fontSize: 12, color: Colors.white54)),
+        ] else ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
+            child: Text('技カード（手札から使用・使用後は捨て札）',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white70,
+                    fontSize: 13)),
           ),
+          if (techniqueCards.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Text('手札に技カードがありません',
+                  style: TextStyle(fontSize: 11, color: Colors.white38)),
+            )
+          else
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final c in techniqueCards) _techniqueHandCard(c),
+              ],
+            ),
+          if (signatures.every((m) => !engine.evaluateMove(player, m).usable) &&
+              techniqueCards.every((c) =>
+                  !_energyAffordable(player, engine.moves[c.techniqueMoveId]!)))
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text('使用できる技がありません。エネルギーが貯まるまで待ちましょう。',
+                  style: TextStyle(fontSize: 12, color: Colors.white54)),
+            ),
+        ],
         const SizedBox(height: 8),
         Center(
           child: OutlinedButton(
@@ -2420,6 +2494,37 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
           ? () => _act(() => engine.useBasicMove('player', card.instanceId))
           : null,
       energyCost: _isEnergyMode ? basic.energyModeRequiredCards : null,
+    );
+  }
+
+  /// Ver.0.8.0 energyモード：技カード（手札から使用・使用後は捨て札）。
+  Widget _techniqueHandCard(TechniqueResourceCard card) {
+    final move = engine.moves[card.techniqueMoveId]!;
+    final affordable = _energyAffordable(state.player, move);
+    String? locked;
+    if (!affordable) {
+      final ready = state.player.readyEnergyCounts;
+      final lacks = <String>[];
+      for (final e in move.energyModeRequiredCards.entries) {
+        final short = e.value - (ready[e.key] ?? 0);
+        if (short > 0) lacks.add('${moveAttributeLabel(e.key)}あと$short');
+      }
+      locked = lacks.isEmpty ? 'エネルギー不足' : lacks.join(' ');
+    }
+    return _moveTile(
+      attribute: move.attribute,
+      name: move.name,
+      damage: move.power,
+      speed: move.speed,
+      tags: const [],
+      usable: affordable,
+      lockedText: locked,
+      ctaColor: _pink,
+      ctaLabel: 'この技カードで攻撃',
+      onTap: affordable
+          ? () => _act(() => engine.useTechniqueCard('player', card.instanceId))
+          : null,
+      energyCost: move.energyModeRequiredCards,
     );
   }
 

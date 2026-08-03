@@ -92,14 +92,23 @@ const int kExhaustionHeatGain = 5; // 疲労1ターンあたりのHEAT増加
 const int kMaxTurnSafetyCap = 200; // 無限試合を避ける安全弁
 
 class TechniqueResourceCard {
-  const TechniqueResourceCard(this.instanceId, this.attribute);
+  const TechniqueResourceCard(this.instanceId, this.attribute, {this.techniqueMoveId});
   final String instanceId;
   final MoveAttribute attribute;
+
+  /// Ver.0.8.0 energyモード：このカードが「技カード」（手札から使用・使用後は捨て札）
+  /// を表す場合に技IDを持つ。nullなら純粋な「技エネルギーカード」（場にセット）。
+  final String? techniqueMoveId;
+
+  /// エネルギーカードか（＝技として直接使えないセット専用カード）。
+  bool get isEnergyOnly => techniqueMoveId == null;
+
   String get name => '${moveAttributeLabel(attribute)}カード';
 
   Map<String, dynamic> toJson() => {
     'instanceId': instanceId,
     'attribute': attribute.name,
+    if (techniqueMoveId != null) 'techniqueMoveId': techniqueMoveId,
   };
 }
 
@@ -420,16 +429,18 @@ class LevelMatchEngine {
     MatchResourceMode resourceMode = MatchResourceMode.classic,
   }) {
     final rng = random ?? Random();
-    final playerDeckBuild = deckBuilder.build(
-      wrestler: playerWrestler,
-      moves: moves,
-      owner: 'player',
-    );
-    final cpuDeckBuild = deckBuilder.build(
-      wrestler: cpuWrestler,
-      moves: moves,
-      owner: 'cpu',
-    );
+    // Ver.0.8.0：energyモードは技カード／技エネルギーカードが混在するデッキを使う。
+    // classic側のデッキ生成アルゴリズムはbuildEnergyMode内部で再利用するのみで、
+    // classicモードの挙動には一切影響しない。
+    final playerDeckBuild = resourceMode == MatchResourceMode.energy
+        ? deckBuilder.buildEnergyMode(
+            wrestler: playerWrestler, moves: moves, owner: 'player')
+        : deckBuilder.build(
+            wrestler: playerWrestler, moves: moves, owner: 'player');
+    final cpuDeckBuild = resourceMode == MatchResourceMode.energy
+        ? deckBuilder.buildEnergyMode(
+            wrestler: cpuWrestler, moves: moves, owner: 'cpu')
+        : deckBuilder.build(wrestler: cpuWrestler, moves: moves, owner: 'cpu');
     final playerDeck = List.of(playerDeckBuild.cards)..shuffle(rng);
     final cpuDeck = List.of(cpuDeckBuild.cards)..shuffle(rng);
     final player = PlayerLevelMatchState(
@@ -564,7 +575,11 @@ class LevelMatchEngine {
     if (cardIndex < 0) throw StateError('手札にカードがありません');
 
     // Ver.0.8.0 energyモード：エネルギーゾーンへセット（永続・毎ターンアンタップ）。
+    // 技カード（techniqueMoveId付き）はセット不可＝使用（捨て札）専用。
     if (state.resourceMode == MatchResourceMode.energy) {
+      if (!actor.hand[cardIndex].isEnergyOnly) {
+        throw StateError('技カードはエネルギーとしてセットできません（使用してください）');
+      }
       final card = actor.hand.removeAt(cardIndex);
       final energyCard = EnergyCardState(
         instanceId: card.instanceId,
@@ -714,8 +729,12 @@ class LevelMatchEngine {
     if (state.phase != LevelMatchPhase.chooseMove) {
       throw StateError('技選択フェイズではありません');
     }
-    final move = moves[moveId];
-    if (move == null) throw StateError('技が見つかりません');
+    final rawMove = moves[moveId];
+    if (rawMove == null) throw StateError('技が見つかりません');
+    // Ver.0.8.0: energyモード専用バランス上書き（classicの技マスタ本体は不変）。
+    final move = state.resourceMode == MatchResourceMode.energy
+        ? rawMove.resolvedForEnergyMode
+        : rawMove;
     if (move.isCounterMove && !move.canUseAsNormalMove) {
       throw StateError('返し技は相手の技に対応するときだけ使えます');
     }
@@ -897,8 +916,11 @@ class LevelMatchEngine {
     }
     if (atk.defenderId != playerId) throw StateError('対応できるのは防御側です');
     final defender = state.byId(playerId);
-    final move = moves[moveId];
-    if (move == null) throw StateError('技が見つかりません');
+    final rawMove = moves[moveId];
+    if (rawMove == null) throw StateError('技が見つかりません');
+    final move = state.resourceMode == MatchResourceMode.energy
+        ? rawMove.resolvedForEnergyMode
+        : rawMove;
     final avail = responseAvailability(defender, move, isBasic: false);
     if (!avail.usable) throw StateError(avail.reasons.join('\n'));
     defender.moveUsageCounts[move.id] =
@@ -960,6 +982,52 @@ class LevelMatchEngine {
     defender.hand.removeAt(index);
     defender.discardPile.add(card);
     defender.previousMoveId = move.id;
+    _resolveExchange(response: move, responder: defender, responseIsBasic: true);
+  }
+
+  /// Ver.0.8.0 energyモード：技カードで対応（迎撃）する。
+  /// 速い技カードなら攻撃をつぶせる。返し技として成立させたい場合は
+  /// 固有の返し技（counterカテゴリ、返エネルギー要）を使うこと。
+  void respondWithTechniqueCard(String playerId, String cardInstanceId) {
+    final atk = state.pendingAttack;
+    if (state.phase != LevelMatchPhase.responseSelection || atk == null) {
+      throw StateError('対応できる局面ではありません');
+    }
+    if (atk.defenderId != playerId) throw StateError('対応できるのは防御側です');
+    if (state.resourceMode != MatchResourceMode.energy) {
+      throw StateError('技カードはエネルギーモード専用です');
+    }
+    final defender = state.byId(playerId);
+    final index = defender.hand.indexWhere(
+      (c) => c.instanceId == cardInstanceId,
+    );
+    if (index < 0) throw StateError('手札にカードがありません');
+    final card = defender.hand[index];
+    if (card.isEnergyOnly) throw StateError('これは技エネルギーカードです（技カードではありません）');
+    final attack = moves[atk.moveId];
+    if (attack != null && attack.ignoreNormalSpeed) {
+      throw StateError('フィニッシャーには技カードで割り込めません');
+    }
+    final rawMove = moves[card.techniqueMoveId];
+    if (rawMove == null) throw StateError('技が見つかりません');
+    final move = rawMove.resolvedForEnergyMode;
+    if (!canAffordEnergy(defender, move.energyModeRequiredCards)) {
+      throw StateError('エネルギーが不足しているため対応できません');
+    }
+    defender.hand.removeAt(index);
+    defender.discardPile.add(card);
+    defender.previousMoveId = move.id;
+    final readyBefore = Map.of(defender.readyEnergyCounts);
+    final spent = _consumeEnergy(defender, move.energyModeRequiredCards);
+    final readyAfter = Map.of(defender.readyEnergyCounts);
+    _log(defender, 'respondEnergyConsumed', '${move.name}（技カード）で対応（迎撃）', {
+      'moveId': move.id,
+      'isCounterMove': move.isCounterMove,
+      'energyCost': _attributeJson(move.energyModeRequiredCards),
+      'energySpent': spent,
+      'readyEnergyBefore': _attributeJson(readyBefore),
+      'readyEnergyAfter': _attributeJson(readyAfter),
+    });
     _resolveExchange(response: move, responder: defender, responseIsBasic: true);
   }
 
@@ -1268,6 +1336,42 @@ class LevelMatchEngine {
     actor.hand.removeAt(cardIndex);
     actor.discardPile.add(card);
     _declareAttack(actor, move, isBasic: true);
+  }
+
+  /// Ver.0.8.0 energyモード：技カード（手札から使用・使用後は捨て札）を攻撃として宣言する。
+  /// 技エネルギーカード（isEnergyOnly）はここでは使えない。
+  void useTechniqueCard(String playerId, String cardInstanceId) {
+    final actor = _requireTurn(playerId);
+    if (state.phase != LevelMatchPhase.chooseMove) {
+      throw StateError('技選択フェイズではありません');
+    }
+    if (state.resourceMode != MatchResourceMode.energy) {
+      throw StateError('技カードはエネルギーモード専用です');
+    }
+    final cardIndex = actor.hand.indexWhere(
+      (item) => item.instanceId == cardInstanceId,
+    );
+    if (cardIndex < 0) throw StateError('手札にカードがありません');
+    final card = actor.hand[cardIndex];
+    if (card.isEnergyOnly) throw StateError('これは技エネルギーカードです（技カードではありません）');
+    final rawMove = moves[card.techniqueMoveId];
+    if (rawMove == null) throw StateError('技が見つかりません');
+    final move = rawMove.resolvedForEnergyMode;
+    if (!canAffordEnergy(actor, move.energyModeRequiredCards)) {
+      throw StateError('エネルギーが不足しているため使用できません');
+    }
+    // 宣言＝コミット：手札から捨て札へ（エネルギー消費は_declareAttack内で行う）。
+    actor.hand.removeAt(cardIndex);
+    actor.discardPile.add(card);
+    _declareAttack(actor, move, isBasic: true);
+  }
+
+  bool canAffordEnergy(PlayerLevelMatchState actor, Map<MoveAttribute, int> cost) {
+    final ready = actor.readyEnergyCounts;
+    for (final entry in cost.entries) {
+      if ((ready[entry.key] ?? 0) < entry.value) return false;
+    }
+    return true;
   }
 
   // ===== Ver.0.5: フォール（3カウント） =====
@@ -1603,8 +1707,19 @@ class LevelMatchEngine {
     final signatureOptions = _currentMoves(defender)
         .where((m) => responseAvailability(defender, m, isBasic: false).usable)
         .toList();
-    // Ver.0.8.0 energyモード：単体技での対応は廃止のため候補にしない。
-    final basicCards = state.resourceMode == MatchResourceMode.energy
+    // Ver.0.8.0 energyモード：単体技(basic_*)は廃止。代わりに手札の技カード
+    // （エネルギーで支払えるもの）を迎撃候補にする。フィニッシャーには不可。
+    final isEnergyMode = state.resourceMode == MatchResourceMode.energy;
+    final canInterceptFinisher = !(attackMove.ignoreNormalSpeed);
+    final techniqueCards = isEnergyMode && canInterceptFinisher
+        ? defender.hand
+            .where((c) =>
+                !c.isEnergyOnly &&
+                moves[c.techniqueMoveId] != null &&
+                canAffordEnergy(defender, moves[c.techniqueMoveId]!.energyModeRequiredCards))
+            .toList()
+        : const <TechniqueResourceCard>[];
+    final basicCards = isEnergyMode
         ? const <TechniqueResourceCard>[]
         : defender.hand
             .where((c) => basicMoveFor(c.attribute, defender) != null)
@@ -1638,10 +1753,26 @@ class LevelMatchEngine {
         }
       }
     }
+    TechniqueResourceCard? bestTechCard;
+    var bestTechScore = 0;
+    for (final c in techniqueCards) {
+      final m = moves[c.techniqueMoveId]!;
+      final clash = clashBetween(attackMove, m);
+      if (clash == ClashOutcome.speedWin) {
+        final score = 50 + m.power;
+        if (score > bestTechScore) {
+          bestTechScore = score;
+          bestTechCard = c;
+        }
+      }
+    }
     // 攻撃が決着技（強い脅威）なら、勝てる手があれば必ず出す。
-    if (bestSig != null && bestSigScore >= bestBasicScore) {
+    if (bestSig != null && bestSigScore >= bestBasicScore && bestSigScore >= bestTechScore) {
       _log(defender, 'cpuDecision', '返し/速度で対応: ${bestSig.name}', {});
       respondWithMove(defender.playerId, bestSig.id);
+    } else if (bestTechCard != null && bestTechScore >= bestBasicScore) {
+      _log(defender, 'cpuDecision', '技カードで迎撃: ${moves[bestTechCard.techniqueMoveId]!.name}', {});
+      respondWithTechniqueCard(defender.playerId, bestTechCard.instanceId);
     } else if (bestBasic != null) {
       _log(defender, 'cpuDecision', '単体技で対応', {});
       respondWithBasic(defender.playerId, bestBasic.instanceId);
@@ -1719,12 +1850,17 @@ class LevelMatchEngine {
     } else {
       desired = _desiredAttributes(actor);
     }
-    final candidates = actor.hand
+    // Ver.0.8.0 energyモード：技カードはセットできない（使用専用）ため、
+    // セット候補はエネルギーカード（isEnergyOnly）に限る。
+    final setable = state.resourceMode == MatchResourceMode.energy
+        ? actor.hand.where((c) => c.isEnergyOnly).toList()
+        : actor.hand;
+    final candidates = setable
         .where((card) => desired.contains(card.attribute))
         .toList();
     final card = candidates.isNotEmpty
         ? candidates.first
-        : (actor.hand.isEmpty ? null : actor.hand.first);
+        : (setable.isEmpty ? null : setable.first);
     if (card == null) {
       skipSetCard(id);
     } else if (actor.setCards.length < 6) {
@@ -1808,17 +1944,66 @@ class LevelMatchEngine {
         return cost.keys.any(needed.contains);
       });
     }
+    if (state.resourceMode == MatchResourceMode.energy) {
+      // Ver.0.8.0 energyモード：固有技（無料のbasic_*は廃止）に加え、
+      // 手札の技カード（techniqueMoveId付き・エネルギーで支払えるもの）も
+      // 対等な選択肢として評価する。
+      final techniqueOptions = <(MoveDefinition, TechniqueResourceCard)>[
+        for (final card in actor.hand)
+          if (!card.isEnergyOnly && moves[card.techniqueMoveId] != null)
+            if (canAffordEnergy(actor, moves[card.techniqueMoveId]!.energyModeRequiredCards))
+              (moves[card.techniqueMoveId]!, card),
+      ];
+      if (candidates.isEmpty && techniqueOptions.isEmpty) {
+        _log(actor, 'cpuDecision', '使用可能な技なし', {'candidates': <String>[]});
+        skipMove(id);
+        return;
+      }
+      MoveDefinition? bestSig;
+      var bestSigScore = -1 << 30;
+      for (final m in candidates) {
+        final s = _scoreMoveFor(actor, m);
+        if (s > bestSigScore) {
+          bestSigScore = s;
+          bestSig = m;
+        }
+      }
+      (MoveDefinition, TechniqueResourceCard)? bestTech;
+      var bestTechScore = -1 << 30;
+      for (final entry in techniqueOptions) {
+        final s = _scoreMoveFor(actor, entry.$1);
+        if (s > bestTechScore) {
+          bestTechScore = s;
+          bestTech = entry;
+        }
+      }
+      if (bestSig != null && bestSigScore >= bestTechScore) {
+        _log(actor, 'cpuDecision', '${bestSig.name}を選択（固有技）', {
+          'score': bestSigScore,
+          'selectionReason': 'maximumScore',
+        });
+        useMove(id, bestSig.id);
+      } else if (bestTech != null) {
+        _log(actor, 'cpuDecision', '${bestTech.$1.name}を選択（技カード）', {
+          'score': bestTechScore,
+          'card': bestTech.$2.instanceId,
+          'selectionReason': 'maximumScore',
+        });
+        useTechniqueCard(id, bestTech.$2.instanceId);
+      } else {
+        _log(actor, 'cpuDecision', '使用可能な技なし', {'candidates': <String>[]});
+        skipMove(id);
+      }
+      return;
+    }
     if (candidates.isEmpty) {
       // Ver.0.7: 固有技が使えなければ単体技で攻める（手札があれば）。
-      // Ver.0.8.0 energyモード：無料の単体技は廃止のため対象外（固有技のみ）。
-      final basicCard = state.resourceMode == MatchResourceMode.energy
-          ? null
-          : actor.hand
-              .cast<TechniqueResourceCard?>()
-              .firstWhere(
-                (card) => basicMoveFor(card!.attribute, actor) != null,
-                orElse: () => null,
-              );
+      final basicCard = actor.hand
+          .cast<TechniqueResourceCard?>()
+          .firstWhere(
+            (card) => basicMoveFor(card!.attribute, actor) != null,
+            orElse: () => null,
+          );
       if (basicCard != null) {
         _log(actor, 'cpuDecision', '単体技で攻める', {'card': basicCard.attribute.name});
         useBasicMove(id, basicCard.instanceId);

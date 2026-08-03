@@ -161,6 +161,75 @@ class LevelMatchDeckBuilder {
     );
   }
 
+  /// Ver.0.8.0 energyモード：技カード（手札から使用・使用後は捨て札）と
+  /// 技エネルギーカード（場にセット）を混在させたデッキを生成する。
+  /// 属性配分は classic と同じ重み計算（build）を再利用し、classic側の
+  /// アルゴリズムには一切手を加えない。返（counter）属性は返し技を発動する
+  /// 権利＝エネルギー専用として扱い、技カード化しない。
+  DeckBuildResult buildEnergyMode({
+    required WrestlerDefinition wrestler,
+    required Map<String, MoveDefinition> moves,
+    required String owner,
+    double techniqueCardRatio = 0.4,
+  }) {
+    final base = build(wrestler: wrestler, moves: moves, owner: owner);
+    var serial = 0;
+    final cards = <TechniqueResourceCard>[
+      for (final attribute in MoveAttribute.values)
+        for (var i = 0; i < (base.counts[attribute] ?? 0); i++)
+          _cardFor(
+            owner,
+            serial++,
+            attribute,
+            i,
+            base.counts[attribute] ?? 0,
+            techniqueCardRatio,
+            wrestler,
+            moves,
+          ),
+    ];
+    return DeckBuildResult(
+      source: base.source,
+      counts: base.counts,
+      cards: cards,
+      attributeReasons: base.attributeReasons,
+      usedAttributes: base.usedAttributes,
+      usedFallback: base.usedFallback,
+      failureReason: base.failureReason,
+    );
+  }
+
+  TechniqueResourceCard _cardFor(
+    String owner,
+    int serial,
+    MoveAttribute attribute,
+    int indexWithinAttribute,
+    int totalForAttribute,
+    double techniqueCardRatio,
+    WrestlerDefinition wrestler,
+    Map<String, MoveDefinition> moves,
+  ) {
+    final id = '$owner-$serial';
+    // 返エネルギーは常に純粋なエネルギーカード（返し技を発動する権利）。
+    if (attribute == MoveAttribute.counter) {
+      return TechniqueResourceCard(id, attribute);
+    }
+    final techniqueCount = (totalForAttribute * techniqueCardRatio).round();
+    if (indexWithinAttribute >= techniqueCount) {
+      return TechniqueResourceCard(id, attribute);
+    }
+    final ownId = wrestler.basicMoveIds[attribute];
+    final moveId = (ownId != null && moves.containsKey(ownId))
+        ? ownId
+        : moves.values
+            .firstWhere(
+              (m) => m.category == MoveCategory.basic && m.attribute == attribute,
+              orElse: () => moves.values.first,
+            )
+            .id;
+    return TechniqueResourceCard(id, attribute, techniqueMoveId: moveId);
+  }
+
   /// 重みと最低保証から30枚を配分する。破綻したら null（フォールバックへ）。
   Map<MoveAttribute, int>? _distribute(
     Map<MoveAttribute, double> weights,
