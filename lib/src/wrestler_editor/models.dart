@@ -13,7 +13,7 @@ enum EditorWrestlerType {
 
 enum MoveAttribute { strike, throwMove, submission, counter, rough, aerial }
 
-enum MoveCategory { normal, counter, finisher }
+enum MoveCategory { normal, counter, finisher, basic }
 
 enum AdditionalCheckType {
   none,
@@ -244,6 +244,18 @@ class MoveDefinition {
     this.submissionPower = 0,
     this.autoSubmissionCheck = false,
     this.submissionBonusOnFinisher = 0,
+    this.speed = 5,
+    this.canPin = false,
+    this.canSubmit = false,
+    this.canKO = false,
+    this.counterTypes = const [],
+    this.cannotCounterTypes = const [],
+    this.specialAbilities = const [],
+    this.causesDownFlag = false,
+    this.causesCorner = false,
+    this.causesOutside = false,
+    this.requiredPreviousState,
+    this.consumesSetCards = true,
   });
 
   final String id;
@@ -278,19 +290,44 @@ class MoveDefinition {
   final bool autoSubmissionCheck;
   final int submissionBonusOnFinisher;
 
-  /// この技が成功後にフォール判定へ移行できるか。
+  // Ver.0.7: 技速度・返し・決着可否・状態変化・特殊能力（改修10）。
+  final int speed; // 大きいほど速い（先に命中）
+  final bool canPin; // フォール可能（固有技のみ想定）
+  final bool canSubmit; // ギブアップ可能
+  final bool canKO; // KO可能（ダウンへ）
+  final List<MoveAttribute> counterTypes; // 返せる相手属性
+  final List<MoveAttribute> cannotCounterTypes; // この技を返せない属性
+  final List<String> specialAbilities; // 例: cannotRopeBreak, cannotCounter
+  final bool causesDownFlag; // 明示的なダウン付与
+  final bool causesCorner;
+  final bool causesOutside;
+  final String? requiredPreviousState; // 使用に必要な直前状態（例: down, topRope）
+  final bool consumesSetCards; // 使用時にセットカードを消費するか
+
+  /// 単体技（コスト不要・決着不可）か。
+  bool get isBasic => category == MoveCategory.basic;
+
+  /// この技が成功後にフォール判定へ移行できるか（単体技は不可）。
   bool get offersPin =>
-      canAttemptPin || additionalChecks.contains(AdditionalCheckType.pinfall);
+      !isBasic &&
+      (canPin ||
+          canAttemptPin ||
+          additionalChecks.contains(AdditionalCheckType.pinfall));
 
-  /// この技が成功後にギブアップ判定へ移行できるか。
+  /// この技が成功後にギブアップ判定へ移行できるか（単体技は不可）。
   bool get offersSubmission =>
-      canAttemptSubmission ||
-      additionalChecks.contains(AdditionalCheckType.submission);
+      !isBasic &&
+      (canSubmit ||
+          canAttemptSubmission ||
+          additionalChecks.contains(AdditionalCheckType.submission));
 
-  /// この技が相手をダウンさせるか（旧knockoutはdown扱い）。
+  /// この技が相手をダウンさせるか（単体技は不可。旧knockoutはdown扱い）。
   bool get causesDown =>
-      additionalChecks.contains(AdditionalCheckType.down) ||
-      additionalChecks.contains(AdditionalCheckType.knockout);
+      !isBasic &&
+      (causesDownFlag ||
+          canKO ||
+          additionalChecks.contains(AdditionalCheckType.down) ||
+          additionalChecks.contains(AdditionalCheckType.knockout));
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -320,6 +357,18 @@ class MoveDefinition {
     'submissionPower': submissionPower,
     'autoSubmissionCheck': autoSubmissionCheck,
     'submissionBonusOnFinisher': submissionBonusOnFinisher,
+    'speed': speed,
+    'canPin': canPin,
+    'canSubmit': canSubmit,
+    'canKO': canKO,
+    'counterTypes': counterTypes.map((item) => item.name).toList(),
+    'cannotCounterTypes': cannotCounterTypes.map((item) => item.name).toList(),
+    'specialAbilities': specialAbilities,
+    'causesDown': causesDownFlag,
+    'causesCorner': causesCorner,
+    'causesOutside': causesOutside,
+    'requiredPreviousState': requiredPreviousState,
+    'consumesSetCards': consumesSetCards,
   };
 
   factory MoveDefinition.fromJson(Map<String, dynamic> json) => MoveDefinition(
@@ -362,6 +411,26 @@ class MoveDefinition {
     autoSubmissionCheck: json['autoSubmissionCheck'] as bool? ?? false,
     submissionBonusOnFinisher:
         (json['submissionBonusOnFinisher'] as num?)?.toInt() ?? 0,
+    speed: (json['speed'] as num?)?.toInt() ?? 5,
+    canPin: json['canPin'] as bool? ?? false,
+    canSubmit: json['canSubmit'] as bool? ?? false,
+    canKO: json['canKO'] as bool? ?? false,
+    counterTypes: [
+      for (final item in (json['counterTypes'] as List? ?? const []))
+        enumValue(MoveAttribute.values, item, 'counterTypes'),
+    ],
+    cannotCounterTypes: [
+      for (final item in (json['cannotCounterTypes'] as List? ?? const []))
+        enumValue(MoveAttribute.values, item, 'cannotCounterTypes'),
+    ],
+    specialAbilities: List<String>.from(
+      json['specialAbilities'] as List? ?? const [],
+    ),
+    causesDownFlag: json['causesDown'] as bool? ?? false,
+    causesCorner: json['causesCorner'] as bool? ?? false,
+    causesOutside: json['causesOutside'] as bool? ?? false,
+    requiredPreviousState: json['requiredPreviousState'] as String?,
+    consumesSetCards: json['consumesSetCards'] as bool? ?? true,
   );
 }
 

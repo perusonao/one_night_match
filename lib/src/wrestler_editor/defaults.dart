@@ -18,6 +18,7 @@ MoveDefinition _move(
   bool submission = false,
   int submissionPower = 0,
   bool down = false,
+  int? speed,
   String description = 'Ver.0.5 検討用の仮技データです。',
 }) {
   final checks = <AdditionalCheckType>[
@@ -25,6 +26,14 @@ MoveDefinition _move(
     if (submission) AdditionalCheckType.submission,
     if (down) AdditionalCheckType.down,
   ];
+  // 速度は威力から自動決定（重い技ほど遅い）。5刻みの目安。
+  final autoSpeed = power >= 26
+      ? 3
+      : power >= 20
+      ? 4
+      : power >= 15
+      ? 6
+      : 8;
   return MoveDefinition(
     id: id,
     name: name,
@@ -39,9 +48,35 @@ MoveDefinition _move(
     pinPower: pinPower,
     canAttemptSubmission: submission,
     submissionPower: submissionPower,
+    speed: speed ?? autoSpeed,
+    canPin: pin,
+    canSubmit: submission,
+    canKO: down,
     description: description,
   );
 }
+
+/// Ver.0.7 単体技（基本技）。コスト不要・決着不可・速い。
+MoveDefinition _basic(
+  String id,
+  String name,
+  MoveAttribute attribute,
+  int power,
+  int heat,
+  int speed,
+) => MoveDefinition(
+  id: id,
+  name: name,
+  category: MoveCategory.basic,
+  attribute: attribute,
+  power: power,
+  heat: heat,
+  requiredCards: _cards(),
+  discardAfterUse: _cards(),
+  speed: speed,
+  consumesSetCards: false,
+  description: 'Ver.0.7 単体技。手札から直接使用（コスト不要・決着不可）。',
+);
 
 MoveDefinition _finisher(
   String id,
@@ -69,8 +104,26 @@ MoveDefinition _finisher(
   canAttemptSubmission: !pinfall,
   submissionPower: pinfall ? 0 : strength,
   submissionBonusOnFinisher: pinfall ? 0 : 15,
+  speed: 2, // フィニッシャーは最も遅い
+  canPin: pinfall,
+  canSubmit: !pinfall,
   description: 'Ver.0.5 のフィニッシャー。決着（フォール／ギブアップ）へ直結する。',
 );
+
+/// Ver.0.7 単体技カタログ（属性→基本技）。手札から直接使用できる。
+final defaultBasicMoves = <MoveDefinition>[
+  _basic('basic_strike', '逆水平チョップ', MoveAttribute.strike, 5, 5, 9),
+  _basic('basic_throw', 'ボディスラム', MoveAttribute.throwMove, 10, 5, 6),
+  _basic('basic_aerial', 'ドロップキック', MoveAttribute.aerial, 10, 10, 9),
+  _basic('basic_submission', 'グラウンド固め', MoveAttribute.submission, 5, 5, 6),
+  _basic('basic_rough', 'ラフファイト', MoveAttribute.rough, 8, 3, 7),
+  _basic('basic_counter', '当て身', MoveAttribute.counter, 4, 5, 10),
+];
+
+/// 属性→単体技ID の対応。
+final basicMoveIdByAttribute = <MoveAttribute, String>{
+  for (final move in defaultBasicMoves) move.attribute: move.id,
+};
 
 final defaultEditorMoves = <MoveDefinition>[
   // 打撃（KO=ダウン）。
@@ -133,6 +186,8 @@ final defaultEditorMoves = <MoveDefinition>[
       pinfall: false, strength: 12),
   _finisher('black_butterfly', 'ブラック・バタフライ', MoveAttribute.rough,
       pinfall: true, strength: 10),
+  // Ver.0.7 単体技（全レスラー共通・手札から直接使用）。
+  ...defaultBasicMoves,
 ];
 
 final defaultEditorAbilities = <AbilityDefinition>[

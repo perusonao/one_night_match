@@ -48,6 +48,8 @@ class LevelMatchIntroScreen extends StatelessWidget {
               'セット属性で各Levelの技が解放',
               '全Levelの技コストを確認できる',
               'レスラーごとに30枚デッキを自動生成',
+              '手札は「単体技」で直接使用も可能（コスト不要）',
+              '決着（フォール/ギブアップ/KO）は固有技のみ',
               'HPは消耗の指標（0でも試合は続く）',
               '投げ技からフォール（3カウント）',
               '関節技からギブアップ',
@@ -473,6 +475,24 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
             state.unlockNotice!,
             style: const TextStyle(color: _gold, fontWeight: FontWeight.bold),
           ),
+        // Ver.0.7: 相手の前ターン技を常時表示（読み合いの土台）。
+        if (state.cpu.lastUsedMoveName != null)
+          Container(
+            margin: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.black26,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '相手の技: ${state.cpu.lastUsedMoveName}'
+              '（速度${state.cpu.lastUsedMoveSpeed ?? "-"}）',
+              style: const TextStyle(
+                color: Colors.orangeAccent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         if (state.lastMove != null)
           Text('${state.lastMove} / ${state.lastDamage} DAMAGE'),
         if (state.logs.isNotEmpty)
@@ -688,6 +708,16 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     final moveList = engine.currentMoves(player);
     return Column(
       children: [
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Padding(
+            padding: EdgeInsets.only(left: 4, top: 4, bottom: 2),
+            child: Text(
+              '固有技（セット消費・決着可）',
+              style: TextStyle(fontWeight: FontWeight.bold, color: _gold),
+            ),
+          ),
+        ),
         for (final move in moveList)
           Builder(
             builder: (_) {
@@ -704,7 +734,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                     '${move.name}${tags.isEmpty ? "" : "  [${tags.join("/")}]"}',
                   ),
                   subtitle: Text(
-                    '${moveAttributeLabel(move.attribute)} / 攻撃 ${move.power} / HEAT ${move.heat >= 0 ? "+" : ""}${move.heat}\n'
+                    '${moveAttributeLabel(move.attribute)} / 攻撃 ${move.power} / 速度 ${move.speed} / HEAT ${move.heat >= 0 ? "+" : ""}${move.heat}\n'
                     '必要 ${_attributeCounts(move.requiredCards)} / 現在 ${_attributeCounts(player.setAttributeCounts)}\n'
                     '${availability.usable ? "使用可能" : "使用不可: ${availability.reasons.join(" / ")}"}',
                   ),
@@ -720,6 +750,55 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
               );
             },
           ),
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Padding(
+            padding: EdgeInsets.only(left: 4, top: 8, bottom: 2),
+            child: Text(
+              '単体技（手札から直接・コスト不要・決着不可）',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70),
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 92,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              for (final card in player.hand)
+                Builder(
+                  builder: (_) {
+                    final basic = engine.basicMoveFor(card.attribute);
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ActionChip(
+                        avatar: CircleAvatar(
+                          child: Text(moveAttributeLabel(card.attribute)),
+                        ),
+                        label: SizedBox(
+                          width: 92,
+                          child: Text(
+                            basic == null
+                                ? card.name
+                                : '${basic.name}\n威力${basic.power} 速${basic.speed}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                        onPressed: basic == null
+                            ? null
+                            : () => _act(
+                                () => engine.useBasicMove(
+                                  'player',
+                                  card.instanceId,
+                                ),
+                              ),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
         OutlinedButton(
           onPressed: () => _act(() => engine.skipMove('player')),
           child: const Text('技を使わず終了'),

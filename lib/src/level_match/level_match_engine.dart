@@ -137,6 +137,12 @@ class PlayerLevelMatchState {
   // Ver.0.5: CPU評価用（直前使用技）。
   String? previousMoveId;
 
+  // Ver.0.7: このプレイヤーが直前に使った技（相手の「前ターン技」表示・読み合い用）。
+  String? lastUsedMoveId;
+  String? lastUsedMoveName;
+  int? lastUsedMoveSpeed;
+  bool lastUsedWasBasic = false;
+
   // Ver.0.5: 自動生成デッキの内訳（プレビュー・ログ用）。
   DeckBuildResult? deckBuild;
 
@@ -588,6 +594,10 @@ class LevelMatchEngine {
     if (actor.currentHp <= 30) heatDelta++;
     final fromFinisher = move.category == MoveCategory.finisher;
     actor.previousMoveId = move.id;
+    actor.lastUsedMoveId = move.id;
+    actor.lastUsedMoveName = move.name;
+    actor.lastUsedMoveSpeed = move.speed;
+    actor.lastUsedWasBasic = false;
     if (fromFinisher) {
       heatDelta += 3;
       actor.finisherUsed = true;
@@ -754,6 +764,74 @@ class LevelMatchEngine {
       throw StateError('技をスキップできません');
     }
     _log(actor, 'skipMove', '技を使用せずターン終了');
+    endTurn();
+  }
+
+  /// 手札のカードから探せる単体技（属性が一致する MoveCategory.basic）。
+  MoveDefinition? basicMoveFor(MoveAttribute attribute) {
+    for (final move in moves.values) {
+      if (move.category == MoveCategory.basic && move.attribute == attribute) {
+        return move;
+      }
+    }
+    return null;
+  }
+
+  /// Ver.0.7: 手札のカードを単体技として直接使用する（コスト不要・決着不可）。
+  void useBasicMove(String playerId, String cardInstanceId) {
+    final actor = _requireTurn(playerId);
+    if (state.phase != LevelMatchPhase.chooseMove) {
+      throw StateError('技選択フェイズではありません');
+    }
+    final cardIndex = actor.hand.indexWhere(
+      (item) => item.instanceId == cardInstanceId,
+    );
+    if (cardIndex < 0) throw StateError('手札にカードがありません');
+    final card = actor.hand[cardIndex];
+    final move = basicMoveFor(card.attribute);
+    if (move == null) throw StateError('この属性の単体技がありません');
+    final target = state.defender;
+    state.phase = LevelMatchPhase.resolveMove;
+    actor.hand.removeAt(cardIndex);
+    actor.discardPile.add(card);
+    final resistance = target.levelCard.resistances[move.attribute] ?? 0;
+    final damage = max(0, move.power - resistance);
+    final hpBefore = target.currentHp;
+    target.currentHp = max(0, target.currentHp - damage);
+    actor.damageDealtCount++;
+    target.damageTakenCount++;
+    final firstAttribute =
+        (actor.attributeSuccessCounts[move.attribute] ?? 0) == 0;
+    actor.attributeSuccessCounts[move.attribute] =
+        (actor.attributeSuccessCounts[move.attribute] ?? 0) + 1;
+    actor.previousMoveId = move.id;
+    actor.lastUsedMoveId = move.id;
+    actor.lastUsedMoveName = move.name;
+    actor.lastUsedMoveSpeed = move.speed;
+    actor.lastUsedWasBasic = true;
+    var heatDelta = move.heat;
+    if (damage > 0 && firstAttribute) heatDelta++;
+    state.sharedHeat += heatDelta;
+    state.lastMove = move.name;
+    state.lastMoveId = move.id;
+    state.lastDamage = damage;
+    if (target.currentHp <= 0 && target.hpZeroReachedTurn == null) {
+      target.hpZeroReachedTurn = state.turnNumber;
+    }
+    _log(actor, 'useBasicMove', '${move.name}（単体技）！ $damageダメージ', {
+      'selectedMove': move.id,
+      'basic': true,
+      'moveAttribute': move.attribute.name,
+      'movePower': move.power,
+      'speed': move.speed,
+      'finalDamage': damage,
+      'heatDelta': heatDelta,
+      'targetHpBefore': hpBefore,
+      'targetHpAfter': target.currentHp,
+    });
+    evaluateUnlocks(actor);
+    evaluateUnlocks(target);
+    // 単体技は決着（フォール／ギブアップ／KO）を発生させない。
     endTurn();
   }
 
@@ -1128,8 +1206,20 @@ class LevelMatchEngine {
       actor,
     ).where((move) => evaluateMove(actor, move).usable).toList();
     if (candidates.isEmpty) {
-      _log(actor, 'cpuDecision', '使用可能な技なし', {'candidates': <String>[]});
-      skipMove(id);
+      // Ver.0.7: 固有技が使えなければ単体技で攻める（手札があれば）。
+      final basicCard = actor.hand
+          .cast<TechniqueResourceCard?>()
+          .firstWhere(
+            (card) => basicMoveFor(card!.attribute) != null,
+            orElse: () => null,
+          );
+      if (basicCard != null) {
+        _log(actor, 'cpuDecision', '単体技で攻める', {'card': basicCard.attribute.name});
+        useBasicMove(id, basicCard.instanceId);
+      } else {
+        _log(actor, 'cpuDecision', '使用可能な技なし', {'candidates': <String>[]});
+        skipMove(id);
+      }
     } else {
       candidates.sort(
         (a, b) => _scoreMoveFor(actor, b).compareTo(_scoreMoveFor(actor, a)),
