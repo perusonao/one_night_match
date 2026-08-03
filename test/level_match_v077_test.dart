@@ -1,0 +1,55 @@
+import 'dart:math';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:one_night_match/src/level_match/level_match_engine.dart';
+import 'package:one_night_match/src/wrestler_editor/models.dart';
+import 'package:one_night_match/src/wrestler_editor/defaults.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() {
+  final moves = {for (final m in defaultEditorMoves) m.id: m};
+  WrestlerDefinition byId(String id) =>
+      defaultEditorWrestlers.firstWhere((w) => w.id == id);
+
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('Ver.0.7.7: レスラー固有の通常技が解決される', () {
+    final m = LevelMatchEngine.create(
+      playerWrestler: byId('wrestler_akari'),
+      cpuWrestler: byId('wrestler_jack'),
+      moves: moves,
+      random: Random(1),
+      playerStarts: true,
+    );
+    // アカリの打撃通常技は「火炎チョップ」、ジャックは「闇討ちジャブ」。
+    expect(m.basicMoveFor(MoveAttribute.strike, m.state.player)!.name, '火炎チョップ');
+    expect(m.basicMoveFor(MoveAttribute.strike, m.state.cpu)!.name, '闇討ちジャブ');
+    // 未指定属性は共通の通常技へフォールバック。
+    expect(m.basicMoveFor(MoveAttribute.counter, m.state.player)!.id, 'basic_counter');
+  });
+
+  test('Ver.0.7.7: 固有技IDがレスラー間で重複しない', () {
+    final all = <String>{};
+    for (final w in defaultEditorWrestlers) {
+      for (final lv in w.levels) {
+        for (final id in lv.moveIds) {
+          expect(all.add(id), isTrue,
+              reason: '固有技IDが重複: $id (${w.name})');
+        }
+      }
+    }
+  });
+
+  test('Ver.0.7.7: 各レスラーの固有技・通常技・フィニッシャーが揃う', () {
+    for (final w in defaultEditorWrestlers) {
+      // 固有技6種（L1-L3 各2）。
+      final sig = [for (final lv in w.levels) ...lv.moveIds];
+      expect(sig.length, 6, reason: '${w.name} の固有技数');
+      // フィニッシャーがL3に登録。
+      expect(w.levels.last.finisherId, isNotNull);
+      expect(moves[w.levels.last.finisherId]!.category,
+          MoveCategory.finisher);
+      // 固有の通常技を持つ。
+      expect(w.basicMoveIds, isNotEmpty);
+    }
+  });
+}

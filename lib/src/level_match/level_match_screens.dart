@@ -1341,7 +1341,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     final seen = <MoveAttribute>{};
     for (final card in player.hand) {
       if (!seen.add(card.attribute)) continue;
-      final basic = engine.basicMoveFor(card.attribute);
+      final basic = engine.basicMoveFor(card.attribute, player);
       if (basic == null) continue;
       final o = engine.clashBetween(attackMove, basic);
       options.add(_RespOption(
@@ -1986,7 +1986,8 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     final seen = <MoveAttribute>{};
     final basics = <TechniqueResourceCard>[];
     for (final c in player.hand) {
-      if (engine.basicMoveFor(c.attribute) != null && seen.add(c.attribute)) {
+      if (engine.basicMoveFor(c.attribute, player) != null &&
+          seen.add(c.attribute)) {
         basics.add(c);
       }
     }
@@ -2148,7 +2149,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   }
 
   Widget _basicMoveCard(TechniqueResourceCard card) {
-    final basic = engine.basicMoveFor(card.attribute)!;
+    final basic = engine.basicMoveFor(card.attribute, state.player)!;
     return _moveTile(
       attribute: card.attribute,
       name: basic.name,
