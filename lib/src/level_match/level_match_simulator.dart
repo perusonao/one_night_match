@@ -218,7 +218,7 @@ class SimReport {
         {for (final e in reasons.entries) e.key: total == 0 ? 0 : e.value / total};
     return {
       'generatedAt': DateTime.now().toUtc().toIso8601String(),
-      'version': '0.7.2',
+      'version': '0.7.3',
       'config': config,
       'summary': {
         'totalMatches': total,
