@@ -1514,13 +1514,13 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
         attribute: m.attribute,
       ));
     }
-    // 単体技（手札）での対応。属性ごとに1枚へ集約。
+    // 単体技（手札）での対応。Ver.0.8.0 energyモードでは廃止（固有技のみ）。
+    // 属性ごとに1枚へ集約。
     final seen = <MoveAttribute>{};
-    for (final card in player.hand) {
+    for (final card in _isEnergyMode ? const <TechniqueResourceCard>[] : player.hand) {
       if (!seen.add(card.attribute)) continue;
       final basic = engine.basicMoveFor(card.attribute, player);
       if (basic == null) continue;
-      if (_isEnergyMode && !_energyAffordable(player, basic)) continue;
       final o = engine.clashBetween(attackMove, basic);
       options.add(_RespOption(
         kind: _RespKind.basic,
@@ -2172,21 +2172,26 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
         .currentMoves(player)
         .where((m) => !(m.isCounterMove && !m.canUseAsNormalMove))
         .toList();
+    // Ver.0.8.0 energyモード：無料の単体技は廃止。攻撃は固有技のみ
+    // （手札カードはエネルギーゾーン専用リソースとして完全に分離される）。
     final seen = <MoveAttribute>{};
     final basics = <TechniqueResourceCard>[];
-    for (final c in player.hand) {
-      if (engine.basicMoveFor(c.attribute, player) != null &&
-          seen.add(c.attribute)) {
-        basics.add(c);
+    if (!_isEnergyMode) {
+      for (final c in player.hand) {
+        if (engine.basicMoveFor(c.attribute, player) != null &&
+            seen.add(c.attribute)) {
+          basics.add(c);
+        }
       }
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(12, 2, 12, 2),
-          child: Text('固有技（セットを消費・決着可）',
-              style: TextStyle(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
+          child: Text(
+              _isEnergyMode ? '固有技（エネルギーを消費・決着可）' : '固有技（セットを消費・決着可）',
+              style: const TextStyle(
                   fontWeight: FontWeight.bold, color: _gold, fontSize: 13)),
         ),
         Wrap(
@@ -2195,20 +2200,27 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
           runSpacing: 8,
           children: [for (final m in signatures) _signatureCard(player, m)],
         ),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(12, 8, 12, 2),
-          child: Text('単体技（カード1枚で使用・コスト不要）',
-              style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white70,
-                  fontSize: 13)),
-        ),
-        Wrap(
-          alignment: WrapAlignment.center,
-          spacing: 8,
-          runSpacing: 8,
-          children: [for (final c in basics) _basicMoveCard(c)],
-        ),
+        if (!_isEnergyMode) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(12, 8, 12, 2),
+            child: Text('単体技（カード1枚で使用・コスト不要）',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white70,
+                    fontSize: 13)),
+          ),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [for (final c in basics) _basicMoveCard(c)],
+          ),
+        ] else if (signatures.every((m) => !engine.evaluateMove(player, m).usable))
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Text('使用できる固有技がありません。エネルギーが貯まるまで待ちましょう。',
+                style: TextStyle(fontSize: 12, color: Colors.white54)),
+          ),
         const SizedBox(height: 8),
         Center(
           child: OutlinedButton(
