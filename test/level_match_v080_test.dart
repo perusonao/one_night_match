@@ -25,8 +25,8 @@ void main() {
     expect(m.state.remainingSeconds, 900); // ターン1開始時
   });
 
-  test('Ver.0.8.0: 時間切れで判定決着になる', () {
-    // 60秒=2ターンの超短時間。フォールが出なければ3ターン目開始で判定。
+  test('Ver.0.9: 時間切れは引き分けになる（決着は3カウント/ギブアップのみ）', () {
+    // 60秒=2ターンの超短時間。フォールが出なければ3ターン目開始で時間切れ引き分け。
     final m = LevelMatchEngine.create(
       playerWrestler: byId('wrestler_akari'),
       cpuWrestler: byId('wrestler_misaki'),
@@ -39,8 +39,16 @@ void main() {
       m.autoAdvance();
     }
     expect(m.state.isGameOver, isTrue);
-    // 短時間なので判定決着（または稀にフォール）。勝者は必ず決まる。
-    expect(m.state.winnerId, isNotNull);
+    // 短時間なので大抵は時間切れ引き分け（稀に先にフォール/ギブアップが決まる）。
+    if (m.state.finishReason == LevelFinishReason.draw) {
+      expect(m.state.winnerId, isNull);
+    } else {
+      expect(
+        m.state.finishReason,
+        anyOf(LevelFinishReason.pinfall, LevelFinishReason.submission),
+      );
+      expect(m.state.winnerId, isNotNull);
+    }
     // 時間制限を大きく超えない。
     expect(m.state.turnNumber, lessThanOrEqualTo(4));
   });

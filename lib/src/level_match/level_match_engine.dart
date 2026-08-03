@@ -26,7 +26,17 @@ enum LevelMatchPhase {
 /// 決着理由。Ver.0.5 で pinfall / submission を追加。
 /// hpZero は旧Ver.0.4ログ互換のため残すが、Ver.0.5では新規に出力しない。
 /// deckOut も Ver.0.6 で新規には出さない（山札切れは疲労へ）。exhaustion は安全弁。
-enum LevelFinishReason { hpZero, deckOut, pinfall, submission, exhaustion, decision }
+/// Ver.0.9: 決着は3カウント／ギブアップのみとし、時間切れ・消耗打ち切りは
+/// 勝敗を決めず draw（引き分け）とする。decision/exhaustion は旧ログ互換のため残す。
+enum LevelFinishReason {
+  hpZero,
+  deckOut,
+  pinfall,
+  submission,
+  exhaustion,
+  decision,
+  draw,
+}
 
 /// Ver.0.8.0: リソース方式（将来の特殊ルール拡張の土台）。
 /// classic = 現行のセットカード制（Ver.0.7バランス。カードは永続消費）。
@@ -516,20 +526,19 @@ class LevelMatchEngine {
     _log(actor, 'turnStart', '${actor.wrestler.name}のターン開始');
     evaluateUnlocks(actor);
 
-    // Ver.0.8.0: 試合時間切れ → 判定決着（時間制限ルール時のみ）。
+    // Ver.0.9: 試合時間切れ → 引き分け（時間制限ルール時のみ）。
+    // 決着は3カウント／ギブアップのみとし、時間切れでは勝敗をつけない。
     final limit = state.turnLimit;
     if (limit != null && state.turnNumber > limit) {
-      _judgeDecision();
+      _timeUpDraw();
       return;
     }
 
     // Ver.0.6: 無限試合を避ける安全弁（通常到達しない高ターン数）。
+    // Ver.0.9: これも決着ではなく引き分け（消耗の果て）とする。
     if (state.turnNumber > kMaxTurnSafetyCap) {
-      final winner = state.player.currentHp >= state.cpu.currentHp
-          ? state.player
-          : state.cpu;
       state.finishingMove = '消耗の果て';
-      _finish(winner, LevelFinishReason.exhaustion);
+      _finishDraw(LevelFinishReason.exhaustion);
       return;
     }
 
@@ -2379,23 +2388,15 @@ class LevelMatchEngine {
     return discarded;
   }
 
-  /// Ver.0.8.0: 時間切れ判定。①残り体力 ②与ダメージ回数 ③ランダムの順で勝者決定。
-  void _judgeDecision() {
+  /// Ver.0.9: 時間切れ＝引き分け。3カウント／ギブアップ以外では勝敗をつけない。
+  void _timeUpDraw() {
     final p = state.player, c = state.cpu;
-    final PlayerLevelMatchState winner;
-    if (p.currentHp != c.currentHp) {
-      winner = p.currentHp > c.currentHp ? p : c;
-    } else if (p.damageDealtCount != c.damageDealtCount) {
-      winner = p.damageDealtCount > c.damageDealtCount ? p : c;
-    } else {
-      winner = random.nextBool() ? p : c;
-    }
-    state.finishingMove = '時間切れ判定';
-    _log(winner, 'timeOver', '時間切れ！ 判定は${winner.wrestler.name}', {
+    state.finishingMove = '時間切れ';
+    _log(p, 'timeOver', '時間切れ！ 決着つかず引き分け', {
       'playerHp': p.currentHp,
       'cpuHp': c.currentHp,
     });
-    _finish(winner, LevelFinishReason.decision);
+    _finishDraw(LevelFinishReason.draw);
   }
 
   void _finish(PlayerLevelMatchState winner, LevelFinishReason reason) {
@@ -2404,6 +2405,19 @@ class LevelMatchEngine {
     state.finishedAt = DateTime.now().toUtc();
     state.phase = LevelMatchPhase.gameOver;
     _log(winner, 'gameOver', '${winner.wrestler.name}の勝利', {
+      'finishReason': reason.name,
+      'finishingMove': state.finishingMove ?? state.lastMove,
+      'finishMoveId': state.finishMoveId ?? state.lastMoveId,
+    });
+  }
+
+  /// Ver.0.9: 引き分け決着（時間切れ・消耗打ち切り）。勝者を立てない。
+  void _finishDraw(LevelFinishReason reason) {
+    state.winnerId = null;
+    state.finishReason = reason;
+    state.finishedAt = DateTime.now().toUtc();
+    state.phase = LevelMatchPhase.gameOver;
+    _log(state.player, 'gameOver', '引き分け', {
       'finishReason': reason.name,
       'finishingMove': state.finishingMove ?? state.lastMove,
       'finishMoveId': state.finishMoveId ?? state.lastMoveId,

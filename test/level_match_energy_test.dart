@@ -237,7 +237,13 @@ void main() {
         m.autoAdvance();
       }
       expect(m.state.isGameOver, isTrue, reason: 'seed=$seed で終了しない');
-      expect(m.state.winnerId, isNotNull, reason: 'seed=$seed で勝者未確定');
+      // Ver.0.9: 決着は3カウント/ギブアップのみ。安全弁到達時のみ引き分け（winnerId null）を許容。
+      expect(
+        m.state.winnerId != null ||
+            m.state.finishReason == LevelFinishReason.exhaustion,
+        isTrue,
+        reason: 'seed=$seed で異常終了',
+      );
     }
   });
 }

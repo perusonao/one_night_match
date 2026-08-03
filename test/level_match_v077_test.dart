@@ -20,9 +20,11 @@ void main() {
       random: Random(1),
       playerStarts: true,
     );
-    // アカリの打撃通常技は「火炎チョップ」、ジャックは「闇討ちジャブ」。
-    expect(m.basicMoveFor(MoveAttribute.strike, m.state.player)!.name, '火炎チョップ');
-    expect(m.basicMoveFor(MoveAttribute.strike, m.state.cpu)!.name, '闇討ちジャブ');
+    // Ver.0.9: 通常技は固有技と混同しないよう属性名で統一（性能はレスラーごとに個別）。
+    expect(m.basicMoveFor(MoveAttribute.strike, m.state.player)!.name, '打撃');
+    expect(m.basicMoveFor(MoveAttribute.strike, m.state.player)!.id, 'akari_nt_strike');
+    expect(m.basicMoveFor(MoveAttribute.strike, m.state.cpu)!.name, '打撃');
+    expect(m.basicMoveFor(MoveAttribute.strike, m.state.cpu)!.id, 'jack_nt_strike');
     // 未指定属性は共通の通常技へフォールバック。
     expect(m.basicMoveFor(MoveAttribute.counter, m.state.player)!.id, 'basic_counter');
   });
