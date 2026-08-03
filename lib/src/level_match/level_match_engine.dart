@@ -29,9 +29,30 @@ enum LevelMatchPhase {
 enum LevelFinishReason { hpZero, deckOut, pinfall, submission, exhaustion, decision }
 
 /// Ver.0.8.0: リソース方式（将来の特殊ルール拡張の土台）。
-/// setCards = 現行のセットカード制（Ver.0.7バランス）。
-/// heatMana = MTG風の毎ターン回復HEATマナ制（新ルールモード）。
-enum MatchResourceMode { setCards, heatMana }
+/// classic = 現行のセットカード制（Ver.0.7バランス。カードは永続消費）。
+/// energy  = MTG風エネルギーゾーン制（毎自ターン開始時にアンタップ／全回復）。
+enum MatchResourceMode { classic, energy }
+
+/// Ver.0.8.0 energyモード：場に置かれた技エネルギーカード（Ready/Used）。
+class EnergyCardState {
+  EnergyCardState({
+    required this.instanceId,
+    required this.attribute,
+    required this.name,
+    this.ready = true,
+  });
+  final String instanceId;
+  final MoveAttribute attribute;
+  final String name;
+  bool ready;
+
+  Map<String, dynamic> toJson() => {
+    'instanceId': instanceId,
+    'attribute': attribute.name,
+    'name': name,
+    'ready': ready,
+  };
+}
 
 /// Ver.0.7 Phase B: 攻防クラッシュの結果（レスポンダー視点）。
 /// counter/speedWin = レスポンダーの勝ち、speedLoss/neutral = 攻撃側の勝ち。
@@ -126,6 +147,8 @@ class PlayerLevelMatchState {
   final List<TechniqueResourceCard> hand;
   final List<TechniqueResourceCard> discardPile = [];
   final List<TechniqueResourceCard> setCards = [];
+  // Ver.0.8.0 energyモード専用（classicには影響しない・常に空）。
+  final List<EnergyCardState> energyZone = [];
   bool finisherUsed = false;
   final Map<String, int> moveUsageCounts = {};
   int damageDealtCount = 0;
@@ -191,6 +214,15 @@ class PlayerLevelMatchState {
       attribute: setCards.where((card) => card.attribute == attribute).length,
   };
 
+  /// Ver.0.8.0: エネルギーゾーンのうちReady（使用可能）な枚数を属性別に集計。
+  Map<MoveAttribute, int> get readyEnergyCounts {
+    final map = <MoveAttribute, int>{};
+    for (final e in energyZone) {
+      if (e.ready) map[e.attribute] = (map[e.attribute] ?? 0) + 1;
+    }
+    return map;
+  }
+
   Map<String, dynamic> toSummaryJson() => {
     'playerId': playerId,
     'wrestlerId': wrestler.id,
@@ -221,6 +253,8 @@ class PlayerLevelMatchState {
     'exhausted': isExhausted,
     'exhaustionTurns': exhaustionTurns,
     'deck': deckBuild?.toJson(),
+    if (energyZone.isNotEmpty)
+      'energyZone': energyZone.map((e) => e.toJson()).toList(),
   };
 }
 
@@ -287,7 +321,7 @@ class LevelMatchState {
   // Ver.0.8.0: 試合時間ルール（0=無制限）。1ターン=30秒。
   static const int secondsPerTurn = 30;
   int matchTimeSeconds = 0;
-  MatchResourceMode resourceMode = MatchResourceMode.setCards;
+  MatchResourceMode resourceMode = MatchResourceMode.classic;
 
   bool get isTimed => matchTimeSeconds > 0;
   int? get turnLimit => isTimed ? matchTimeSeconds ~/ secondsPerTurn : null;
@@ -383,7 +417,7 @@ class LevelMatchEngine {
     Random? random,
     bool playerStarts = true,
     int matchTimeSeconds = 0,
-    MatchResourceMode resourceMode = MatchResourceMode.setCards,
+    MatchResourceMode resourceMode = MatchResourceMode.classic,
   }) {
     final rng = random ?? Random();
     final playerDeckBuild = deckBuilder.build(
@@ -457,6 +491,12 @@ class LevelMatchEngine {
     final actor = state.active;
     actor.cardSetUsedThisTurn = false;
     actor.levelChangeUsedThisTurn = false;
+    // Ver.0.8.0 energyモード：自ターン開始時にエネルギーを全てアンタップ（Ready）。
+    if (state.resourceMode == MatchResourceMode.energy) {
+      for (final e in actor.energyZone) {
+        e.ready = true;
+      }
+    }
     if (actor.isDown) {
       actor.isDown = false;
       _log(actor, 'downRecovered', '${actor.wrestler.name}はダウンから立ち上がった');
@@ -522,6 +562,26 @@ class LevelMatchEngine {
       (item) => item.instanceId == cardInstanceId,
     );
     if (cardIndex < 0) throw StateError('手札にカードがありません');
+
+    // Ver.0.8.0 energyモード：エネルギーゾーンへセット（永続・毎ターンアンタップ）。
+    if (state.resourceMode == MatchResourceMode.energy) {
+      final card = actor.hand.removeAt(cardIndex);
+      final energyCard = EnergyCardState(
+        instanceId: card.instanceId,
+        attribute: card.attribute,
+        name: card.name,
+      );
+      actor.energyZone.add(energyCard);
+      actor.cardSetUsedThisTurn = true;
+      _log(actor, 'setEnergy', '${card.name}をエネルギーゾーンへセット', {
+        'energyCard': energyCard.toJson(),
+        'readyEnergyCounts': _attributeJson(actor.readyEnergyCounts),
+      });
+      evaluateUnlocks(actor);
+      state.phase = LevelMatchPhase.levelChange;
+      return;
+    }
+
     TechniqueResourceCard? removed;
     if (actor.setCards.length >= 6) {
       if (replaceInstanceId == null) throw StateError('セット上限です。交換が必要です');
@@ -598,19 +658,32 @@ class LevelMatchEngine {
         level.counterMoveId == move.id ||
         level.finisherId == move.id;
     if (!registered) reasons.add('現在のLevelカードに登録されていません');
-    final counts = actor.setAttributeCounts;
-    for (final entry in move.requiredCards.entries) {
-      final shortage = entry.value - (counts[entry.key] ?? 0);
-      if (shortage > 0) {
-        reasons.add('${moveAttributeLabel(entry.key)}カードが$shortage枚不足しています');
+    if (state.resourceMode == MatchResourceMode.energy) {
+      // Ver.0.8.0 energyモード：Ready状態のエネルギーで支払えるかを判定。
+      final ready = actor.readyEnergyCounts;
+      for (final entry in move.energyModeRequiredCards.entries) {
+        final shortage = entry.value - (ready[entry.key] ?? 0);
+        if (shortage > 0) {
+          reasons.add(
+            '${moveAttributeLabel(entry.key)}エネルギーがReadyで$shortage不足しています',
+          );
+        }
       }
-    }
-    for (final entry in move.discardAfterUse.entries) {
-      final shortage = entry.value - (counts[entry.key] ?? 0);
-      if (shortage > 0) {
-        reasons.add(
-          '破棄する${moveAttributeLabel(entry.key)}カードが$shortage枚不足しています',
-        );
+    } else {
+      final counts = actor.setAttributeCounts;
+      for (final entry in move.requiredCards.entries) {
+        final shortage = entry.value - (counts[entry.key] ?? 0);
+        if (shortage > 0) {
+          reasons.add('${moveAttributeLabel(entry.key)}カードが$shortage枚不足しています');
+        }
+      }
+      for (final entry in move.discardAfterUse.entries) {
+        final shortage = entry.value - (counts[entry.key] ?? 0);
+        if (shortage > 0) {
+          reasons.add(
+            '破棄する${moveAttributeLabel(entry.key)}カードが$shortage枚不足しています',
+          );
+        }
       }
     }
     if (move.category == MoveCategory.finisher && actor.finisherUsed) {
@@ -663,9 +736,14 @@ class LevelMatchEngine {
       actor.finisherUsed = true;
       actor.finisherUsedTurn = state.turnNumber;
     }
-    final consumed = isBasic
-        ? const <TechniqueResourceCard>[]
-        : _consumeCost(actor, move);
+    List<TechniqueResourceCard> consumed = const <TechniqueResourceCard>[];
+    if (state.resourceMode == MatchResourceMode.energy) {
+      // Ver.0.8.0 energyモード：単体技も固有技も等しくエネルギーを消費する
+      // （「無料通常技」の廃止）。
+      _consumeEnergy(actor, move.energyModeRequiredCards);
+    } else if (!isBasic) {
+      consumed = _consumeCost(actor, move);
+    }
     final defender = state.defender;
     state.pendingAttack = PendingAttack(
       attackerId: actor.playerId,
@@ -701,6 +779,32 @@ class LevelMatchEngine {
     // Ver.0.7.1: 固有技は「必要コスト」をセットから消費（再使用に再セットが必要）。
     final cost = move.consumesSetCards ? move.requiredCards : move.discardAfterUse;
     return _discardSetCards(actor, cost);
+  }
+
+  /// Ver.0.8.0 energyモード：ReadyなエネルギーをUsedに変える（消費）。
+  /// evaluateMove/responseAvailability で事前に支払い可能と確認済みの前提。
+  void _consumeEnergy(PlayerLevelMatchState actor, Map<MoveAttribute, int> cost) {
+    for (final entry in cost.entries) {
+      var remaining = entry.value;
+      for (final e in actor.energyZone) {
+        if (remaining <= 0) break;
+        if (e.attribute == entry.key && e.ready) {
+          e.ready = false;
+          remaining--;
+        }
+      }
+      if (remaining > 0) {
+        throw StateError('${moveAttributeLabel(entry.key)}エネルギーが不足しています');
+      }
+    }
+  }
+
+  bool _canAffordEnergy(PlayerLevelMatchState actor, Map<MoveAttribute, int> cost) {
+    final ready = actor.readyEnergyCounts;
+    for (final entry in cost.entries) {
+      if ((ready[entry.key] ?? 0) < entry.value) return false;
+    }
+    return true;
   }
 
   /// 最終ダメージを5刻みに丸める（0か最低5）。
@@ -755,6 +859,10 @@ class LevelMatchEngine {
     }
     if (isBasic) {
       // フィニッシャーへ単体技で割り込むのは不可（上でカバー済み）。
+      if (state.resourceMode == MatchResourceMode.energy &&
+          !_canAffordEnergy(defender, move.energyModeRequiredCards)) {
+        return const MoveAvailability(false, ['エネルギーが不足しています']);
+      }
       return const MoveAvailability(true, []);
     }
     return evaluateMove(defender, move);
@@ -790,7 +898,11 @@ class LevelMatchEngine {
       defender.finisherUsed = true;
       defender.finisherUsedTurn = state.turnNumber;
     }
-    _consumeCost(defender, move);
+    if (state.resourceMode == MatchResourceMode.energy) {
+      _consumeEnergy(defender, move.energyModeRequiredCards);
+    } else {
+      _consumeCost(defender, move);
+    }
     _resolveExchange(response: move, responder: defender, responseIsBasic: false);
   }
 
@@ -813,9 +925,16 @@ class LevelMatchEngine {
     final card = defender.hand[index];
     final move = basicMoveFor(card.attribute, defender);
     if (move == null) throw StateError('この属性の単体技がありません');
+    if (state.resourceMode == MatchResourceMode.energy &&
+        !_canAffordEnergy(defender, move.energyModeRequiredCards)) {
+      throw StateError('エネルギーが不足しているため対応できません');
+    }
     defender.hand.removeAt(index);
     defender.discardPile.add(card);
     defender.previousMoveId = move.id;
+    if (state.resourceMode == MatchResourceMode.energy) {
+      _consumeEnergy(defender, move.energyModeRequiredCards);
+    }
     _resolveExchange(response: move, responder: defender, responseIsBasic: true);
   }
 
@@ -1114,6 +1233,11 @@ class LevelMatchEngine {
     final card = actor.hand[cardIndex];
     final move = basicMoveFor(card.attribute, actor);
     if (move == null) throw StateError('この属性の単体技がありません');
+    // Ver.0.8.0 energyモード：無料通常技は廃止。エネルギーで支払えない場合は使用不可。
+    if (state.resourceMode == MatchResourceMode.energy &&
+        !_canAffordEnergy(actor, move.energyModeRequiredCards)) {
+      throw StateError('エネルギーが不足しているため使用できません');
+    }
     // 宣言＝コミット：手札から捨て札へ。
     actor.hand.removeAt(cardIndex);
     actor.discardPile.add(card);
@@ -1454,7 +1578,14 @@ class LevelMatchEngine {
         .where((m) => responseAvailability(defender, m, isBasic: false).usable)
         .toList();
     final basicCards = defender.hand
-        .where((c) => basicMoveFor(c.attribute, defender) != null)
+        .where((c) {
+          final basic = basicMoveFor(c.attribute, defender);
+          if (basic == null) return false;
+          if (state.resourceMode == MatchResourceMode.energy) {
+            return _canAffordEnergy(defender, basic.energyModeRequiredCards);
+          }
+          return true;
+        })
         .toList();
     // 勝てるレスポンスを探す（counter を最優先）。
     MoveDefinition? bestSig;
@@ -1660,7 +1791,14 @@ class LevelMatchEngine {
       final basicCard = actor.hand
           .cast<TechniqueResourceCard?>()
           .firstWhere(
-            (card) => basicMoveFor(card!.attribute, actor) != null,
+            (card) {
+              final basic = basicMoveFor(card!.attribute, actor);
+              if (basic == null) return false;
+              if (state.resourceMode == MatchResourceMode.energy) {
+                return _canAffordEnergy(actor, basic.energyModeRequiredCards);
+              }
+              return true;
+            },
             orElse: () => null,
           );
       if (basicCard != null) {

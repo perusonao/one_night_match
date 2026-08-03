@@ -393,6 +393,8 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
   }
 
   Future<void> _start(WrestlerDefinition player) async {
+    final mode = await _pickResourceMode();
+    if (mode == null || !mounted) return;
     final seconds = await _pickMatchTime();
     if (seconds == null || !mounted) return;
     final candidates = wrestlers!
@@ -410,11 +412,43 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
             moves: repository.moves,
             playerStarts: true,
             matchTimeSeconds: seconds,
+            resourceMode: mode,
           ),
         ),
       ),
     );
   }
+
+  Future<MatchResourceMode?> _pickResourceMode() =>
+      showModalBottomSheet<MatchResourceMode>(
+        context: context,
+        builder: (_) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('ルールを選択',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.style),
+                title: const Text('クラシック（推奨）'),
+                subtitle: const Text('技カードをセットして消費するVer.0.7方式'),
+                onTap: () =>
+                    Navigator.pop(context, MatchResourceMode.classic),
+              ),
+              ListTile(
+                leading: const Icon(Icons.bolt),
+                title: const Text('エネルギー（新ルール）'),
+                subtitle: const Text('毎ターン回復するエネルギーで技を使う。返し用の温存が鍵'),
+                onTap: () =>
+                    Navigator.pop(context, MatchResourceMode.energy),
+              ),
+            ],
+          ),
+        ),
+      );
 
   Future<int?> _pickMatchTime() => showModalBottomSheet<int>(
     context: context,
@@ -646,7 +680,13 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                   children: [
                     _chip('手札 ${f.hand.length}'),
                     const SizedBox(width: 6),
-                    _chip('セット ${f.setCards.length}'),
+                    if (state.resourceMode == MatchResourceMode.energy)
+                      _chip(
+                        'EN ${f.energyZone.where((e) => e.ready).length}/${f.energyZone.length}',
+                        color: Colors.lightBlueAccent,
+                      )
+                    else
+                      _chip('セット ${f.setCards.length}'),
                     const SizedBox(width: 6),
                     _chip(ready ? 'FIN READY' : 'FIN USED',
                         color: ready ? Colors.greenAccent : Colors.white38),
@@ -665,6 +705,8 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                     ),
                   ],
                 ),
+                if (state.resourceMode == MatchResourceMode.energy)
+                  _energyZoneRow(f),
                 if (!isCpu) _finisherPips(f),
               ],
             ),
@@ -687,6 +729,57 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
             color: color ?? Colors.white70,
             fontWeight: FontWeight.bold)),
   );
+
+  // ===== Ver.0.8.0 energyモード：エネルギーゾーン（属性別 Ready/Used） =====
+  Widget _energyZoneRow(PlayerLevelMatchState f) {
+    final ready = f.readyEnergyCounts;
+    final used = <MoveAttribute, int>{};
+    for (final e in f.energyZone) {
+      if (!e.ready) used[e.attribute] = (used[e.attribute] ?? 0) + 1;
+    }
+    final attrs = MoveAttribute.values
+        .where((a) => (ready[a] ?? 0) > 0 || (used[a] ?? 0) > 0)
+        .toList();
+    if (attrs.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: [
+          for (final a in attrs)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: attributeColor(a).withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: attributeColor(a)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  attributeBadge(a, size: 16),
+                  const SizedBox(width: 3),
+                  Text(
+                    '${ready[a] ?? 0}',
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.greenAccent),
+                  ),
+                  if ((used[a] ?? 0) > 0)
+                    Text(
+                      '+${used[a]}済',
+                      style: const TextStyle(
+                          fontSize: 9, color: Colors.white38),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _finisherPips(PlayerLevelMatchState f) {
     final info = _finisherHeatInfo(f);
@@ -993,7 +1086,9 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       return ('${state.cpu.wrestler.name}の手番', '相手の出方をうかがう…', Colors.purpleAccent);
     }
     return switch (state.phase) {
-      LevelMatchPhase.setCard => ('カードセット', 'このターンに備えるカードを1枚セット', _gold),
+      LevelMatchPhase.setCard => _isEnergyMode
+          ? ('エネルギーセット', 'エネルギーカードを1枚セット（永続・毎ターン回復）', _gold)
+          : ('カードセット', 'このターンに備えるカードを1枚セット', _gold),
       LevelMatchPhase.levelChange => ('レベルチェンジ', '上げるレベルを選ぶ（維持も可）', _gold),
       LevelMatchPhase.chooseMove => ('あなたの攻撃', '繰り出す技を選んでください', _pink),
       _ => ('試合進行中', '', _pink),
@@ -1187,6 +1282,15 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                               fontSize: 16, fontWeight: FontWeight.w900)),
+                      if (_isEnergyMode && o.move != null)
+                        Text(
+                          o.move!.energyModeRequiredCards.entries
+                              .map((e) =>
+                                  '${moveAttributeLabel(e.key)}×${e.value}')
+                              .join(' '),
+                          style: const TextStyle(
+                              fontSize: 10, color: Colors.lightBlueAccent),
+                        ),
                     ],
                   ),
                 ),
@@ -1416,6 +1520,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       if (!seen.add(card.attribute)) continue;
       final basic = engine.basicMoveFor(card.attribute, player);
       if (basic == null) continue;
+      if (_isEnergyMode && !_energyAffordable(player, basic)) continue;
       final o = engine.clashBetween(attackMove, basic);
       options.add(_RespOption(
         kind: _RespKind.basic,
@@ -1844,16 +1949,18 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
           padding: const EdgeInsets.fromLTRB(12, 4, 8, 0),
           child: Row(
             children: [
-              const Expanded(
-                child: Text('カードをセット（固有技を組み立てる）',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              Expanded(
+                child: Text(
+                    _isEnergyMode ? 'エネルギーをセット（永続・毎ターン回復）' : 'カードをセット（固有技を組み立てる）',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 14)),
               ),
-              TextButton.icon(
-                onPressed: () => _showCostSheet(player),
-                icon: const Icon(Icons.list_alt, size: 16),
-                label: const Text('全コスト', style: TextStyle(fontSize: 11)),
-              ),
+              if (!_isEnergyMode)
+                TextButton.icon(
+                  onPressed: () => _showCostSheet(player),
+                  icon: const Icon(Icons.list_alt, size: 16),
+                  label: const Text('全コスト', style: TextStyle(fontSize: 11)),
+                ),
             ],
           ),
         ),
@@ -1861,7 +1968,10 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Align(
             alignment: Alignment.centerLeft,
-            child: Text('現在 SET ${_attributeCounts(player.setAttributeCounts)}',
+            child: Text(
+                _isEnergyMode
+                    ? '現在のエネルギーゾーン ${_attributeCounts(player.readyEnergyCounts)}'
+                    : '現在 SET ${_attributeCounts(player.setAttributeCounts)}',
                 style: const TextStyle(fontSize: 11, color: _gold)),
           ),
         ),
@@ -1941,6 +2051,12 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
   }
 
   Future<void> _previewThenSet(TechniqueResourceCard card) async {
+    // Ver.0.8.0 energyモード：セットカードの「解放プレビュー」はclassic専用の
+    // 計算（setAttributeCounts前提）のため、energyモードでは素通しでセットする。
+    if (_isEnergyMode) {
+      await _setCard(card);
+      return;
+    }
     final player = state.player;
     final prediction = _preview.predictSet(
       attribute: card.attribute,
@@ -2115,6 +2231,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     required Color ctaColor,
     required String ctaLabel,
     required VoidCallback? onTap,
+    Map<MoveAttribute, int>? energyCost,
   }) {
     final color = attributeColor(attribute);
     return Opacity(
@@ -2147,13 +2264,43 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
                 ],
               ),
               const SizedBox(height: 4),
-              Row(
-                children: [
-                  _statChip('ダメージ', '$damage', Colors.redAccent),
-                  const SizedBox(width: 10),
-                  _statChip('速度', '$speed', Colors.lightBlueAccent),
-                ],
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  children: [
+                    _statChip('ダメージ', '$damage', Colors.redAccent),
+                    const SizedBox(width: 10),
+                    _statChip('速度', '$speed', Colors.lightBlueAccent),
+                  ],
+                ),
               ),
+              if (energyCost != null && energyCost.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Wrap(
+                    spacing: 4,
+                    children: [
+                      for (final e in energyCost.entries)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: attributeColor(e.key)
+                                .withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '${moveAttributeLabel(e.key)}×${e.value}',
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: attributeColor(e.key)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               if (tags.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 3),
@@ -2189,6 +2336,8 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     );
   }
 
+  bool get _isEnergyMode => state.resourceMode == MatchResourceMode.energy;
+
   Widget _signatureCard(PlayerLevelMatchState player, MoveDefinition m) {
     final availability = engine.evaluateMove(player, m);
     final usable = availability.usable;
@@ -2199,13 +2348,23 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
     ];
     String? locked;
     if (!usable) {
-      final counts = player.setAttributeCounts;
-      final lacks = <String>[];
-      for (final e in m.requiredCards.entries) {
-        final short = e.value - (counts[e.key] ?? 0);
-        if (short > 0) lacks.add('${moveAttributeLabel(e.key)}あと$short');
+      if (_isEnergyMode) {
+        final ready = player.readyEnergyCounts;
+        final lacks = <String>[];
+        for (final e in m.energyModeRequiredCards.entries) {
+          final short = e.value - (ready[e.key] ?? 0);
+          if (short > 0) lacks.add('${moveAttributeLabel(e.key)}あと$short');
+        }
+        locked = lacks.isEmpty ? 'エネルギー不足' : lacks.join(' ');
+      } else {
+        final counts = player.setAttributeCounts;
+        final lacks = <String>[];
+        for (final e in m.requiredCards.entries) {
+          final short = e.value - (counts[e.key] ?? 0);
+          if (short > 0) lacks.add('${moveAttributeLabel(e.key)}あと$short');
+        }
+        locked = lacks.isEmpty ? 'セットが必要' : lacks.join(' ');
       }
-      locked = lacks.isEmpty ? 'セットが必要' : lacks.join(' ');
     }
     return _moveTile(
       attribute: m.attribute,
@@ -2218,22 +2377,46 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen> {
       ctaColor: _gold,
       ctaLabel: 'この固有技を使う',
       onTap: usable ? () => _useMove(m) : null,
+      energyCost: _isEnergyMode ? m.energyModeRequiredCards : null,
     );
   }
 
   Widget _basicMoveCard(TechniqueResourceCard card) {
     final basic = engine.basicMoveFor(card.attribute, state.player)!;
+    String? locked;
+    if (_isEnergyMode && !_energyAffordable(state.player, basic)) {
+      final ready = state.player.readyEnergyCounts;
+      final lacks = <String>[];
+      for (final e in basic.energyModeRequiredCards.entries) {
+        final short = e.value - (ready[e.key] ?? 0);
+        if (short > 0) lacks.add('${moveAttributeLabel(e.key)}あと$short');
+      }
+      locked = lacks.isEmpty ? 'エネルギー不足' : lacks.join(' ');
+    }
+    final affordable = !_isEnergyMode || _energyAffordable(state.player, basic);
     return _moveTile(
       attribute: card.attribute,
       name: basic.name,
       damage: basic.power,
       speed: basic.speed,
       tags: const [],
-      usable: true,
+      usable: affordable,
+      lockedText: locked,
       ctaColor: _pink,
       ctaLabel: 'この技で攻撃',
-      onTap: () => _act(() => engine.useBasicMove('player', card.instanceId)),
+      onTap: affordable
+          ? () => _act(() => engine.useBasicMove('player', card.instanceId))
+          : null,
+      energyCost: _isEnergyMode ? basic.energyModeRequiredCards : null,
     );
+  }
+
+  bool _energyAffordable(PlayerLevelMatchState p, MoveDefinition m) {
+    final ready = p.readyEnergyCounts;
+    for (final e in m.energyModeRequiredCards.entries) {
+      if ((ready[e.key] ?? 0) < e.value) return false;
+    }
+    return true;
   }
 
   // ===== フォール／ギブアップ 対応UI =====
