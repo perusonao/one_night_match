@@ -129,6 +129,21 @@ enum TechniqueTargetState {
 }
 
 // ============================================================
+// enum: キックアウトカードのサブ種別（Phase 2で確定、仕様書9.1章）
+// ============================================================
+
+/// [TechniqueDeckCardType.kickOut] のサブ分類。通常のフォールから脱出する
+/// 「通常キックアウト」と、成功したフィニッシャーからのみ脱出できる
+/// 「特殊キックアウト」を区別する（`kickOut` 以外のカード種別では無関係）。
+enum KickOutCardCategory {
+  /// 通常のフォール（フィニッシャー以外）から脱出できる。
+  normal,
+
+  /// 成功したフィニッシャーからのみ脱出できる（通常フォールには使用不可）。
+  finisherEscape,
+}
+
+// ============================================================
 // JSON補助関数（未知値へのフォールバックを持つ、安全側の実装）
 // ============================================================
 
@@ -549,6 +564,7 @@ class TechniqueDefenseCard {
     required this.id,
     required this.name,
     required this.type,
+    this.kickOutCategory,
     this.description = '',
     this.requirements = const {},
     this.effects = const {},
@@ -561,6 +577,10 @@ class TechniqueDefenseCard {
   /// Phase 1では [TechniqueDeckCardType] の値をそのまま保持するのみで
   /// 型レベルの制約は課さない。
   final TechniqueDeckCardType type;
+
+  /// [type] が [TechniqueDeckCardType.kickOut] の場合のみ意味を持つ
+  /// サブ分類（仕様書9.1章）。それ以外の種別では未設定（null）。
+  final KickOutCardCategory? kickOutCategory;
   final String description;
   final Map<String, dynamic> requirements;
   final Map<String, dynamic> effects;
@@ -569,6 +589,7 @@ class TechniqueDefenseCard {
     String? id,
     String? name,
     TechniqueDeckCardType? type,
+    Object? kickOutCategory = _unset,
     String? description,
     Map<String, dynamic>? requirements,
     Map<String, dynamic>? effects,
@@ -576,6 +597,9 @@ class TechniqueDefenseCard {
     id: id ?? this.id,
     name: name ?? this.name,
     type: type ?? this.type,
+    kickOutCategory: identical(kickOutCategory, _unset)
+        ? this.kickOutCategory
+        : kickOutCategory as KickOutCardCategory?,
     description: description ?? this.description,
     requirements: requirements ?? this.requirements,
     effects: effects ?? this.effects,
@@ -585,6 +609,7 @@ class TechniqueDefenseCard {
     'id': id,
     'name': name,
     'type': type.name,
+    if (kickOutCategory != null) 'kickOutCategory': kickOutCategory!.name,
     'description': description,
     'requirements': requirements,
     'effects': effects,
@@ -593,6 +618,7 @@ class TechniqueDefenseCard {
   factory TechniqueDefenseCard.fromJson(Map<String, dynamic> json) {
     final id = json['id'];
     final name = json['name'];
+    final kickOutCategoryRaw = json['kickOutCategory'];
     return TechniqueDefenseCard(
       id: id is String && id.isNotEmpty ? id : '',
       name: name is String ? name : '',
@@ -602,6 +628,13 @@ class TechniqueDefenseCard {
         json['type'],
         TechniqueDeckCardType.escape,
       ),
+      kickOutCategory: kickOutCategoryRaw is String
+          ? enumOrDefault(
+              KickOutCardCategory.values,
+              kickOutCategoryRaw,
+              KickOutCardCategory.normal,
+            )
+          : null,
       description: _stringOrDefault(json['description'], ''),
       requirements: json['requirements'] is Map
           ? Map<String, dynamic>.from(json['requirements'] as Map)
@@ -618,6 +651,7 @@ class TechniqueDefenseCard {
       id == other.id &&
       name == other.name &&
       type == other.type &&
+      kickOutCategory == other.kickOutCategory &&
       description == other.description &&
       _mapEquals(requirements, other.requirements) &&
       _mapEquals(effects, other.effects);
@@ -627,6 +661,7 @@ class TechniqueDefenseCard {
     id,
     name,
     type,
+    kickOutCategory,
     description,
     _mapHash(requirements),
     _mapHash(effects),
