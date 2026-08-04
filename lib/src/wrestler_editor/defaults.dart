@@ -118,16 +118,19 @@ MoveDefinition _finisher(
   description: 'Ver.0.7.2 のフィニッシャー。通常技では割り込めない切り札。',
 );
 
-/// Ver.0.9 単体技カタログ（属性→基本技）。手札から直接使用できる。
-/// 通常カードは「打撃／投げ／関節／ラフ／空中」など属性そのものを名乗り、
-/// レスラーらしい固有名は付けない（固有技と一目で区別できるようにするため）。
+/// Ver.0.9 技カードカタログ（属性→技）。
+/// クラシックルール廃止に伴い、この一覧の唯一の用途はenergyモードの
+/// 「技カード」（手札から使用・使用後は捨て札）の技実体。
+/// 技エネルギーカード（場にセットする燃料。属性名のみを名乗る＝
+/// moveAttributeLabel）や、レスラー固有のド派手な固有技名とは重ならない、
+/// 汎用的だが実在感のある技名にする（3段階の役割を名前で見分けられる）。
 final defaultBasicMoves = <MoveDefinition>[
-  _basic('basic_strike', '打撃', MoveAttribute.strike, 5, 5, 9),
-  _basic('basic_throw', '投げ', MoveAttribute.throwMove, 10, 5, 6),
-  _basic('basic_aerial', '空中', MoveAttribute.aerial, 10, 10, 9),
-  _basic('basic_submission', '関節', MoveAttribute.submission, 5, 5, 6),
-  _basic('basic_rough', 'ラフ', MoveAttribute.rough, 8, 3, 7),
-  _basic('basic_counter', 'カウンター', MoveAttribute.counter, 4, 5, 10),
+  _basic('basic_strike', 'ジャブ', MoveAttribute.strike, 5, 5, 9),
+  _basic('basic_throw', 'テイクダウン', MoveAttribute.throwMove, 10, 5, 6),
+  _basic('basic_aerial', 'クロスボディ', MoveAttribute.aerial, 10, 10, 9),
+  _basic('basic_submission', 'アームロック', MoveAttribute.submission, 5, 5, 6),
+  _basic('basic_rough', 'ラフブロー', MoveAttribute.rough, 8, 3, 7),
+  _basic('basic_counter', 'カウンター構え', MoveAttribute.counter, 4, 5, 10),
 ];
 
 /// 属性→単体技ID の対応。
@@ -267,17 +270,17 @@ final defaultEditorMoves = <MoveDefinition>[
       cost: 2, pin: true, pinPower: 8, speed: 9,
       specialAbilities: ['cannotCounter']),
 
-  // ===== Ver.0.9：レスラー固有の通常技（性能のみ個性化・名前は属性名で統一） =====
-  // 通常カードはレスラーごとに性能差はあっても、名前は固有技と混同しないよう
-  // 属性名（打撃／投げ／関節／ラフ）で統一する。
-  _basic('akari_nt_strike', '打撃', MoveAttribute.strike, 5, 5, 9),
-  _basic('akari_nt_throw', '投げ', MoveAttribute.throwMove, 10, 5, 6),
-  _basic('misaki_nt_strike', '打撃', MoveAttribute.strike, 5, 5, 9),
-  _basic('misaki_nt_throw', '投げ', MoveAttribute.throwMove, 10, 5, 6),
-  _basic('reina_nt_sub', '関節', MoveAttribute.submission, 5, 5, 6),
-  _basic('reina_nt_strike', '打撃', MoveAttribute.strike, 5, 5, 9),
-  _basic('jack_nt_rough', 'ラフ', MoveAttribute.rough, 8, 3, 7),
-  _basic('jack_nt_strike', '打撃', MoveAttribute.strike, 5, 5, 9),
+  // ===== Ver.0.9：レスラー固有の技カード（性能のみ個性化） =====
+  // 技エネルギーカード（属性名のみ）でも固有技（ド派手な固有名）でもない、
+  // 「実在する技名」の技カードとしてレスラーごとに軽く個性を付ける。
+  _basic('akari_nt_strike', '速射ジャブ', MoveAttribute.strike, 5, 5, 9),
+  _basic('akari_nt_throw', 'スイングテイクダウン', MoveAttribute.throwMove, 10, 5, 6),
+  _basic('misaki_nt_strike', '重量ジャブ', MoveAttribute.strike, 5, 5, 9),
+  _basic('misaki_nt_throw', 'パワーテイクダウン', MoveAttribute.throwMove, 10, 5, 6),
+  _basic('reina_nt_sub', 'テクニカルアームロック', MoveAttribute.submission, 5, 5, 6),
+  _basic('reina_nt_strike', '精密ジャブ', MoveAttribute.strike, 5, 5, 9),
+  _basic('jack_nt_rough', '闇討ちラフブロー', MoveAttribute.rough, 8, 3, 7),
+  _basic('jack_nt_strike', '不意打ちジャブ', MoveAttribute.strike, 5, 5, 9),
 
   // Ver.0.7 単体技（全レスラー共通・手札から直接使用）。
   ...defaultBasicMoves,

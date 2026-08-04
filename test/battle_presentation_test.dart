@@ -164,4 +164,74 @@ void main() {
     );
     expect(events, isEmpty);
   });
+
+  test('draw: 技カードなら技名、エネルギーカードなら属性名がsubtitleになる', () {
+    final e = engine();
+    final techEvents = const BattleEventQueue().build(
+      [
+        log('draw', 'x', details: {
+          'drawnCard': {'instanceId': 'c1', 'techniqueMoveId': 'akari_dropkick'},
+        })
+      ],
+      e.state,
+      moves,
+    );
+    expect(techEvents.single.subtitle, '紅蓮ドロップキック');
+
+    final energyEvents = const BattleEventQueue().build(
+      [
+        log('draw', 'x', details: {
+          'drawnCard': {'instanceId': 'c2', 'attribute': 'strike'},
+        })
+      ],
+      e.state,
+      moves,
+    );
+    expect(energyEvents.single.subtitle, '打カード');
+  });
+
+  test('respondEnergyConsumed: 迎撃/返し技の別と消費エネルギーが分かる', () {
+    final e = engine();
+    final events = const BattleEventQueue().build(
+      [
+        log('respondEnergyConsumed', 'x', details: {
+          'moveId': 'akari_dropkick',
+          'isCounterMove': false,
+          'energyCost': {'strike': 1},
+        }),
+      ],
+      e.state,
+      moves,
+    );
+    expect(events.single.text, contains('迎撃'));
+    expect(events.single.subtitle, contains('打×1'));
+  });
+
+  test('attackDeclared: エネルギー消費内訳がsubtitleに出る', () {
+    final e = engine();
+    final events = const BattleEventQueue().build(
+      [
+        log('attackDeclared', 'x', details: {
+          'moveId': 'akari_dropkick',
+          'energyCost': {'strike': 1},
+        }),
+      ],
+      e.state,
+      moves,
+    );
+    expect(events.single.subtitle, contains('打×1'));
+  });
+
+  test('setEnergy/skipSet/changeLevel/skipMoveはinfoビートになる', () {
+    final e = engine();
+    for (final action in ['setEnergy', 'skipSet', 'changeLevel', 'skipMove']) {
+      final events = const BattleEventQueue().build(
+        [log(action, 'テストメッセージ')],
+        e.state,
+        moves,
+      );
+      expect(events, hasLength(1), reason: action);
+      expect(events.single.kind, BattleBeatKind.info, reason: action);
+    }
+  });
 }
