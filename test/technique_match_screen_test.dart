@@ -309,4 +309,183 @@ void main() {
       expect(find.text('ターン終了'), findsOneWidget); // 通常の行動選択に戻る
     });
   });
+
+  group('TechniqueMatchScreen: Phase 6 フォール・ギブアップ回避', () {
+    TechniqueDeckCardCatalog fallCatalog() => const TechniqueDeckCardCatalog(
+      techniques: [
+        TechniqueDeckTechniqueCard(
+          id: 'fall_move',
+          name: 'フォール技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.strike,
+          attackEnergyCost: {MoveAttribute.strike: 1},
+          reversalEnergyCost: {MoveAttribute.counter: 1},
+          power: 10,
+          hasPinEffect: true,
+          kickOutThreshold: 20,
+          kickOutHpRate: 0.5,
+        ),
+      ],
+      energies: [
+        TechniqueEnergyCard(
+          id: 'energy_strike',
+          attribute: MoveAttribute.strike,
+          name: '打エネルギー',
+        ),
+      ],
+      defenseCards: [
+        TechniqueDefenseCard(
+          id: 'kickout_normal',
+          name: '通常キックアウト',
+          type: TechniqueDeckCardType.kickOut,
+          kickOutCategory: KickOutCardCategory.normal,
+        ),
+      ],
+    );
+
+    Future<void> pumpFallScreen(
+      WidgetTester tester, {
+      required TechniqueDeckRepository deckRepository,
+    }) async {
+      await tester.binding.setSurfaceSize(const Size(800, 3000));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TechniqueMatchScreen(
+            catalog: fallCatalog(),
+            deckRepository: deckRepository,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('フォール技が成立すると回避判定ダイアログが開き、キックアウトカードで回避できる', (
+      tester,
+    ) async {
+      final repo = LocalTechniqueDeckRepository();
+      await pumpFallScreen(tester, deckRepository: repo);
+      final state = tester.state(find.byType(TechniqueMatchScreen));
+      // ignore: avoid_dynamic_calls
+      final wrestlerAId = (state as dynamic).wrestlerA.id as String;
+
+      await repo.save(
+        TechniqueDeckSaveRecord(
+          deckId: 'fall_deck',
+          name: 'フォールテスト用デッキ',
+          wrestlerId: wrestlerAId,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          entries: const [
+            TechniqueDeckEntry(
+              instanceId: 'e1',
+              cardId: 'fall_move',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 'e2',
+              cardId: 'energy_strike',
+              cardType: TechniqueDeckCardType.energy,
+            ),
+          ],
+        ),
+      );
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('打エネルギー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('セットする'));
+      await tester.pumpAndSettle();
+
+      // Bにキックアウトカードを直接注入する（実プレイではBのデッキに
+      // 含まれる。ここではUIの配線確認が目的のため直接注入する）。
+      final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
+      final TechniqueMatchState beforeDeclare = screenState.matchState;
+      screenState.matchState = beforeDeclare.copyWith(
+        playerB: beforeDeclare.playerB.copyWith(
+          hand: [
+            ...beforeDeclare.playerB.hand,
+            const TechniqueDeckEntry(
+              instanceId: 'k1',
+              cardId: 'kickout_normal',
+              cardType: TechniqueDeckCardType.kickOut,
+            ),
+          ],
+        ),
+      );
+
+      await tester.tap(find.text('フォール技').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('使用する'));
+      await tester.pumpAndSettle();
+
+      // 返技せず成立させる。
+      await tester.tap(find.text('返技しない'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('フォールの危機'), findsWidgets);
+      final kickOutButton = find.widgetWithText(OutlinedButton, '通常キックアウト');
+      expect(kickOutButton, findsOneWidget);
+
+      await tester.tap(kickOutButton);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('を回避した'), findsOneWidget);
+      expect(find.text('ターン終了'), findsOneWidget); // 通常の行動選択に戻る
+    });
+
+    testWidgets('回避せず諦めると勝敗が決まり、勝利バナーが表示される', (tester) async {
+      final repo = LocalTechniqueDeckRepository();
+      await pumpFallScreen(tester, deckRepository: repo);
+      final state = tester.state(find.byType(TechniqueMatchScreen));
+      // ignore: avoid_dynamic_calls
+      final wrestlerAId = (state as dynamic).wrestlerA.id as String;
+
+      await repo.save(
+        TechniqueDeckSaveRecord(
+          deckId: 'fall_deck',
+          name: 'フォールテスト用デッキ',
+          wrestlerId: wrestlerAId,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          entries: const [
+            TechniqueDeckEntry(
+              instanceId: 'e1',
+              cardId: 'fall_move',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 'e2',
+              cardId: 'energy_strike',
+              cardType: TechniqueDeckCardType.energy,
+            ),
+          ],
+        ),
+      );
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('打エネルギー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('セットする'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('フォール技').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('使用する'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('返技しない'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('諦める（敗北を認める）'), findsOneWidget);
+      await tester.tap(find.text('諦める（敗北を認める）'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('の勝利！'), findsOneWidget);
+      expect(find.textContaining('フォール勝利'), findsWidgets);
+      // 試合終了後は通常の行動ボタンが表示されない。
+      expect(find.text('ターン終了'), findsNothing);
+    });
+  });
 }
