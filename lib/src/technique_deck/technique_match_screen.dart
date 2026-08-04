@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../wrestler_editor/models.dart' show WrestlerDefinition;
+import '../wrestler_editor/models.dart'
+    show WrestlerDefinition, moveAttributeLabel;
 import '../wrestler_editor/repository.dart';
 import 'technique_deck_deck.dart';
 import 'technique_deck_defaults.dart';
@@ -9,13 +10,13 @@ import 'technique_deck_models.dart';
 import 'technique_deck_storage.dart';
 import 'technique_match_state.dart';
 
-/// Technique Deck Rules Phase 3: 最初のプレイアブル画面「Technique Match」。
+/// Technique Deck Rules Phase 3〜4: 最初のプレイアブル画面「Technique Match」。
 ///
-/// スタンド／ダウン／疲労・休息・ターン進行・HP／HEAT表示・手札5枚・
-/// 山札／捨て札のみを扱う。技の使用・ダメージ・返技・連続攻撃・
-/// フォール／ギブアップ・フィニッシャー・CPUは実装しない（Phase 4以降）。
-/// 現行のclassic／energyモード・Deck Simulator・レスラーエディタ・
-/// Technique Deck Builderの挙動には一切影響しない。
+/// スタンド／ダウン／疲労・休息・ターン進行・HP／HEAT表示・手札／山札・
+/// エネルギーセット・単発技の使用（ダメージ・HEAT・ダウンの即時反映）を扱う。
+/// 返技・連続攻撃・フォール／ギブアップ・フィニッシャーの決着処理・CPUは
+/// 実装しない（Phase 5以降）。現行のclassic／energyモード・Deck Simulator・
+/// レスラーエディタ・Technique Deck Builderの挙動には一切影響しない。
 class TechniqueMatchScreen extends StatefulWidget {
   const TechniqueMatchScreen({
     super.key,
@@ -73,18 +74,23 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final saved = await deckRepository.loadAll();
     final match = saved.where((r) => r.wrestlerId == wrestler.id).toList();
     if (match.isNotEmpty) {
-      return (match.first.toDeckDefinition(), '保存済みデッキ「${match.first.name}」を使用');
+      return (
+        match.first.toDeckDefinition(),
+        '保存済みデッキ「${match.first.name}」を使用',
+      );
     }
-    final result = TechniqueDeckAutoGenerator(
-      config: TechniqueDeckGenerationConfig(
-        seed: DateTime.now().millisecondsSinceEpoch,
-      ),
-    ).generate(
-      catalog: catalog,
-      wrestlerId: wrestler.id,
-      deckId: '${wrestler.id}_temp_${DateTime.now().millisecondsSinceEpoch}',
-      deckName: '${wrestler.name} 仮デッキ（自動生成）',
-    );
+    final result =
+        TechniqueDeckAutoGenerator(
+          config: TechniqueDeckGenerationConfig(
+            seed: DateTime.now().millisecondsSinceEpoch,
+          ),
+        ).generate(
+          catalog: catalog,
+          wrestlerId: wrestler.id,
+          deckId:
+              '${wrestler.id}_temp_${DateTime.now().millisecondsSinceEpoch}',
+          deckName: '${wrestler.name} 仮デッキ（自動生成）',
+        );
     return (result.deck, '保存済みデッキが無いため仮デッキを自動生成');
   }
 
@@ -118,6 +124,108 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     if (state == null) return;
     setState(() => matchState = TechniqueMatchEngine.goDown(state));
   }
+
+  void _setEnergy(TechniqueDeckEntry entry) {
+    final state = matchState;
+    if (state == null) return;
+    final result = TechniqueMatchEngine.setEnergy(state, entry, catalog);
+    setState(() => matchState = result.state);
+  }
+
+  void _useMove(TechniqueDeckEntry entry) {
+    final state = matchState;
+    if (state == null) return;
+    final result = TechniqueMatchEngine.useMove(state, entry, catalog);
+    setState(() => matchState = result.state);
+  }
+
+  Future<void> _showHandCardSheet(TechniqueDeckEntry entry) async {
+    final state = matchState;
+    if (state == null) return;
+    final technique = catalog.findTechniqueById(entry.cardId);
+    final energy = catalog.findEnergyById(entry.cardId);
+
+    if (energy != null) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(energy.name),
+          content: Text(
+            '「${energy.name}」（${moveAttributeLabel(energy.attribute)}）を'
+            'エネルギーとしてセットします。手札から出ると捨て札には入らず、'
+            '以後ずっと使用可能な資源として残ります。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('キャンセル'),
+            ),
+            FilledButton(
+              onPressed: () {
+                _setEnergy(entry);
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('セットする'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    if (technique != null) {
+      final check = TechniqueMatchEngine.canUseMove(state, entry, catalog);
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(technique.name),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('威力: ${technique.power} ・ HEAT: ${technique.heatDelta}'),
+              Text(
+                '必要レベル: Lv.${technique.minimumLevel} ・ '
+                '対象状態: ${_targetStateLabel(technique.targetState)}',
+              ),
+              if (technique.attackEnergyCost.values.any((v) => v > 0))
+                Text(
+                  '必要エネルギー: ${technique.attackEnergyCost.entries.where((e) => e.value > 0).map((e) => '${moveAttributeLabel(e.key)}${e.value}').join('・')}',
+                ),
+              if (technique.causesDown) const Text('成立すると相手をダウンさせます。'),
+              const SizedBox(height: 8),
+              if (!check.canUse)
+                Text(
+                  check.reason ?? '使用できません。',
+                  style: const TextStyle(color: _red),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('キャンセル'),
+            ),
+            FilledButton(
+              onPressed: check.canUse
+                  ? () {
+                      _useMove(entry);
+                      Navigator.pop(dialogContext);
+                    }
+                  : null,
+              child: const Text('使用する'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  String _targetStateLabel(TechniqueTargetState state) => switch (state) {
+    TechniqueTargetState.any => '指定なし',
+    TechniqueTargetState.stand => '相手がスタンド中のみ',
+    TechniqueTargetState.down => '相手がダウン中のみ',
+  };
 
   void _rest() {
     final state = matchState;
@@ -170,11 +278,12 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '開発中：Technique Deck Rules Phase 3',
+            '開発中：Technique Deck Rules Phase 4',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           Text(
-            'まだ技は使えません。スタンド／ダウン／休息とターン進行のみの試作です',
+            '単発技のみ動作します（返技・連続攻撃・フォール／ギブアップ・'
+            'フィニッシャー決着・CPUは未実装）',
             style: TextStyle(fontSize: 12),
           ),
         ],
@@ -339,9 +448,14 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
-                    color: _postureColor(player.posture).withValues(alpha: 0.25),
+                    color: _postureColor(
+                      player.posture,
+                    ).withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -367,21 +481,32 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
               ),
             ),
             const SizedBox(height: 4),
-            Text('HP ${player.hp} / ${player.maxHp} ・ HEAT ${player.heat}'),
+            Text(
+              'HP ${player.hp} / ${player.maxHp} ・ HEAT ${player.heat} ・ '
+              'Lv.${player.level}',
+            ),
             Text(
               '手札 ${player.hand.length}枚 ・ 山札 ${player.drawPile.length}枚 ・ '
               '捨て札 ${player.discardPile.length}枚',
               style: const TextStyle(fontSize: 12, color: Colors.white70),
             ),
+            if (player.energyPool.isNotEmpty)
+              Text(
+                'エネルギー: ${player.energyPool.entries.map((e) => '${moveAttributeLabel(e.key)}${player.availableEnergyFor(e.key)}/${e.value}').join('・')}',
+                style: const TextStyle(fontSize: 12, color: Colors.white70),
+              ),
             if (note != null)
-              Text(note, style: const TextStyle(fontSize: 11, color: Colors.white54)),
+              Text(
+                note,
+                style: const TextStyle(fontSize: 11, color: Colors.white54),
+              ),
             const SizedBox(height: 6),
             Wrap(
               spacing: 4,
               runSpacing: 4,
               children: [
                 for (final entry in player.hand)
-                  Chip(
+                  ActionChip(
                     label: Text(
                       catalog.findTechniqueById(entry.cardId)?.name ??
                           catalog.findEnergyById(entry.cardId)?.name ??
@@ -389,6 +514,13 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                           entry.cardId,
                       style: const TextStyle(fontSize: 11),
                     ),
+                    backgroundColor:
+                        catalog.findEnergyById(entry.cardId) != null
+                        ? _gold.withValues(alpha: 0.2)
+                        : null,
+                    onPressed: isActive
+                        ? () => _showHandCardSheet(entry)
+                        : null,
                   ),
               ],
             ),
