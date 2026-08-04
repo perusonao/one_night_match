@@ -397,15 +397,16 @@ void main() {
       await tester.tap(find.text('セットする'));
       await tester.pumpAndSettle();
 
-      // Bにキックアウトカードを直接注入する（実プレイではBのデッキに
-      // 含まれる。ここではUIの配線確認が目的のため直接注入する）。
+      // Bの手札をキックアウトカード1枚だけに差し替える（実プレイではBの
+      // デッキに含まれる。ここではUIの配線確認が目的のため直接注入する。
+      // Bの自動生成デッキが偶然同名カードを引いている場合との重複を避ける
+      // ため、追記ではなく丸ごと置き換える）。
       final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
       final TechniqueMatchState beforeDeclare = screenState.matchState;
       screenState.matchState = beforeDeclare.copyWith(
         playerB: beforeDeclare.playerB.copyWith(
-          hand: [
-            ...beforeDeclare.playerB.hand,
-            const TechniqueDeckEntry(
+          hand: const [
+            TechniqueDeckEntry(
               instanceId: 'k1',
               cardId: 'kickout_normal',
               cardType: TechniqueDeckCardType.kickOut,
