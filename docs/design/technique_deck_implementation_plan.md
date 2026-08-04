@@ -1,8 +1,10 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 2（新デッキ生成・デッキ検証）完了時点**
-  （手動デッキの検証・JSON入出力・デッキプレビューUI・構成不足理由表示・
-  暫定自動生成のすべてを実装。実戦エンジンへの接続はPhase 4以降）
+- ステータス: **Phase 3（スタンド・ダウン・休息、最初のプレイアブル）完了時点**
+  （縮小スコープ版。「Technique Match」画面でPlayer A/B・ターン進行・
+  スタンド／ダウン／休息・手札5枚・山札／捨て札が実際に動く。技の使用・
+  ダメージ・返技・連続攻撃・フォール／ギブアップ・フィニッシャー・CPUは
+  Phase 4以降）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 
@@ -239,22 +241,52 @@ kickOutCategory` を追加（仕様書9.1章）。
 
 ---
 
-## Phase 3：スタンド・ダウン・休息
+## Phase 3：スタンド・ダウン・休息（最初のプレイアブル）
 
-実装対象:
+**ステータス: 完了（縮小スコープ版）。**
 
-- レスラー状態（`stand` / `down` / `fatigued`）
-- 縦／横表示（UI）
-- ダウンさせる技（`causesDown`）
-- ダウン中限定技（`targetState`）
-- ターン開始時のスタンド復帰
-- 休息アクション
-- レスラー別回復力（`recoveryPower`）
-- HP0時の疲労状態
+Deck Simulator・Technique Deck Builderの拡充よりプレイアブル化を優先する
+方針判断のもと、当初計画の全項目ではなく「試合を1つ起動して、状態・ターン・
+手札・山札が実際に動く」ことに絞った縮小スコープで実装した。
+
+実装対象（今回完了分）:
+
+- レスラー状態（`stand` / `down`。`fatigued`はenum上は既存だが、ダメージが
+  まだ無いため到達しない状態として未使用）
+- ターン進行（開始→ドロー→エネルギーセット→終了。技の使用＝メインアクション
+  はまだ無いため、エネルギーセット後は即座にプレイヤーの行動待ちとなる）
+- ターン開始時のスタンド復帰（仕様書11.4章）
+- 休息アクション（ダウン中のみ。HPを回復力分回復し、ターンを終了する）
+- レスラー別回復力（`TechniqueDeckWrestlerProfile.recoveryPower`は未接続。
+  暫定値 `defaultRecoveryPower`（15、正式値ではない）を全レスラー共通で使用）
+- HP／HEAT表示（HEATは変動なし。ダメージがまだ無いためHPも変動しない。
+  休息によるHP回復のみ動作する）
+- 手札5枚ドロー、山札・捨て札の表示、山札切れ時の捨て札再シャッフル
+  （仕様書13章。捨て札も空の場合は何も起きない＝open questions 4番は
+  未決定のまま、最小実装として無害な無操作にした）
+
+今回完了していない（Phase 4以降）:
+
+- 縦／横表示（UI）としての明示的な演出（今回はカラーバッジ表示のみ）
+- ダウンさせる技（`causesDown`）・ダウン中限定技（`targetState`）
+  （技の使用自体がPhase 4）
+- HP0時の疲労状態（ダメージが無いため到達しない）
+- レスラーごとの`recoveryPower`のカタログ接続（暫定共通値のまま）
+
+成果物: `lib/src/technique_deck/technique_match_state.dart`
+（`TechniqueMatchPhase` / `TechniqueMatchPlayerState` / `TechniqueMatchState` /
+`TechniqueMatchEngine`）、`lib/src/technique_deck/technique_match_screen.dart`
+（「Technique Match」画面。`DebugScreen`からTechnique Deck Builderの直後に
+導線を追加）。テスト: `test/technique_match_state_test.dart`（17テスト）、
+`test/technique_match_screen_test.dart`（6ウィジェットテスト）。
+
+Player A / Player Bの2人零面（CPU無し）。保存済みTechnique Deckがあれば
+それを使用し、無ければ`TechniqueDeckAutoGenerator`で仮デッキを自動生成して
+試合開始する（保存を強制せず、プレイアブル化の摩擦を減らす判断）。
 
 HP0時の細かな行動制限（[open questions 3番](technique_deck_open_questions.md)）は
 未決定事項が解決するまで、最小実装（例: 制限なし）またはフラグで切替可能な実装に
-留める。
+留める（ダメージ自体が無いため、現時点では到達しない）。
 
 **依存関係**: Phase 1（状態パラメータ定義）。Phase 2とは独立して並行着手可能。
 
