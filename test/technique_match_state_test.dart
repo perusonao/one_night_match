@@ -480,4 +480,299 @@ void main() {
       expect(result.state, same(state));
     });
   });
+
+  group('Phase 5: ラリー（返技・連続攻撃）', () {
+    TechniqueDeckCardCatalog catalog() => const TechniqueDeckCardCatalog(
+      techniques: [
+        TechniqueDeckTechniqueCard(
+          id: 'strike_move',
+          name: '打撃技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.strike,
+          attackEnergyCost: {MoveAttribute.strike: 1},
+          reversalEnergyCost: {MoveAttribute.counter: 1},
+          power: 10,
+          heatDelta: 5,
+          causesDown: true,
+        ),
+        TechniqueDeckTechniqueCard(
+          id: 'throw_move',
+          name: '投げ技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.throwMove,
+          attackEnergyCost: {MoveAttribute.throwMove: 1},
+          reversalEnergyCost: {MoveAttribute.counter: 1},
+          power: 15,
+        ),
+      ],
+      energies: [],
+      defenseCards: [],
+    );
+
+    TechniqueDeckDefinition deckWithSpecificCards(
+      String wrestlerId,
+      List<String> cardIds,
+    ) => TechniqueDeckDefinition(
+      id: '${wrestlerId}_deck',
+      wrestlerId: wrestlerId,
+      entries: [
+        for (var i = 0; i < cardIds.length; i++)
+          TechniqueDeckEntry(
+            instanceId: '${wrestlerId}_entry_$i',
+            cardId: cardIds[i],
+            cardType: TechniqueDeckCardType.technique,
+          ),
+      ],
+    );
+
+    TechniqueMatchState startWith({
+      List<String> handA = const [],
+      List<String> handB = const [],
+      Map<MoveAttribute, int> energyA = const {},
+      Map<MoveAttribute, int> energyB = const {},
+    }) {
+      final handSize = handA.length > handB.length ? handA.length : handB.length;
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'wrestler_a',
+        wrestlerAName: 'レスラーA',
+        wrestlerAMaxHp: 100,
+        deckA: deckWithSpecificCards('wrestler_a', handA),
+        wrestlerBId: 'wrestler_b',
+        wrestlerBName: 'レスラーB',
+        wrestlerBMaxHp: 100,
+        deckB: deckWithSpecificCards('wrestler_b', handB),
+        handSize: handSize == 0 ? 1 : handSize,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        playerA: state.playerA.copyWith(energyPool: energyA),
+        playerB: state.playerB.copyWith(energyPool: energyB),
+      );
+      return state;
+    }
+
+    test('返技条件を満たしていれば返技できる（ダメージ無効・攻守交代）', () {
+      final state = startWith(
+        handA: ['strike_move'],
+        energyA: const {MoveAttribute.strike: 1},
+        energyB: const {MoveAttribute.counter: 1},
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      );
+      expect(declared.success, isTrue);
+      expect(declared.state.pendingAttack?.chain, 1);
+      expect(declared.state.rallyAttackerIndex, 0);
+
+      final countered = TechniqueMatchEngine.counterAttack(
+        declared.state,
+        catalog(),
+      );
+      expect(countered.success, isTrue);
+      expect(countered.state.pendingAttack, isNull);
+      expect(countered.state.rallyAttackerIndex, 1); // 攻守交代
+      expect(countered.state.playerB.hp, 100); // ダメージ無効
+      expect(countered.state.playerB.heat, 0); // HEAT加算なし
+      expect(countered.state.playerB.posture, WrestlerPosture.stand); // ダウンなし
+      expect(countered.state.playerB.availableEnergyFor(MoveAttribute.counter), 0);
+    });
+
+    test('返技エネルギー不足だと返技できない', () {
+      final state = startWith(
+        handA: ['strike_move'],
+        energyA: const {MoveAttribute.strike: 1},
+        // Bは返技エネルギーを持たない。
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      );
+      final countered = TechniqueMatchEngine.counterAttack(
+        declared.state,
+        catalog(),
+      );
+      expect(countered.success, isFalse);
+      expect(countered.failureReason, contains('返技エネルギー'));
+      expect(countered.state, same(declared.state)); // 状態は変化しない
+    });
+
+    test('返技成功後、新しい攻撃側（元の防御側）が技を宣言してラリーが続く', () {
+      final state = startWith(
+        handA: ['strike_move'],
+        handB: ['throw_move'],
+        energyA: const {MoveAttribute.strike: 1, MoveAttribute.counter: 1},
+        energyB: const {
+          MoveAttribute.throwMove: 1,
+          MoveAttribute.counter: 1,
+        },
+      );
+      final afterDeclare1 = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      ).state;
+      final afterCounter1 = TechniqueMatchEngine.counterAttack(
+        afterDeclare1,
+        catalog(),
+      ).state;
+      expect(afterCounter1.rallyAttackerIndex, 1);
+
+      final afterDeclare2 = TechniqueMatchEngine.declareAttack(
+        afterCounter1,
+        afterCounter1.playerB.hand.first,
+        catalog(),
+      );
+      expect(afterDeclare2.success, isTrue);
+      expect(afterDeclare2.state.pendingAttack?.chain, 2);
+      expect(afterDeclare2.state.pendingAttack?.attackerIndex, 1);
+
+      // さらにAが返技すると再度攻守交代する（ラリー継続の確認）。
+      final afterCounter2 = TechniqueMatchEngine.counterAttack(
+        afterDeclare2.state,
+        catalog(),
+      );
+      expect(afterCounter2.success, isTrue);
+      expect(afterCounter2.state.rallyAttackerIndex, 0);
+      expect(afterCounter2.state.rallyChain, 2); // Chainは宣言のたびに増える
+    });
+
+    test('返技しない場合は技が成立し、ダメージ・HEAT・ダウンが即時反映されラリーが終了する', () {
+      final state = startWith(
+        handA: ['strike_move'],
+        energyA: const {MoveAttribute.strike: 1},
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      ).state;
+      final resolved = TechniqueMatchEngine.resolveHit(declared, catalog());
+
+      expect(resolved.playerB.hp, 90); // 100 - 10
+      expect(resolved.playerA.heat, 5);
+      expect(resolved.playerB.posture, WrestlerPosture.down);
+      expect(resolved.pendingAttack, isNull);
+      expect(resolved.rallyAttackerIndex, isNull);
+      expect(resolved.rallyChain, 0);
+      expect(resolved.activePlayerIndex, 0); // 公式なターンはAのまま
+    });
+
+    test('Chain Limitに到達すると宣言できずラリーが強制終了する', () {
+      final base = startWith(
+        handA: ['strike_move'],
+        energyA: const {MoveAttribute.strike: 1},
+      );
+      final atLimit = base.copyWith(
+        rallyAttackerIndex: 0,
+        rallyChain: TechniqueMatchEngine.maxRallyChain,
+      );
+      final result = TechniqueMatchEngine.declareAttack(
+        atLimit,
+        atLimit.playerA.hand.first,
+        catalog(),
+      );
+      expect(result.success, isFalse);
+      expect(result.failureReason, contains('Chain Limit'));
+      expect(result.state.rallyAttackerIndex, isNull);
+      expect(result.state.rallyChain, 0);
+      expect(result.state.log.last, contains('Chain Limit'));
+    });
+
+    test('保留中の攻撃がある間は新たな宣言ができない', () {
+      final state = startWith(
+        handA: ['strike_move'],
+        energyA: const {MoveAttribute.strike: 1},
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      ).state;
+      // 手札は既に空だが、pendingAttackガードは手札チェックより先に働く
+      // ことを確認するため、ダミーのエントリを渡す。
+      const dummyEntry = TechniqueDeckEntry(
+        instanceId: 'dummy',
+        cardId: 'strike_move',
+        cardType: TechniqueDeckCardType.technique,
+      );
+      final result = TechniqueMatchEngine.declareAttack(
+        declared,
+        dummyEntry,
+        catalog(),
+      );
+      expect(result.success, isFalse);
+      expect(result.failureReason, contains('返技'));
+    });
+
+    test('保留中の攻撃が無ければcounterAttackは失敗する', () {
+      final state = startWith(handA: ['strike_move']);
+      final result = TechniqueMatchEngine.counterAttack(state, catalog());
+      expect(result.success, isFalse);
+      expect(result.failureReason, contains('返技可能な攻撃がありません'));
+    });
+
+    test('endRallyでラリーを終了できる（攻守交代後、追撃しない場合）', () {
+      final state = startWith(
+        handA: ['strike_move'],
+        energyA: const {MoveAttribute.strike: 1},
+        energyB: const {MoveAttribute.counter: 1},
+      );
+      final afterCounter = TechniqueMatchEngine.counterAttack(
+        TechniqueMatchEngine.declareAttack(
+          state,
+          state.playerA.hand.first,
+          catalog(),
+        ).state,
+        catalog(),
+      ).state;
+      expect(afterCounter.isRallyActive, isTrue);
+
+      final ended = TechniqueMatchEngine.endRally(afterCounter);
+      expect(ended.isRallyActive, isFalse);
+      expect(ended.rallyChain, 0);
+      expect(ended.log.last, contains('ラリーを終了した'));
+    });
+
+    test('hasUsableMoveは攻撃側に使用可能な技があるかを判定する', () {
+      final withMove = startWith(
+        handA: ['strike_move'],
+        energyA: const {MoveAttribute.strike: 1},
+      );
+      expect(TechniqueMatchEngine.hasUsableMove(withMove, catalog()), isTrue);
+
+      final withoutEnergy = startWith(handA: ['strike_move']);
+      expect(
+        TechniqueMatchEngine.hasUsableMove(withoutEnergy, catalog()),
+        isFalse,
+      );
+
+      final withoutHand = startWith();
+      expect(
+        TechniqueMatchEngine.hasUsableMove(withoutHand, catalog()),
+        isFalse,
+      );
+    });
+
+    test('ログにChain番号と宣言・返技・成立が記録される', () {
+      final state = startWith(
+        handA: ['strike_move'],
+        energyA: const {MoveAttribute.strike: 1},
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      ).state;
+      expect(declared.log.last, contains('[Chain 1]'));
+      expect(declared.log.last, contains('宣言した'));
+
+      final resolved = TechniqueMatchEngine.resolveHit(declared, catalog());
+      expect(resolved.log.any((l) => l.contains('Hit!')), isTrue);
+      expect(resolved.log.any((l) => l.contains('ダメージ')), isTrue);
+      expect(resolved.log.any((l) => l.contains('ラリー終了')), isTrue);
+    });
+  });
 }
