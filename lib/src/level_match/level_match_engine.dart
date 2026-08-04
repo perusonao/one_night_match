@@ -76,6 +76,13 @@ enum EnergySurplusPolicy {
   burstAction,
 }
 
+/// Ver.1.0: デッキバランスシミュレーター用のCPU思考プリセット。
+/// normal = 既定のAI（探索ボーナス込みのスコアリング）。
+/// strong = normalから探索用ボーナス（初使用/初属性ボーナス）を除いた
+/// 純粋なスコア最大化。エンドゲーム移行も早め。
+/// random = 使用可能候補からの完全ランダム選択（比較対照用のベースライン）。
+enum CpuDifficulty { normal, strong, random }
+
 /// Ver.0.8.0 energyモード：場に置かれた技エネルギーカード（Ready/Used）。
 class EnergyCardState {
   EnergyCardState({
@@ -397,6 +404,9 @@ class LevelMatchState {
   // かったため、既定はnone（不採用）のまま。オプションとしては温存。
   EnergySurplusPolicy energySurplusPolicy = EnergySurplusPolicy.none;
 
+  // Ver.1.0: デッキバランスシミュレーター用のCPU思考プリセット（既定normal）。
+  CpuDifficulty cpuDifficulty = CpuDifficulty.normal;
+
   bool get isTimed => matchTimeSeconds > 0;
   int? get turnLimit => isTimed ? matchTimeSeconds ~/ secondsPerTurn : null;
 
@@ -464,6 +474,7 @@ class LevelMatchState {
       'signatureOncePerMatch': signatureOncePerMatch,
       'basicCardPolicy': basicCardPolicy.name,
       'energySurplusPolicy': energySurplusPolicy.name,
+      'cpuDifficulty': cpuDifficulty.name,
       'lastMove': lastMove,
       'pinAttempts': pinAttemptCount,
       'kickOuts': kickOutTotalCount,
@@ -502,6 +513,11 @@ class LevelMatchEngine {
     // Ver.0.9.2: 正式採用（詳細はLevelMatchState側のコメント参照）。
     BasicCardPolicy basicCardPolicy = BasicCardPolicy.unlimitedReuse,
     EnergySurplusPolicy energySurplusPolicy = EnergySurplusPolicy.none,
+    // Ver.1.0: デッキバランスシミュレーター用。
+    CpuDifficulty cpuDifficulty = CpuDifficulty.normal,
+    int? startingLevel,
+    int? startingHeat,
+    int? startingHp,
   }) {
     final rng = random ?? Random();
     final effectiveSignatureOncePerMatch =
@@ -549,7 +565,33 @@ class LevelMatchEngine {
       ..resourceMode = resourceMode
       ..signatureOncePerMatch = effectiveSignatureOncePerMatch
       ..basicCardPolicy = basicCardPolicy
-      ..energySurplusPolicy = energySurplusPolicy;
+      ..energySurplusPolicy = energySurplusPolicy
+      ..cpuDifficulty = cpuDifficulty;
+    if (startingHeat != null) {
+      state.sharedHeat = startingHeat < 0 ? 0 : startingHeat;
+    }
+    for (final side in [player, cpu]) {
+      if (startingHp != null) {
+        side.currentHp = startingHp.clamp(0, side.wrestler.maxHp);
+      }
+      if (startingLevel != null) {
+        final available = side.wrestler.levels.map((l) => l.level).toList()
+          ..sort();
+        if (available.isNotEmpty) {
+          final target = available.lastWhere(
+            (lv) => lv <= startingLevel,
+            orElse: () => available.first,
+          );
+          for (final lv in available) {
+            if (lv <= target) {
+              side.unlockedLevels.add(lv);
+              side.visitedLevels.add(lv);
+            }
+          }
+          side.currentLevel = target;
+        }
+      }
+    }
     final engine = LevelMatchEngine(state: state, moves: moves, random: rng);
     for (final side in [player, cpu]) {
       engine._log(side, 'deckGenerated', '${side.wrestler.name}のデッキを自動生成', {
@@ -2182,6 +2224,26 @@ class LevelMatchEngine {
         skipMove(id);
         return;
       }
+      // Ver.1.0: デッキバランスシミュレーター用のRANDOM思考。スコアリングを
+      // 一切使わず、使用可能な候補から一様ランダムに選ぶ（比較対照用）。
+      if (state.cpuDifficulty == CpuDifficulty.random) {
+        final pool = <Object>[...candidates, ...techniqueOptions];
+        final picked = pool[random.nextInt(pool.length)];
+        if (picked is MoveDefinition) {
+          _log(actor, 'cpuDecision', '${picked.name}を選択（固有技・ランダム）', {
+            'selectionReason': 'random',
+          });
+          useMove(id, picked.id);
+        } else {
+          final entry = picked as (MoveDefinition, TechniqueResourceCard);
+          _log(actor, 'cpuDecision', '${entry.$1.name}を選択（技カード・ランダム）', {
+            'card': entry.$2.instanceId,
+            'selectionReason': 'random',
+          });
+          useTechniqueCard(id, entry.$2.instanceId);
+        }
+        return;
+      }
       MoveDefinition? bestSig;
       var bestSigScore = -1 << 30;
       for (final m in candidates) {
@@ -2420,9 +2482,13 @@ class LevelMatchEngine {
       }
     }
     if (move.id == cpu.previousMoveId) score -= 5; // 同一技連続ペナルティ
-    if ((cpu.moveUsageCounts[move.id] ?? 0) == 0) score += 3; // 初使用ボーナス
-    if ((cpu.attributeSuccessCounts[move.attribute] ?? 0) == 0) {
-      score += 3; // 初使用属性ボーナス
+    // Ver.1.0: strong思考は多様性目的の探索ボーナス（初使用/初属性）を
+    // 適用せず、純粋なスコア最大化のみで動く（normalより最適寄り）。
+    if (state.cpuDifficulty != CpuDifficulty.strong) {
+      if ((cpu.moveUsageCounts[move.id] ?? 0) == 0) score += 3; // 初使用ボーナス
+      if ((cpu.attributeSuccessCounts[move.attribute] ?? 0) == 0) {
+        score += 3; // 初使用属性ボーナス
+      }
     }
     // 相手のキックアウトカードが尽きているならフォール技を後押し。
     if (move.offersPin && opponent.kickOutCards == 0) score += 5;
@@ -2477,9 +2543,13 @@ class LevelMatchEngine {
   /// Ver.0.9.2 改修③: HP・HEAT・残り時間のいずれかが閾値を超えたら
   /// エンドゲームモードとみなす（cpu視点、相手のHPも見る）。
   bool _isEndGameMode(PlayerLevelMatchState cpu) {
+    // Ver.1.0: strong思考はより早く「勝ち切りモード」へ移行する。
+    final threshold = state.cpuDifficulty == CpuDifficulty.strong ? 60 : 50;
     final opponent = _opponentOf(cpu);
-    if (cpu.currentHp <= 50 || opponent.currentHp <= 50) return true;
-    if (state.sharedHeat >= 50) return true;
+    if (cpu.currentHp <= threshold || opponent.currentHp <= threshold) {
+      return true;
+    }
+    if (state.sharedHeat >= threshold) return true;
     final limit = state.turnLimit;
     if (limit != null && limit > 0) {
       final remaining = limit - state.turnNumber;

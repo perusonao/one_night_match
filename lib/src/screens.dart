@@ -8,6 +8,7 @@ import 'game.dart';
 import 'wrestler_editor/editor_screens.dart';
 import 'level_match/level_match_screens.dart';
 import 'level_match/level_match_engine.dart';
+import 'level_match/deck_balance_screen.dart';
 import 'level_match/level_match_simulator_screen.dart';
 
 const _pink = Color(0xffff477e);
@@ -1080,6 +1081,17 @@ class _DebugScreenState extends State<DebugScreen> {
                   ),
                   icon: const Icon(Icons.science),
                   label: const Text('対戦シミュレータ（フォール/ギブアップ検証）'),
+                ),
+                const SizedBox(height: 8),
+                FilledButton.tonalIcon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const DeckBalanceScreen(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.bar_chart),
+                  label: const Text('Deck Simulator（デッキバランス調整）'),
                 ),
                 const SizedBox(height: 12),
                 _metric('総試合数', '${analytics!.totalMatches}'),
