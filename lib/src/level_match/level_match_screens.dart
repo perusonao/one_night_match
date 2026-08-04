@@ -2915,14 +2915,23 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
   Widget _signatureCard(PlayerLevelMatchState player, MoveDefinition m) {
     final availability = engine.evaluateMove(player, m);
     final usable = availability.usable;
+    final usedOnce = state.signatureOncePerMatch &&
+        m.category == MoveCategory.normal &&
+        (player.moveUsageCounts[m.id] ?? 0) >= 1;
     final tags = <String>[
       if (m.offersPin) 'フォール',
       if (m.offersSubmission) 'ギブアップ',
       if (m.category == MoveCategory.finisher) 'FINISHER',
+      if (state.signatureOncePerMatch &&
+          m.category == MoveCategory.normal &&
+          !usedOnce)
+        'あと1回',
     ];
     String? locked;
     if (!usable) {
-      if (_isEnergyMode) {
+      if (usedOnce) {
+        locked = 'USED（この試合では使用不可）';
+      } else if (_isEnergyMode) {
         final ready = player.readyEnergyCounts;
         final lacks = <String>[];
         for (final e in m.energyModeRequiredCards.entries) {
