@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../wrestler_editor/editor_screens.dart';
 import '../wrestler_editor/models.dart';
 import '../wrestler_editor/repository.dart';
+import 'balance_diagnostics.dart';
 import 'deck_balance_models.dart';
 import 'deck_balance_report.dart';
 import 'deck_balance_simulator.dart';
@@ -638,12 +639,45 @@ class _DeckBalanceScreenState extends State<DeckBalanceScreen> {
 
   Widget _aiReportTab(DeckBalanceReport r) {
     final findings = r.generateAiReport(repository.moves);
-    if (findings.isEmpty) {
+    final diagnosis = diagnoseBalance(
+      report: r,
+      wrestlersById: {r.config.playerA.id: r.config.playerA, r.config.playerB.id: r.config.playerB},
+      moves: repository.moves,
+    );
+    final allFindings = [
+      ...diagnosis.wrestlers.expand((w) => w.findings),
+      ...diagnosis.overallFindings,
+      ...findings,
+    ];
+    if (allFindings.isEmpty) {
       return const Text('特筆すべき偏りは検出されませんでした。', style: TextStyle(color: Colors.white70));
     }
     return Column(
       children: [
-        for (final f in findings)
+        if (diagnosis.strongWrestlers.isNotEmpty || diagnosis.weakWrestlers.isNotEmpty)
+          Card(
+            color: const Color(0xff211527),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final w in diagnosis.strongWrestlers)
+                    Chip(
+                      label: Text('${w.name} 強すぎ(${(w.winRate * 100).toStringAsFixed(1)}%)'),
+                      backgroundColor: const Color(0xff3a1620),
+                    ),
+                  for (final w in diagnosis.weakWrestlers)
+                    Chip(
+                      label: Text('${w.name} 弱すぎ(${(w.winRate * 100).toStringAsFixed(1)}%)'),
+                      backgroundColor: const Color(0xff1a2a3a),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        for (final f in allFindings)
           Card(
             color: switch (f.severity) {
               'critical' => const Color(0xff3a1620),

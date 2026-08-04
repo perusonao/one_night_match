@@ -147,6 +147,9 @@ class WrestlerAccumulator {
   final Map<MoveAttribute, int> attributeEnergyInvested = {};
   final Map<MoveAttribute, int> attributeEnergyReadyAtEnd = {};
   int entertainmentScoreSum = 0;
+  int counterAttempts = 0; // このレスラーが返し技を試みた回数
+  int counterSuccesses = 0; // 上記のうちclash outcome=counterで成立した回数
+  int counteredAgainstCount = 0; // 相手の返し技で自分の技が返された回数
 
   double get winRate => games == 0 ? 0 : wins / games;
   double get avgTurns => games == 0 ? 0 : turnSum / games;
@@ -170,6 +173,14 @@ class WrestlerAccumulator {
 
   double get avgEntertainmentScore =>
       games == 0 ? 0 : entertainmentScoreSum / games;
+
+  double get counterSuccessRate =>
+      counterAttempts == 0 ? 0 : counterSuccesses / counterAttempts;
+
+  /// 相手に返し技で潰された割合（自分の総攻撃試行に対する比率の目安として
+  /// 「1試合あたり回数」を返す。全レスラーの平均と比較して外れ値を見る）。
+  double get counteredAgainstPerGame =>
+      games == 0 ? 0 : counteredAgainstCount / games;
 
   MoveAttribute? get favoriteAttribute {
     if (attributeDamage.isEmpty) return null;

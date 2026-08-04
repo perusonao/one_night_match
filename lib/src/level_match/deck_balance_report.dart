@@ -211,11 +211,21 @@ class DeckBalanceReport {
             final outcome = log.details['outcome'] as String?;
             final responseMove =
                 responseMoveId == null ? null : moves[responseMoveId];
+            final responderSide = log.playerId; // _logで responder を渡している
+            final responderWrestler = responderSide == (aIsPlayer ? 'player' : 'cpu')
+                ? config.playerA
+                : config.playerB;
+            final responderStat =
+                responderWrestler.id == config.playerA.id ? aStat : bStat;
+            final attackerStat = responderStat == aStat ? bStat : aStat;
             if (responseMove != null && responseMove.isCounterMove) {
               counterAttempts++;
+              responderStat.counterAttempts++;
               if (outcome == 'counter') {
                 counterSuccesses++;
                 counterCountThisMatch++;
+                responderStat.counterSuccesses++;
+                attackerStat.counteredAgainstCount++;
               }
             }
             break;
@@ -377,6 +387,97 @@ class DeckBalanceReport {
     entertainmentScores.add(score.score);
     aStat.entertainmentScoreSum += score.score;
     bStat.entertainmentScoreSum += score.score;
+  }
+
+  /// Ver.1.1: 複数の対戦カード（複数DeckSimConfig）のレポートを1つに
+  /// マージする。ロースター全体の勝率ランキング・技ランキング・AIレポート
+  /// などを、既存の単一ペア用ロジックをそのまま再利用して得るための集約。
+  /// マージ後のconfigはプレースホルダ（playerA/Bは代表値）であり、
+  /// 個別ペアの対戦カード設定としては意味を持たない。
+  static DeckBalanceReport merge(
+    List<DeckBalanceReport> reports, {
+    required DeckSimConfig placeholderConfig,
+  }) {
+    final merged = DeckBalanceReport(placeholderConfig);
+    for (final r in reports) {
+      merged.matches += r.matches;
+      merged.draws += r.draws;
+      merged.aWins += r.aWins;
+      merged.bWins += r.bWins;
+      merged.turnsList.addAll(r.turnsList);
+      r.finishReasonCounts.forEach((k, v) =>
+          merged.finishReasonCounts[k] = (merged.finishReasonCounts[k] ?? 0) + v);
+      merged.pinTotal += r.pinTotal;
+      merged.subTotal += r.subTotal;
+      merged.noUsableMoveTotal += r.noUsableMoveTotal;
+      merged.leadChangesTotal += r.leadChangesTotal;
+      merged.matchesWithComeback += r.matchesWithComeback;
+      merged.counterAttempts += r.counterAttempts;
+      merged.counterSuccesses += r.counterSuccesses;
+      r.energyInvestedTotals.forEach((k, v) =>
+          merged.energyInvestedTotals[k] = (merged.energyInvestedTotals[k] ?? 0) + v);
+      r.energyReadyAtEndTotals.forEach((k, v) =>
+          merged.energyReadyAtEndTotals[k] = (merged.energyReadyAtEndTotals[k] ?? 0) + v);
+      merged.finisherAttemptedSides += r.finisherAttemptedSides;
+      merged.finisherLandedSides += r.finisherLandedSides;
+      merged.finisherWonSides += r.finisherWonSides;
+      merged.sidesTotal += r.sidesTotal;
+      merged.heatSumEnd += r.heatSumEnd;
+      merged.distinctMovesSidesSum += r.distinctMovesSidesSum;
+      merged.entertainmentScores.addAll(r.entertainmentScores);
+
+      for (final e in r.moveStats.entries) {
+        final acc = merged.moveStats.putIfAbsent(
+          e.key,
+          () => MoveAccumulator(e.key, e.value.name, e.value.category, e.value.attribute)
+            ..level = e.value.level,
+        );
+        acc.eligibleMatches += e.value.eligibleMatches;
+        acc.matchesUsedAtLeastOnce += e.value.matchesUsedAtLeastOnce;
+        acc.totalUses += e.value.totalUses;
+        acc.attemptedCount += e.value.attemptedCount;
+        acc.landedCount += e.value.landedCount;
+        acc.finishCount += e.value.finishCount;
+        acc.totalDamage += e.value.totalDamage;
+        acc.totalHeatGain += e.value.totalHeatGain;
+        acc.totalCost += e.value.totalCost;
+        acc.turnSum += e.value.turnSum;
+        acc.matchTurnsSumWhenUsed += e.value.matchTurnsSumWhenUsed;
+        acc.winsWhenUsed += e.value.winsWhenUsed;
+      }
+      for (final e in r.wrestlerStats.entries) {
+        final acc = merged.wrestlerStats.putIfAbsent(
+          e.key,
+          () => WrestlerAccumulator(e.key, e.value.name),
+        );
+        acc.games += e.value.games;
+        acc.wins += e.value.wins;
+        acc.turnSum += e.value.turnSum;
+        acc.levelSum += e.value.levelSum;
+        acc.damageDealtSum += e.value.damageDealtSum;
+        acc.damageTakenSum += e.value.damageTakenSum;
+        acc.pinAttempts += e.value.pinAttempts;
+        acc.submissionAttempts += e.value.submissionAttempts;
+        acc.koWins += e.value.koWins;
+        acc.finisherAttempts += e.value.finisherAttempts;
+        acc.finisherLands += e.value.finisherLands;
+        acc.finisherWins += e.value.finisherWins;
+        acc.basicUses += e.value.basicUses;
+        acc.signatureUses += e.value.signatureUses;
+        acc.finisherUses += e.value.finisherUses;
+        acc.entertainmentScoreSum += e.value.entertainmentScoreSum;
+        acc.counterAttempts += e.value.counterAttempts;
+        acc.counterSuccesses += e.value.counterSuccesses;
+        acc.counteredAgainstCount += e.value.counteredAgainstCount;
+        e.value.attributeDamage.forEach((k, v) =>
+            acc.attributeDamage[k] = (acc.attributeDamage[k] ?? 0) + v);
+        e.value.attributeEnergyInvested.forEach((k, v) =>
+            acc.attributeEnergyInvested[k] = (acc.attributeEnergyInvested[k] ?? 0) + v);
+        e.value.attributeEnergyReadyAtEnd.forEach((k, v) =>
+            acc.attributeEnergyReadyAtEnd[k] = (acc.attributeEnergyReadyAtEnd[k] ?? 0) + v);
+      }
+    }
+    return merged;
   }
 
   /// 実装⑦: 観戦性スコア（100点満点）。各要素の上限点を合計し、

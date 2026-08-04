@@ -201,7 +201,12 @@ final defaultEditorMoves = <MoveDefinition>[
     successRate: 65,
     additionalChecks: const [AdditionalCheckType.counterSuccess],
     speed: 10, // 返し技は最速
-    counterTypes: const [MoveAttribute.throwMove], // 投げ技を切り返す
+    // Ver.1.1: 唯一の返し技がthrowMoveにしか対応していなかったため、
+    // rough属性（黒蝶ジャックの固有技が集中）は元々誰にも返せない仕様に
+    // なっていた。cannotCounterフラグが冗長化するほどの構造的な穴であり、
+    // ジャックの勝率が86.8%まで突出していた主因と判明（Deck Simulatorの
+    // 仮想シミュレーションで検証: 追加後は87.3%→75.0%まで低下）。
+    counterTypes: const [MoveAttribute.throwMove, MoveAttribute.rough],
   ),
   // フィニッシャー（各レスラー固有・決着直結）。
   // Ver.0.7.3: アカリのフィニッシャーを strike に。彼女のデッキ傾向（打撃/空中）と
