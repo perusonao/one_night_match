@@ -342,6 +342,11 @@ class LevelMatchState {
   int matchTimeSeconds = 0;
   MatchResourceMode resourceMode = MatchResourceMode.classic;
 
+  // Ver.0.9: 検証用オプションルール。固有技（MoveCategory.normal）を
+  // フィニッシャー同様「試合中1回まで」に制限する（レベルアップしても
+  // 回数は回復しない）。既定はfalse（従来通り無制限）。
+  bool signatureOncePerMatch = false;
+
   bool get isTimed => matchTimeSeconds > 0;
   int? get turnLimit => isTimed ? matchTimeSeconds ~/ secondsPerTurn : null;
 
@@ -406,6 +411,7 @@ class LevelMatchState {
       'matchTimeSeconds': matchTimeSeconds,
       'remainingSeconds': remainingSeconds,
       'resourceMode': resourceMode.name,
+      'signatureOncePerMatch': signatureOncePerMatch,
       'lastMove': lastMove,
       'pinAttempts': pinAttemptCount,
       'kickOuts': kickOutTotalCount,
@@ -437,6 +443,7 @@ class LevelMatchEngine {
     bool playerStarts = true,
     int matchTimeSeconds = 0,
     MatchResourceMode resourceMode = MatchResourceMode.classic,
+    bool signatureOncePerMatch = false,
   }) {
     final rng = random ?? Random();
     // Ver.0.8.0：energyモードは技カード／技エネルギーカードが混在するデッキを使う。
@@ -479,7 +486,8 @@ class LevelMatchEngine {
       startedAt: DateTime.now().toUtc(),
     )
       ..matchTimeSeconds = matchTimeSeconds
-      ..resourceMode = resourceMode;
+      ..resourceMode = resourceMode
+      ..signatureOncePerMatch = signatureOncePerMatch;
     final engine = LevelMatchEngine(state: state, moves: moves, random: rng);
     for (final side in [player, cpu]) {
       engine._log(side, 'deckGenerated', '${side.wrestler.name}のデッキを自動生成', {
@@ -716,6 +724,13 @@ class LevelMatchEngine {
     if (move.usageLimit != null &&
         (actor.moveUsageCounts[move.id] ?? 0) >= move.usageLimit!) {
       reasons.add('使用回数制限に達しています');
+    }
+    // Ver.0.9: 検証用オプションルール。固有技を試合中1回までに制限する
+    // （レベルアップしても回復しない）。フィニッシャーは元々1回のみなので対象外。
+    if (state.signatureOncePerMatch &&
+        move.category == MoveCategory.normal &&
+        (actor.moveUsageCounts[move.id] ?? 0) >= 1) {
+      reasons.add('固有技は1試合1回までです（使用済み）');
     }
     if (!_meetsRequiredState(actor, move)) {
       reasons.add('必要な状態（${move.requiredPreviousState}）を満たしていません');
