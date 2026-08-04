@@ -169,6 +169,25 @@
   フィニッシャー・防御カード）をいつ・どの単位で投入するかは未検討。
 - 解決が必要なPhase: 未定（Phase 2後続または実戦接続前のPhase 4直前）
 
+## 23. レスラー別回復力（recoveryPower）のカタログ接続
+
+- 関連章: 仕様書12章、実装: `TechniqueMatchEngine`/`defaultRecoveryPower`
+- 候補: 未提示。`TechniqueDeckWrestlerProfile.recoveryPower`（Phase 1で
+  モデル定義済み）はまだ試合状態へ接続しておらず、Phase 3では全レスラー
+  共通の暫定値 `defaultRecoveryPower`（15、正式値ではない）を使っている。
+  レスラーごとの回復力をどこで管理するか（`TechniqueDeckWrestlerProfile`を
+  正式に使う／`WrestlerDefinition`側に持たせる等）は未検討。
+- 解決が必要なPhase: Phase 4〜（本格的なバランス調整と合わせて）
+
+## 24. HP・maxHpの初期値
+
+- 関連章: 仕様書全般、実装: `TechniqueMatchEngine.start`
+- 候補: 未提示。Phase 3では既存 `WrestlerDefinition.maxHp`
+  （classic/energyモードと共用）をそのまま流用し、`startingHp`未指定時は
+  maxHpと同値としている。Technique Deck Rules専用にHP値を再設計するかは
+  未検討（ダメージ処理が無い現時点では影響しない）。
+- 解決が必要なPhase: Phase 4（ダメージ処理の実装時）
+
 ---
 
 ## 解決済み
