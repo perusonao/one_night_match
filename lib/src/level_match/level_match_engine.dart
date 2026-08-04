@@ -36,6 +36,10 @@ enum LevelFinishReason {
   exhaustion,
   decision,
   draw,
+  // Ver.0.9.1: 山札切れで消耗しHPが尽きた側は、レフェリーストップ（TKO）で
+  // 即座に相手の勝利とする。従来はここで決着がつかず200ターン安全弁の
+  // 引き分けまで間延びしていたための追加。
+  koStoppage,
 }
 
 /// Ver.0.8.0: リソース方式（将来の特殊ルール拡張の土台）。
@@ -162,6 +166,10 @@ class PlayerLevelMatchState {
   int currentHp;
   int currentLevel = 1;
   final Set<int> unlockedLevels = {1};
+  // Ver.0.9.1: 一度でも滞在したレベル（固有技の到達判定用）。CPUが
+  // 複数レベル同時解禁時に上位へ直行し、中間レベル固有技が一生
+  // 出番を得られない問題への対処に使う。
+  final Set<int> visitedLevels = {1};
   final List<TechniqueResourceCard> deck;
   final List<TechniqueResourceCard> hand;
   final List<TechniqueResourceCard> discardPile = [];
@@ -342,10 +350,11 @@ class LevelMatchState {
   int matchTimeSeconds = 0;
   MatchResourceMode resourceMode = MatchResourceMode.classic;
 
-  // Ver.0.9: 検証用オプションルール。固有技（MoveCategory.normal）を
-  // フィニッシャー同様「試合中1回まで」に制限する（レベルアップしても
-  // 回数は回復しない）。既定はfalse（従来通り無制限）。
-  bool signatureOncePerMatch = false;
+  // Ver.0.9: 固有技（MoveCategory.normal）をフィニッシャー同様
+  // 「試合中1回まで」に制限する（レベルアップしても回数は回復しない）。
+  // 1040試合のシミュレーション検証（技の偏り解消・通常技の価値向上・
+  // 引き分け率改善を確認）を経てVer.0.9.1で正式採用、既定trueに変更。
+  bool signatureOncePerMatch = true;
 
   bool get isTimed => matchTimeSeconds > 0;
   int? get turnLimit => isTimed ? matchTimeSeconds ~/ secondsPerTurn : null;
@@ -443,9 +452,14 @@ class LevelMatchEngine {
     bool playerStarts = true,
     int matchTimeSeconds = 0,
     MatchResourceMode resourceMode = MatchResourceMode.classic,
-    bool signatureOncePerMatch = false,
+    // Ver.0.9.1: 未指定時はenergyモード（実プレイで使われる唯一のモード）でのみ
+    // 既定trueとする。classicモードは大量の旧テスト資産のバランス前提
+    // （固有技の反復使用込み）を保持するため既定falseのまま据え置く。
+    bool? signatureOncePerMatch,
   }) {
     final rng = random ?? Random();
+    final effectiveSignatureOncePerMatch =
+        signatureOncePerMatch ?? (resourceMode == MatchResourceMode.energy);
     // Ver.0.8.0：energyモードは技カード／技エネルギーカードが混在するデッキを使う。
     // classic側のデッキ生成アルゴリズムはbuildEnergyMode内部で再利用するのみで、
     // classicモードの挙動には一切影響しない。
@@ -487,7 +501,7 @@ class LevelMatchEngine {
     )
       ..matchTimeSeconds = matchTimeSeconds
       ..resourceMode = resourceMode
-      ..signatureOncePerMatch = signatureOncePerMatch;
+      ..signatureOncePerMatch = effectiveSignatureOncePerMatch;
     final engine = LevelMatchEngine(state: state, moves: moves, random: rng);
     for (final side in [player, cpu]) {
       engine._log(side, 'deckGenerated', '${side.wrestler.name}のデッキを自動生成', {
@@ -564,6 +578,15 @@ class LevelMatchEngine {
         'hpAfter': actor.currentHp,
         'heatAfter': state.sharedHeat,
       });
+      // Ver.0.9.1: 山札が尽きた状態でHPも0まで消耗した場合、これ以上
+      // 攻防を継続できないとみなしレフェリーストップ（TKO）で即決着とする。
+      // 200ターン安全弁まで膠着して引き分けになる問題への対処。
+      if (actor.currentHp <= 0) {
+        final opponent = _opponentOf(actor);
+        state.finishingMove = 'レフェリーストップ';
+        _finish(opponent, LevelFinishReason.koStoppage);
+        return;
+      }
       state.phase = LevelMatchPhase.setCard;
       return;
     }
@@ -659,6 +682,7 @@ class LevelMatchEngine {
     if (actor.currentLevel == targetLevel) throw StateError('現在と同じレベルです');
     final before = actor.currentLevel;
     actor.currentLevel = targetLevel;
+    actor.visitedLevels.add(targetLevel);
     actor.levelChangeUsedThisTurn = true;
     actor.levelChangeCount++;
     _log(actor, 'changeLevel', 'Level $before → Level $targetLevel', {
@@ -1979,6 +2003,25 @@ class LevelMatchEngine {
       changeLevel(id, finLevel);
       return;
     }
+    // Ver.0.9.1: 複数レベルが同時解禁された場合、火力最大のレベルへ直行すると
+    // 中間レベルの固有技が一生使われないままになる（例: Level1→3の即時到達で
+    // Level2固有技が完全に出番を失う）。フィニッシャーを急ぐ局面でなければ、
+    // まだ滞在していない解禁済みレベルのうち、火力を落とさず経由できる
+    // ものを優先して一度は立ち寄る。
+    final unvisited = options.where((l) => !actor.visitedLevels.contains(l));
+    if (unvisited.isNotEmpty) {
+      final currentDamage = _bestDamage(actor, actor.currentLevel);
+      for (final level in unvisited) {
+        if (_bestDamage(actor, level) >= currentDamage) {
+          _log(actor, 'cpuDecision', '未経験のLevel $levelを経由（固有技を試す）', {
+            'candidates': options,
+            'selectionReason': 'visitUnexploredLevel',
+          });
+          changeLevel(id, level);
+          return;
+        }
+      }
+    }
     int? best;
     var bestDamage = _bestDamage(actor, actor.currentLevel);
     for (final level in options) {
@@ -2140,6 +2183,16 @@ class LevelMatchEngine {
       } else {
         score += 8;
       }
+    } else if (move.offersPin || move.offersSubmission) {
+      // Ver.0.9.1: フィニッシャーに限らず、フォール／ギブアップを狙える技は
+      // 相手が弱っているほど「決めに行く価値」が上がる。威力の低い固有技でも、
+      // 終盤の決定機では十分に選ぶ理由を持たせる
+      // （「残りHPが少ないなら低コスト技でも使う」という状況判断）。
+      if (opponent.currentHp <= 20) {
+        score += 14;
+      } else if (opponent.currentHp <= 50) {
+        score += 7;
+      }
     }
     if (move.id == cpu.previousMoveId) score -= 5; // 同一技連続ペナルティ
     if ((cpu.moveUsageCounts[move.id] ?? 0) == 0) score += 3; // 初使用ボーナス
@@ -2150,6 +2203,27 @@ class LevelMatchEngine {
     if (move.offersPin && opponent.kickOutCards == 0) score += 5;
     // Ver.0.7.1: 速い固有技ほど、相手のレスポンスに潰されにくい。
     score += move.speed;
+    // Ver.0.9.1: エネルギー効率（1コストあたりのダメージ）を軽く加点する。
+    // 高威力・高コスト技だけが常に選ばれる偏りを緩和し、軽い技にも
+    // 「コストの割に見合う」独自の勝ち筋を持たせる。
+    if (state.resourceMode == MatchResourceMode.energy) {
+      final totalCost = move.energyModeRequiredCards.values.fold(
+        0,
+        (a, b) => a + b,
+      );
+      if (totalCost > 0) {
+        score += (damage / totalCost).round();
+        // 保有エネルギーが乏しく大技を撃つ余裕が無いときほど、
+        // 「今すぐ確実に出せる」軽量技を優遇する。
+        final readyTotal = cpu.readyEnergyCounts.values.fold(
+          0,
+          (a, b) => a + b,
+        );
+        if (readyTotal <= totalCost + 1 && totalCost <= 2) {
+          score += 3 - totalCost;
+        }
+      }
+    }
     // Ver.0.7.2: フィニッシャーは通常技で割り込まれない“信頼できる切り札”。
     // 相手が弱っているほど期待値が高い（返し残数・HP・HEATを加味）。
     if (move.ignoreNormalSpeed) {

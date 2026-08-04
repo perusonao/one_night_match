@@ -12,12 +12,35 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('signatureOncePerMatch: 既定はfalse（従来通り無制限）', () {
+  test('signatureOncePerMatch: Ver.0.9.1で正式採用、energyモード既定はtrue', () {
     final m = LevelMatchEngine.create(
       playerWrestler: byId('wrestler_akari'),
       cpuWrestler: byId('wrestler_misaki'),
       moves: moves,
       random: Random(1),
+      resourceMode: MatchResourceMode.energy,
+    );
+    expect(m.state.signatureOncePerMatch, isTrue);
+  });
+
+  test('signatureOncePerMatch: classicモード既定は旧テスト資産保護のためfalse', () {
+    final m = LevelMatchEngine.create(
+      playerWrestler: byId('wrestler_akari'),
+      cpuWrestler: byId('wrestler_misaki'),
+      moves: moves,
+      random: Random(1),
+      resourceMode: MatchResourceMode.classic,
+    );
+    expect(m.state.signatureOncePerMatch, isFalse);
+  });
+
+  test('signatureOncePerMatch=false: 明示指定すれば従来通り無制限', () {
+    final m = LevelMatchEngine.create(
+      playerWrestler: byId('wrestler_akari'),
+      cpuWrestler: byId('wrestler_misaki'),
+      moves: moves,
+      random: Random(1),
+      signatureOncePerMatch: false,
     );
     expect(m.state.signatureOncePerMatch, isFalse);
   });
