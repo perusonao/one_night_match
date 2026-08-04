@@ -296,8 +296,15 @@ void _cardStructureTests() {
     );
   });
 
-  test('energyモード：技カードを使用すると宣言でき、エネルギー消費・捨て札になる', () {
-    final m = energyEngine();
+  test('energyモード：技カードを使用すると宣言でき、エネルギー消費・捨て札になる（basicCardPolicy=discardAfterUse時）', () {
+    final m = LevelMatchEngine.create(
+      playerWrestler: byId('wrestler_akari'),
+      cpuWrestler: byId('wrestler_misaki'),
+      moves: moves,
+      random: Random(1),
+      resourceMode: MatchResourceMode.energy,
+      basicCardPolicy: BasicCardPolicy.discardAfterUse,
+    );
     final player = m.state.player;
     // 技カードを1枚仕立てて手札に入れ、コスト分のエネルギーを用意する。
     final techMove = moves['basic_strike']!;
