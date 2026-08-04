@@ -370,4 +370,68 @@ void _cardStructureTests() {
     expect(base.resolvedForEnergyMode.power, base.power);
     expect(overridden.extra, isEmpty);
   });
+
+  _cpuEnergyAiTests();
+}
+
+// ===== Ver.0.9: CPUのエネルギー管理AIバグ修正の回帰テスト =====
+// 実際のプレイテストで「CPUがLevel3まで上がっても何ターンも技を出せない」
+// 不具合が報告された。原因はCPUのAI（_desiredAttributes /
+// _finisherCardsShort）がclassic専用のsetAttributeCounts/requiredCardsを
+// 参照しており、energyモードでは常に0扱いになるため「フィニッシャーの
+// 準備がずっと整わない」と誤認し続け、他の属性へエネルギーを分散できなく
+// なる、というもの。
+void _cpuEnergyAiTests() {
+  final moves = {for (final m in defaultEditorMoves) m.id: m};
+  WrestlerDefinition byId(String id) =>
+      defaultEditorWrestlers.firstWhere((w) => w.id == id);
+
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('energyモード：フィニッシャーを狙う局面でもCPUは技を出し続けられる（無限停滞しない）', () {
+    // 豪田ミサキ(power型)をCPU側にし、複数シードでプレイヤーのHPを
+    // 十分削ってフィニッシャー追求モード（_shouldPursueFinisher）に
+    // 入りやすい状況を作る。修正前は、この局面に入ると以後ずっと
+    // 「使用可能な技なし」でCPUが停止し続けるバグがあった。
+    for (final seed in [3, 7, 11, 19]) {
+      final m = LevelMatchEngine.create(
+        playerWrestler: byId('wrestler_akari'),
+        cpuWrestler: byId('wrestler_misaki'),
+        moves: moves,
+        random: Random(seed),
+        playerStarts: true,
+        resourceMode: MatchResourceMode.energy,
+      );
+      var guard = 0;
+      while (!m.state.isGameOver && guard++ < 400) {
+        m.autoAdvance();
+      }
+      // CPUが最低限の攻撃を積み重ねられている（ゼロ回＝停滞バグの再発）。
+      expect(m.state.cpu.damageDealtCount, greaterThan(0),
+          reason: 'seed=$seed でCPUが一度も技を成立させられなかった');
+    }
+  });
+
+  test('energyモード：CPU対CPUでも双方が継続してダメージを与え合える', () {
+    // 両者ともCPU AIで進行させ、序盤だけでなく試合を通してエネルギー配分が
+    // 破綻しない（片方だけ攻撃できず一方的になる）ことを確認する。
+    for (final seed in [2, 5, 9]) {
+      final m = LevelMatchEngine.create(
+        playerWrestler: byId('wrestler_reina'),
+        cpuWrestler: byId('wrestler_jack'),
+        moves: moves,
+        random: Random(seed),
+        playerStarts: seed.isEven,
+        resourceMode: MatchResourceMode.energy,
+      );
+      var guard = 0;
+      while (!m.state.isGameOver && guard++ < 400) {
+        m.autoAdvance();
+      }
+      expect(m.state.player.damageDealtCount, greaterThan(0),
+          reason: 'seed=$seed でplayer側が一度も技を成立させられなかった');
+      expect(m.state.cpu.damageDealtCount, greaterThan(0),
+          reason: 'seed=$seed でcpu側が一度も技を成立させられなかった');
+    }
+  });
 }
