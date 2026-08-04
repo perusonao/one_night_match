@@ -5,6 +5,7 @@ import 'package:one_night_match/src/technique_deck/technique_deck_deck.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_models.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_storage.dart';
 import 'package:one_night_match/src/technique_deck/technique_match_screen.dart';
+import 'package:one_night_match/src/technique_deck/technique_match_state.dart';
 import 'package:one_night_match/src/wrestler_editor/models.dart' show MoveAttribute;
 
 void main() {
@@ -22,6 +23,7 @@ void main() {
         category: TechniqueCardCategory.normal,
         attribute: MoveAttribute.strike,
         attackEnergyCost: {MoveAttribute.strike: 1},
+        reversalEnergyCost: {MoveAttribute.counter: 1},
         power: 10,
       ),
     ],
@@ -30,6 +32,11 @@ void main() {
         id: 'energy_strike',
         attribute: MoveAttribute.strike,
         name: '打エネルギー',
+      ),
+      TechniqueEnergyCard(
+        id: 'energy_counter',
+        attribute: MoveAttribute.counter,
+        name: '返エネルギー',
       ),
     ],
     defenseCards: [],
@@ -49,6 +56,30 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  Future<String> startWithFixedDeck(
+    WidgetTester tester,
+    LocalTechniqueDeckRepository repo,
+    List<TechniqueDeckEntry> entries,
+  ) async {
+    await pumpScreen(tester, deckRepository: repo);
+    final state = tester.state(find.byType(TechniqueMatchScreen));
+    // ignore: avoid_dynamic_calls
+    final wrestlerAId = (state as dynamic).wrestlerA.id as String;
+    await repo.save(
+      TechniqueDeckSaveRecord(
+        deckId: 'combat_deck',
+        name: '戦闘テスト用デッキ',
+        wrestlerId: wrestlerAId,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        entries: entries,
+      ),
+    );
+    await tester.tap(find.text('試合開始'));
+    await tester.pumpAndSettle();
+    return wrestlerAId;
   }
 
   group('TechniqueMatchScreen: セットアップ', () {
@@ -145,31 +176,7 @@ void main() {
     });
   });
 
-  group('TechniqueMatchScreen: Phase 4 技の使用', () {
-    Future<String> startWithFixedDeck(
-      WidgetTester tester,
-      LocalTechniqueDeckRepository repo,
-      List<TechniqueDeckEntry> entries,
-    ) async {
-      await pumpScreen(tester, deckRepository: repo);
-      final state = tester.state(find.byType(TechniqueMatchScreen));
-      // ignore: avoid_dynamic_calls
-      final wrestlerAId = (state as dynamic).wrestlerA.id as String;
-      await repo.save(
-        TechniqueDeckSaveRecord(
-          deckId: 'combat_deck',
-          name: '戦闘テスト用デッキ',
-          wrestlerId: wrestlerAId,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-          entries: entries,
-        ),
-      );
-      await tester.tap(find.text('試合開始'));
-      await tester.pumpAndSettle();
-      return wrestlerAId;
-    }
-
+  group('TechniqueMatchScreen: 技の宣言・成立', () {
     testWidgets('エネルギーをセットしてから技を使用すると相手にダメージが入る', (tester) async {
       final repo = LocalTechniqueDeckRepository();
       await startWithFixedDeck(tester, repo, const [
@@ -211,7 +218,14 @@ void main() {
       await tester.tap(find.text('使用する'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('を使用した'), findsOneWidget);
+      // 技を宣言すると防御側の返技判定ダイアログが自動で開く。
+      expect(find.textContaining('宣言した'), findsOneWidget);
+      expect(find.text('返技しない'), findsOneWidget);
+
+      await tester.tap(find.text('返技しない'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('が成立した'), findsOneWidget);
       expect(find.textContaining('ダメージ'), findsOneWidget);
     });
 
@@ -235,6 +249,64 @@ void main() {
         find.widgetWithText(FilledButton, '使用する'),
       );
       expect(useButton.onPressed, isNull);
+    });
+  });
+
+  group('TechniqueMatchScreen: Phase 5 ラリー', () {
+    testWidgets('攻撃を宣言すると返技判定ダイアログが開き、返技すると攻守交代してChainが表示される', (
+      tester,
+    ) async {
+      final repo = LocalTechniqueDeckRepository();
+      await startWithFixedDeck(tester, repo, const [
+        TechniqueDeckEntry(
+          instanceId: 'e1',
+          cardId: 'normal_1',
+          cardType: TechniqueDeckCardType.technique,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 'e2',
+          cardId: 'energy_strike',
+          cardType: TechniqueDeckCardType.energy,
+        ),
+      ]);
+
+      await tester.tap(find.text('打エネルギー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('セットする'));
+      await tester.pumpAndSettle();
+
+      // Bに返技エネルギーを直接注入する（実プレイではBの手番に自分で
+      // セットする。ここではUIの配線確認が目的のため直接注入する）。
+      final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
+      final TechniqueMatchState current = screenState.matchState;
+      screenState.matchState = current.copyWith(
+        playerB: current.playerB.copyWith(
+          energyPool: const {MoveAttribute.counter: 1},
+        ),
+      );
+
+      await tester.tap(find.text('通常技A').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('使用する'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('[Chain 1]'), findsWidgets);
+      expect(find.text('返技する'), findsOneWidget);
+
+      await tester.tap(find.text('返技する'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('攻守交代'), findsOneWidget);
+      expect(find.textContaining('Chain 1'), findsWidgets);
+      expect(find.textContaining('攻撃側'), findsWidgets);
+      expect(find.text('ラリーを終了する'), findsOneWidget);
+
+      // 攻守交代後、追撃せずラリーを終了できる。
+      await tester.tap(find.text('ラリーを終了する'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('ラリーを終了した'), findsOneWidget);
+      expect(find.text('ターン終了'), findsOneWidget); // 通常の行動選択に戻る
     });
   });
 }

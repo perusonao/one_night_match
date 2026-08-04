@@ -1,9 +1,10 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 4（単発技の使用）完了時点**
-  （「Technique Match」画面でエネルギーセット・通常技/固有技の使用が動作する。
-  ダメージ・HEAT・ダウン付与・HP0時の疲労状態は即時反映される。
-  返技・連続攻撃・フォール／ギブアップ・フィニッシャー決着・CPUはPhase 5以降）
+- ステータス: **Phase 5（返技エネルギーと連続攻撃）完了時点**
+  （「Technique Match」画面で技の応酬＝ラリーが動作する。攻撃宣言→防御側が
+  返技するか任意に選択→返技成功なら攻守交代して連続攻撃、返技しなければ
+  技成立でラリー終了。フォール／ギブアップ・フィニッシャー決着・CPUは
+  Phase 6以降）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 
@@ -348,29 +349,66 @@ HP0時の細かな行動制限（[open questions 3番](technique_deck_open_quest
 
 ## Phase 5：返技エネルギーと連続攻撃
 
-実装対象:
+**ステータス: 完了。**
 
-- 対応カードなしのエネルギー防御
-- 技の完全無効化
-- 防御された技の捨て札化
-- 追加技の使用（連続攻撃）
-- 使用上限なし（ルール仕様）
-- 継続／終了選択（プレイヤー・CPU双方）
-- 連続ダメージ集計（即時適用か一括適用かは
-  [open questions 1番](technique_deck_open_questions.md) 解決後に実装）
-- 攻防履歴の記録
-- CPU判断（連続攻撃を続けるか、リソースを温存するか）
-- 演出キュー
+実装対象（すべて完了）:
 
-**無限ループ防止用の安全弁を必ず設ける。** ルール上は使用上限なしでも、
-エンジン内部には以下のような防御策を実装すること。
+- 対応カードなしのエネルギー防御（`counterAttack`。手札の返技カードは不要、
+  技カードの`reversalEnergyCost`のみを参照する）
+- 技の完全無効化（返技成功時はダメージ無効・HEAT加算なし・ダウンなし）
+- 防御された技の捨て札化（攻撃宣言時点で捨て札化済み。成立可否を問わない
+  仕様書6章の原則を踏襲）
+- 追加技の使用（連続攻撃。返技成功で攻守交代し、新しい攻撃側が
+  通常技・固有技のどちらでも宣言できる）
+- 使用上限なし（ルール仕様どおり。実装上は`maxRallyChain`で安全弁）
+- 継続／終了選択（プレイヤーが任意のタイミングで`endRally`を選べる。
+  CPUはPhase 8）
+- 連続ダメージ集計は不要になった: Phase 4に続き**技ごとの即時適用**を採用
+  （ユーザー指示、下記「ダメージ適用方式の判断」参照）
+- 攻防履歴の記録（ログに`[Chain N]`形式で宣言・返技・成立を記録）
+- 演出キューは未実装（Phase 9のUI仕上げで検討）
 
-- 1ターンあたりの最大反復回数のハードキャップ（デバッグ・異常系検知用。
-  通常プレイでは手札・エネルギーの有限性により到達しない想定だが、
-  バグによる無限ループを防ぐ最終防衛ラインとして必須）
-- 手札・エネルギーが尽きた時点での強制終了
-- 使用可能技が存在しない場合の即時終了（既存 `energy` モードの
-  `noUsableMove` ログ機構を参考にできる）
+**無限ループ防止の安全弁**: `TechniqueMatchEngine.maxRallyChain`（20）。
+`declareAttack`は`rallyChain >= maxRallyChain`の場合、宣言を拒否して
+ラリーを強制終了し、ログに`Chain Limit`を残す。300試合×25ターンの
+簡易シミュレーションでは最大到達Chainは6（安全弁は一度も発動せず、
+通常プレイでは十分な余裕がある値と確認できた。詳細は作業報告のシミュレーション
+結果を参照）。
+
+### 読み合いの設計（ユーザー指示による重要な設計判断）
+
+返技は「返技エネルギーが足りていれば自動的に発生する」のではなく、
+**防御側が明示的に選択する**（`counterAttack`を呼ばない限り消費されない）。
+UIでは返技判定ダイアログで「返技する」（エネルギーが足りる場合のみ活性化）
+と「返技しない」を常に両方提示する。エネルギーが足りていてもあえて温存する
+（＝返技しない）という選択が可能であることが、このフェーズの核となる
+読み合い要素。
+
+### ダメージ適用方式の判断（open questions 1番、正式決定）
+
+Phase 4に続き、Phase 5でも技ごとの即時適用を採用した。技Aの成立で相手が
+ダウンし、直後にダウン限定技Bが使用可能になる連携（`targetState`判定）を
+成立させるには即時反映が必要という、Phase 4時点の判断がそのままPhase 5にも
+当てはまることを確認した上での採用。
+
+### 「ラリー」と「ターン」の分離
+
+ラリー中に攻守（`rallyAttackerIndex`）が入れ替わっても、公式な「ターン」の
+所有者（`activePlayerIndex`。ターン開始処理・ドロー・ターン終了操作の主体）
+は変化しない。ラリーが終了すると（技が成立／Chain Limit／使用可能技なし／
+プレイヤーが終了を選択）、制御は常に`activePlayerIndex`のプレイヤーへ戻る。
+エネルギーセットはラリー中は行えない仕様とした（UI側で制限。エンジンの
+`setEnergy`自体は`state.active`基準のままのため、ラリー中の呼び出しは
+意図しない挙動になりうるという既知の制約が残る。open questions参照）。
+
+成果物: `TechniqueMatchEngine.declareAttack` / `counterAttack` /
+`resolveHit` / `endRally` / `canDeclareAttack` / `checkCounterEligibility` /
+`hasUsableMove`。`TechniqueMatchState`へ`rallyAttackerIndex` /
+`rallyChain` / `pendingAttack`を追加（`TechniquePendingAttack`）。
+`TechniqueMatchScreen`に返技判定ダイアログ・Chain表示・攻撃側/防御側
+ラベル・「ラリーを終了する」ボタンを追加。
+テスト: `test/technique_match_state_test.dart`に10件追加（計40件）、
+`test/technique_match_screen_test.dart`に1件追加（計9件）。
 
 **依存関係**: Phase 4（単発技使用が土台）。
 
