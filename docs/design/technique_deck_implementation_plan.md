@@ -1,6 +1,8 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 1（データモデル基盤） 完了時点**
+- ステータス: **Phase 2（新デッキ生成・デッキ検証）前半 完了時点**
+  （手動デッキの検証・JSON入出力まで。デッキプレビューUI・自動生成・
+  構成不足時の理由表示は未着手）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 
@@ -119,20 +121,53 @@ wrestler_editor側のエディタUIは今回追加していない（案A採用: 
 
 ## Phase 2：新デッキ生成・デッキ検証
 
-実装対象:
+**ステータス: 前半（手動デッキの検証・JSON入出力）完了。後半（デッキプレビュー
+UI・自動生成・構成不足時の理由表示）は未着手。**
 
-- 技エネルギーカードの生成
-- 通常技・固有技・フィニッシャーカードの生成
-- 特殊防御カードの生成
-- フィニッシャー最大3枚・同名フィニッシャー禁止のバリデーション
-- レスラー使用制限（`allowedWrestlers`）のバリデーション
-- デッキバリデーション全般
-- 自動生成デッキ
-- デッキプレビュー
-- JSON出力
+推奨実装順（今回の判断）:
 
-現行デッキビルダー（`LevelMatchDeckBuilder`）は変更せず、新モード専用ビルダー
-（例: `TechniqueDeckBuilder`）を新規作成する。
+1. ✅ 手動定義したデッキの検証
+2. ✅ JSON保存・読込
+3. ⬜ デッキプレビュー
+4. ⬜ 最低限の自動生成
+5. ⬜ 構成不足時の理由表示
+
+最初から強い自動生成AIを作るのではなく、まず「正しいデッキとは何か」を
+検証ロジックとして固める方を優先した。3〜5は後続の別作業とする。
+
+成果物: `lib/src/technique_deck/technique_deck_deck.dart`（`TechniqueDeckEntry`
+/ `TechniqueDeckDefinition` / `TechniqueDeckBuilder` / `TechniqueDeckValidator`
+/ `TechniqueDeckBuildResult` / `TechniqueDeckValidationRule`）、
+`test/technique_deck_deck_test.dart`（24テスト）。加えて Phase 1モデルへ
+`KickOutCardCategory { normal, finisherEscape }` と `TechniqueDefenseCard.
+kickOutCategory` を追加（仕様書9.1章）。
+
+実装対象（今回完了分）:
+
+- `TechniqueDeckEntry`（デッキ内の1枚の物理カード、`instanceId`/`cardId`/
+  `cardType`）と `TechniqueDeckDefinition`（`id`/`wrestlerId`/`name`/
+  `entries`）のJSON入出力
+- `TechniqueDeckBuilder`（手動デッキ組み立ての補助。カードIDと枚数を渡すと
+  インスタンスIDを自動採番する。強い自動生成AIではない）
+- `TechniqueDeckValidator`（`TechniqueDeckValidationRule` 17種のエラー・
+  警告ルール。デッキ枚数30枚固定・カードID解決・宣言cardTypeとカタログ実態の
+  整合性・同名上限（4.2章の表）・フィニッシャー合計3枚＆同名禁止・固有技/
+  フィニッシャーの`allowedWrestlerIds`必須＆デッキレスラーとの一致・
+  技エネルギー0枚・特殊キックアウト0枚警告・攻撃/返技エネルギーの属性
+  カバレッジ警告・技カード枚数過少警告・エネルギー比率極端警告・
+  使用可能レベルの技が皆無警告）
+- `TechniqueDeckBuildResult`（`isValid`/`errors`/`warnings`）
+
+今回完了していない（次回以降）:
+
+- 技エネルギーカード・技カード・防御カードそのものの「生成」（Phase 0仕様書の
+  想定コンテンツの実データ投入。今回はテスト用の最小フィクスチャのみ）
+- デッキプレビューUI
+- 自動生成デッキ（最低限のものも含め未着手）
+- 構成不足時の理由表示UI
+
+現行デッキビルダー（`LevelMatchDeckBuilder`）は変更していない。新モード専用の
+`TechniqueDeckBuilder`として新規作成した。
 
 **依存関係**: Phase 1（カードデータモデル）。
 
