@@ -456,6 +456,29 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                   '相手の返技に必要なエネルギー: ${technique.reversalEnergyCost.entries.where((e) => e.value > 0).map((e) => '${moveAttributeLabel(e.key)}${e.value}').join('・')}',
                 ),
               if (technique.causesDown) const Text('成立すると相手をダウンさせます。'),
+              if (technique.hasFinisherEffect)
+                const Text(
+                  'フィニッシャー技です（発動条件・専用の決着処理は未実装、Phase 7）。',
+                  style: TextStyle(color: _gold, fontSize: 12),
+                )
+              else if (technique.hasPinEffect && technique.hasSubmissionEffect)
+                const Text(
+                  '成立するとフォール判定が発生します'
+                  '（ギブアップ効果も持ちますが、フォールが優先されます）。',
+                  style: TextStyle(color: _gold, fontSize: 12),
+                )
+              else if (technique.hasPinEffect)
+                const Text(
+                  '成立するとフォール判定が発生します（キックアウトカード／'
+                  '返技エネルギー／HP消費で回避されなければ、そのまま勝敗が決まります）。',
+                  style: TextStyle(color: _gold, fontSize: 12),
+                )
+              else if (technique.hasSubmissionEffect)
+                const Text(
+                  '成立するとギブアップ判定が発生します（ロープブレイクカード／'
+                  '返技エネルギー／HP消費で回避されなければ、そのまま勝敗が決まります）。',
+                  style: TextStyle(color: _gold, fontSize: 12),
+                ),
               const SizedBox(height: 8),
               if (!check.canUse)
                 Text(

@@ -13,17 +13,23 @@ import 'technique_deck_models.dart';
 /// 次第で調整する）。
 
 /// 自動生成の枚数構成。既定値は暫定生成値（正式ルールではない）。
+///
+/// `ropeBreakCount`は元々0だったが、Phase 6のフォール・ギブアップ回避判定
+/// 実装後に行ったプレイテストで「ギブアップをキックアウトカードで防御カード
+/// を使って回避する手段が自動生成デッキに一枚も入らない」ことが判明したため、
+/// `normalKickOutCount`（キックアウト通常1枚）と対称になるよう1へ変更した
+/// （代わりに`normalCount`を7→6に削減し合計30枚を維持）。
 class TechniqueDeckGenerationConfig {
   const TechniqueDeckGenerationConfig({
     this.energyCount = 14,
-    this.normalCount = 7,
+    this.normalCount = 6,
     this.signatureCount = 3,
     this.finisherCount = 2,
     this.escapeCount = 1,
     this.reversalCount = 1,
     this.normalKickOutCount = 1,
     this.specialKickOutCount = 1,
-    this.ropeBreakCount = 0,
+    this.ropeBreakCount = 1,
     this.actionCount = 0,
     this.seed,
   });
