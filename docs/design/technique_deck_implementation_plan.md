@@ -1,10 +1,11 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 5（返技エネルギーと連続攻撃）完了時点**
-  （「Technique Match」画面で技の応酬＝ラリーが動作する。攻撃宣言→防御側が
-  返技するか任意に選択→返技成功なら攻守交代して連続攻撃、返技しなければ
-  技成立でラリー終了。フォール／ギブアップ・フィニッシャー決着・CPUは
-  Phase 6以降）
+- ステータス: **Phase 6（フォール・ギブアップの回避判定、CPU判断を除く）
+  完了時点**（「Technique Match」画面で技の応酬＝ラリーに加え、フォール／
+  ギブアップ効果を持つ技が成立した際の防御側の回避判定（キックアウト／
+  ロープブレイクカード・返技エネルギー・HP消費・諦め）が動作し、初めて
+  勝敗（`winnerIndex`）が決まるようになった。フィニッシャー決着・特殊
+  キックアウト・CPU判断はPhase 7・8以降）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 
@@ -416,19 +417,66 @@ Phase 4に続き、Phase 5でも技ごとの即時適用を採用した。技A�
 
 ## Phase 6：フォール・ギブアップ
 
-実装対象:
+**ステータス: 完了（CPU判断を除く）。**
 
-- フォール技成立
-- キックアウトカード
-- 返技エネルギーによるキックアウト
-- HPキックアウト（`kickOutThreshold` / `kickOutHpRate`）
-- ギブアップ技成立
-- ロープブレイク
-- 返技エネルギーによる耐久
-- HP耐久（`giveUpThreshold` / `giveUpHpCost`）
-- 決着処理
-- CPU判断（キックアウト／ロープブレイク／HP消費のどれを選ぶか）
-- ログ・演出
+ユーザーからの優先順位指定（1.フォール 2.キックアウト 3.ギブアップ
+4.ロープブレイク 5.フィニッシャー、フィニッシャーは後回し可）に沿って
+実装した。フィニッシャーはPhase 7で扱う。
+
+実装対象（すべて完了）:
+
+- フォール技成立（`resolveHit`が`hasPinEffect`を検出し`pendingEscape`へ移行）
+- キックアウトカード（`escapeWithDefenseCard`。通常キックアウトのみ、
+  特殊キックアウトは対象外＝仕様書9.1章どおり）
+- 返技エネルギーによるキックアウト（`escapeWithReversalEnergy`。Phase 5の
+  返技と同じ`reversalEnergyCost`フィールドを再利用）
+- HPキックアウト（`escapeWithHp`。`kickOutThreshold`以上の現在HPが必要、
+  `kickOutHpRate`＝現在HPに対する割合を消費。HP0到達時は疲労状態へ）
+- ギブアップ技成立（`resolveHit`が`hasSubmissionEffect`を検出）
+- ロープブレイク（`escapeWithDefenseCard`、ギブアップ版）
+- 返技エネルギーによる耐久（`escapeWithReversalEnergy`と共通実装）
+- HP耐久（`escapeWithHp`。`giveUpThreshold`以上の現在HPが必要、
+  `giveUpHpCost`＝**固定値**を消費。open questions 7番、正式決定）
+- 決着処理（`concede`。回避しない/できない場合に`winnerIndex`・`winReason`を
+  セットし、エンジン初の勝敗確定処理となった）
+- CPU判断は**未実装**（Phase 8。現状はプレイヤーが両者とも人間の想定）
+- ログ・演出（ログ文言のみ実装。専用の演出は今回スコープ外）
+
+今回のPhase 6スコープでは扱わなかったもの:
+
+- フィニッシャー技（`hasFinisherEffect == true`のカード）は`resolveHit`の
+  フォール／ギブアップ判定から明示的に除外した（Phase 7でフィニッシャー
+  専用の決着処理を実装するまでは通常の技として扱われる。フォール／
+  ギブアップ効果を同時に持っていても発火しない）
+- 特殊キックアウトカード（`KickOutCardCategory.finisherEscape`）は
+  Phase 6の対象外（Phase 7でフィニッシャー成立後の脱出手段として実装）
+- フォール／ギブアップ両方が成立する技（実運用では想定しないが、モデル上は
+  設定可能）は仕様書どおりフォールを優先する
+
+### Phase 5の潜在的な抜けを合わせて修正
+
+Phase 5時点で`goDown` / `rest` / `endTurn` / `setEnergy`にラリー中・
+決着判定待ちの間の実行を防ぐエンジン側ガードが無く、UIがボタンを隠して
+いることのみで防いでいた。Phase 6の`pendingEscape` / `winnerIndex`導入に
+合わせてエンジン側にもガードを追加した（該当状態では状態を変化させず
+no-opする）。
+
+### open questions 7番の決定（ギブアップ時のHP消費方式）
+
+「固定値／最大HP割合／現在HP割合」のうち**固定値**を採用した
+（`giveUpHpCost`）。フォールの`kickOutHpRate`（現在HPに対する割合）とは
+明確に異なる方式とすることで、キックアウトとギブアップの回避コストの
+性質を区別した（フィールド名の`Cost`＝固定額 / `Rate`＝割合、という
+命名慣習にも合わせた）。
+
+成果物: `TechniqueMatchEngine.canEscapeWithDefenseCard` /
+`escapeWithDefenseCard` / `canEscapeWithReversalEnergy` /
+`escapeWithReversalEnergy` / `canEscapeWithHp` / `escapeWithHp` /
+`concede`。`TechniqueMatchState`へ`pendingEscape` / `winnerIndex` /
+`winReason`を追加（`TechniqueEscapeKind` / `TechniquePendingEscape`）。
+`TechniqueMatchScreen`に回避判定ダイアログ・勝利バナーを追加。
+テスト: `test/technique_match_state_test.dart`に21件追加（計61件）、
+`test/technique_match_screen_test.dart`に2件追加（計11件）。
 
 **依存関係**: Phase 4・5（技の成立・連続攻撃の結果としてフォール／ギブアップが
 発生する）。

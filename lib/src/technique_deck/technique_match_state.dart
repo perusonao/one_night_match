@@ -4,7 +4,8 @@ import '../wrestler_editor/models.dart' show MoveAttribute, moveAttributeLabel;
 import 'technique_deck_deck.dart';
 import 'technique_deck_models.dart';
 
-/// Technique Deck Rules Phase 3〜5: 最小限の試合状態管理＋技の応酬（ラリー）。
+/// Technique Deck Rules Phase 3〜6: 最小限の試合状態管理＋技の応酬（ラリー）＋
+/// フォール・ギブアップによる決着。
 ///
 /// Phase 5で追加したのは「攻撃→返技判定→（成功なら）攻守交代→また攻撃」という
 /// ラリー構造。読み合いの核は返技側の選択にある: 返技エネルギーが足りていても
@@ -12,8 +13,18 @@ import 'technique_deck_models.dart';
 /// み消費される）。返技が成立すると、攻守が入れ替わりダメージ・HEAT・ダウンは
 /// 一切発生しない。返技しない（できない）場合は技が成立し、Phase 4と同じ即時
 /// 適用でダメージ・HEAT・ダウンが反映されてラリーが終了する。
-/// フォール・ギブアップ・フィニッシャーの決着処理・キックアウト・エスケープ・
-/// CPUは実装しない（Phase 6以降）。既存の `LevelMatchEngine`
+///
+/// Phase 6で追加したのは、技が成立した際に`hasPinEffect`
+/// （フォール）／`hasSubmissionEffect`（ギブアップ）が立っている場合の決着
+/// 判定。防御側は「キックアウト／ロープブレイクカードを使う」「返技エネルギー
+/// を払う」「HPを消費する」のいずれかで回避でき、いずれもできない（または
+/// 選ばない）場合はそこで試合が終わる（`TechniqueMatchState.winnerIndex`が
+/// セットされる）。優先度は仕様書どおりフォール＞ギブアップとし、
+/// `hasFinisherEffect`が立っている技はPhase 6の対象外（Phase 7でフィニッシャー
+/// 専用の決着処理を実装するまでは、通常のフォール／ギブアップ判定も発生しない
+/// ——通常の技として扱う）。
+/// キックアウト・エスケープカード・フィニッシャー決着・CPUは実装しない
+/// （Phase 7以降）。既存の `LevelMatchEngine`
 /// （classic/energy）とは完全に独立しており、一切の変更・依存を持たない。
 ///
 /// 【ダメージ適用方式について】open questions 1番。Phase 4に続きPhase 5でも
@@ -25,7 +36,9 @@ import 'technique_deck_models.dart';
 /// 入れ替わっても、公式な「ターン」の所有者（`activePlayerIndex`。ターン開始
 /// 処理・ドロー・ターン終了操作の主体）は変化しない。ラリーが終了すると
 /// （技が成立する／Chain Limit／使用可能技なし／プレイヤーが終了を選択）、
-/// 制御は常に`activePlayerIndex`のプレイヤーへ戻る。
+/// 制御は常に`activePlayerIndex`のプレイヤーへ戻る。フォール／ギブアップの
+/// 判定はラリー終了後（`pendingEscape`）に発生し、決着すれば`winnerIndex`が
+/// セットされて試合は終了する。
 
 /// ターンの進行段階。
 enum TechniqueMatchPhase { start, draw, energySet, end }
@@ -44,6 +57,33 @@ class TechniquePendingAttack {
 
   /// このラリーの何回目の攻撃か（1始まり）。
   final int chain;
+}
+
+/// 技成立後の決着判定の種類。
+enum TechniqueEscapeKind {
+  /// フォール（`hasPinEffect`）。キックアウトカード／返技エネルギー／
+  /// HP消費（`kickOutThreshold`・`kickOutHpRate`）で回避する。
+  fall,
+
+  /// ギブアップ（`hasSubmissionEffect`）。ロープブレイクカード／返技エネルギー
+  /// ／HP消費（`giveUpThreshold`・`giveUpHpCost`）で回避する。
+  giveUp,
+}
+
+/// フォール／ギブアップ効果を持つ技が成立し、防御側の回避判定を待っている
+/// 保留状態。
+class TechniquePendingEscape {
+  const TechniquePendingEscape({
+    required this.attackerIndex,
+    required this.defenderIndex,
+    required this.cardId,
+    required this.kind,
+  });
+
+  final int attackerIndex;
+  final int defenderIndex;
+  final String cardId;
+  final TechniqueEscapeKind kind;
 }
 
 /// 1人のプレイヤー（レスラー）の試合内状態。
@@ -139,6 +179,9 @@ class TechniqueMatchState {
     this.rallyAttackerIndex,
     this.rallyChain = 0,
     this.pendingAttack,
+    this.pendingEscape,
+    this.winnerIndex,
+    this.winReason,
     this.log = const [],
   });
 
@@ -161,6 +204,16 @@ class TechniqueMatchState {
   /// 攻撃は無い。
   final TechniquePendingAttack? pendingAttack;
 
+  /// フォール／ギブアップ効果を持つ技が成立し、防御側の回避判定を待っている
+  /// 状態（Phase 6）。nullなら待機中の決着判定は無い。
+  final TechniquePendingEscape? pendingEscape;
+
+  /// 試合の勝者（0=A, 1=B）。nullならまだ試合は継続中。
+  final int? winnerIndex;
+
+  /// 勝敗が決した理由（例:「フォール勝利」）。[winnerIndex] がnullの間はnull。
+  final String? winReason;
+
   final List<String> log;
 
   TechniqueMatchPlayerState get active =>
@@ -177,6 +230,9 @@ class TechniqueMatchState {
   /// 防御側の返技判定を待っているかどうか。
   bool get isAwaitingDefense => pendingAttack != null;
 
+  /// 試合が決着済みかどうか。
+  bool get isOver => winnerIndex != null;
+
   TechniqueMatchState copyWith({
     TechniqueMatchPlayerState? playerA,
     TechniqueMatchPlayerState? playerB,
@@ -186,6 +242,9 @@ class TechniqueMatchState {
     Object? rallyAttackerIndex = _unset,
     int? rallyChain,
     Object? pendingAttack = _unset,
+    Object? pendingEscape = _unset,
+    Object? winnerIndex = _unset,
+    Object? winReason = _unset,
     List<String>? log,
   }) => TechniqueMatchState(
     playerA: playerA ?? this.playerA,
@@ -200,6 +259,15 @@ class TechniqueMatchState {
     pendingAttack: identical(pendingAttack, _unset)
         ? this.pendingAttack
         : pendingAttack as TechniquePendingAttack?,
+    pendingEscape: identical(pendingEscape, _unset)
+        ? this.pendingEscape
+        : pendingEscape as TechniquePendingEscape?,
+    winnerIndex: identical(winnerIndex, _unset)
+        ? this.winnerIndex
+        : winnerIndex as int?,
+    winReason: identical(winReason, _unset)
+        ? this.winReason
+        : winReason as String?,
     log: log ?? this.log,
   );
 
@@ -336,8 +404,12 @@ class TechniqueMatchEngine {
   }
 
   /// アクティブプレイヤーをスタンドからダウンさせる（技を介さない暫定操作、
-  /// Phase 3ではダウン状態の動作確認のみが目的）。
+  /// Phase 3ではダウン状態の動作確認のみが目的）。ラリー中・決着判定待ち・
+  /// 試合終了後は何もしない（Phase 6でガードを追加）。
   static TechniqueMatchState goDown(TechniqueMatchState state) {
+    if (state.isOver || state.isRallyActive || state.pendingEscape != null) {
+      return state;
+    }
     if (state.active.posture != WrestlerPosture.stand) return state;
     final updated = state.active.copyWith(posture: WrestlerPosture.down);
     return state
@@ -348,8 +420,12 @@ class TechniqueMatchEngine {
   }
 
   /// 休息する（ダウン中のみ）。HPを回復力分回復し、ターンを終了する
-  /// （仕様書12章）。
+  /// （仕様書12章）。ラリー中・決着判定待ち・試合終了後は何もしない
+  /// （Phase 6でガードを追加）。
   static TechniqueMatchState rest(TechniqueMatchState state, {Random? random}) {
+    if (state.isOver || state.isRallyActive || state.pendingEscape != null) {
+      return state;
+    }
     if (state.active.posture != WrestlerPosture.down) return state;
     final recovered = (state.active.hp + state.active.recoveryPower).clamp(
       0,
@@ -370,8 +446,12 @@ class TechniqueMatchEngine {
 
   /// ターンを終了し、相手プレイヤーの開始→ドロー→エネルギーセットまでを
   /// 自動的に進める（メインアクションが無いPhase 3では、これらの段階に
-  /// プレイヤーの選択は発生しない）。
+  /// プレイヤーの選択は発生しない）。ラリー中・決着判定待ち・試合終了後は
+  /// 何もしない（Phase 6でガードを追加）。
   static TechniqueMatchState endTurn(TechniqueMatchState state, {Random? random}) {
+    if (state.isOver || state.isRallyActive || state.pendingEscape != null) {
+      return state;
+    }
     final rng = random ?? Random();
     final nextIndex = state.activePlayerIndex == 0 ? 1 : 0;
     final nextTurnNumber = nextIndex == 0 ? state.turnNumber + 1 : state.turnNumber;
@@ -419,6 +499,20 @@ class TechniqueMatchEngine {
     TechniqueDeckEntry entry,
     TechniqueDeckCardCatalog catalog,
   ) {
+    if (state.isOver) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: '試合は終了しています。',
+      );
+    }
+    if (state.isRallyActive || state.pendingEscape != null) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: 'ラリー中・決着判定待ちの間はエネルギーをセットできません。',
+      );
+    }
     final active = state.active;
     if (!active.hand.contains(entry)) {
       return TechniqueMoveResult(
@@ -698,6 +792,20 @@ class TechniqueMatchEngine {
     TechniqueDeckEntry entry,
     TechniqueDeckCardCatalog catalog,
   ) {
+    if (state.isOver) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: '試合は終了しています。',
+      );
+    }
+    if (state.pendingEscape != null) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: '決着の判定待ちです。',
+      );
+    }
     if (state.pendingAttack != null) {
       return TechniqueMoveResult(
         state: state,
@@ -833,6 +941,12 @@ class TechniqueMatchEngine {
   /// 防御側が返技しない（できない、または選ばない）。技が成立し、ダメージ・
   /// HEAT・ダウンが即時反映される。ラリーはここで終了し、制御は
   /// `activePlayerIndex`のプレイヤーへ戻る。
+  ///
+  /// Phase 6: 成立した技が`hasPinEffect`（フォール）／`hasSubmissionEffect`
+  /// （ギブアップ）を持つ場合（`hasFinisherEffect`を持つ技は対象外。
+  /// Phase 7でフィニッシャー専用の決着処理を実装するまでは通常の技として
+  /// 扱う）、防御側の回避判定待ち（[TechniqueMatchState.pendingEscape]）へ
+  /// 移行する。両方が立っている場合は仕様書どおりフォールを優先する。
   static TechniqueMatchState resolveHit(
     TechniqueMatchState state,
     TechniqueDeckCardCatalog catalog,
@@ -840,8 +954,9 @@ class TechniqueMatchEngine {
     final pending = state.pendingAttack;
     if (pending == null) return state;
     final attackerIndex = pending.attackerIndex;
+    final defenderIndex = 1 - attackerIndex;
     final attacker = state.playerAt(attackerIndex);
-    final defender = state.playerAt(1 - attackerIndex);
+    final defender = state.playerAt(defenderIndex);
     final card = catalog.findTechniqueById(pending.cardId)!;
 
     // 手札・エネルギーは宣言（declareAttack）時点で既に消費済みのため、
@@ -856,11 +971,33 @@ class TechniqueMatchEngine {
       'ラリー終了（Chain ${pending.chain}）',
     ];
 
-    return state.copyWithRallyEnded(
+    final rallyEnded = state.copyWithRallyEnded(
       playerA: attackerIndex == 0 ? resolved.attacker : resolved.defender,
       playerB: attackerIndex == 1 ? resolved.attacker : resolved.defender,
       log: log,
     );
+
+    if (!card.hasFinisherEffect &&
+        (card.hasPinEffect || card.hasSubmissionEffect)) {
+      final kind = card.hasPinEffect
+          ? TechniqueEscapeKind.fall
+          : TechniqueEscapeKind.giveUp;
+      final kindLabel = kind == TechniqueEscapeKind.fall ? 'フォール' : 'ギブアップ';
+      return rallyEnded.copyWith(
+        pendingEscape: TechniquePendingEscape(
+          attackerIndex: attackerIndex,
+          defenderIndex: defenderIndex,
+          cardId: card.id,
+          kind: kind,
+        ),
+        log: [
+          ...rallyEnded.log,
+          '${resolved.defender.wrestlerName}は$kindLabelの危機！（回避判定待ち）',
+        ],
+      );
+    }
+
+    return rallyEnded;
   }
 
   /// ラリーを（技を成立させずに）終了する。返技で攻守を得た側が、あえて
@@ -871,6 +1008,284 @@ class TechniqueMatchEngine {
     if (!state.isRallyActive || state.pendingAttack != null) return state;
     final log = [...state.log, 'ラリーを終了した（Chain ${state.rallyChain}）'];
     return state.copyWithRallyEnded(log: log);
+  }
+
+  // ============================================================
+  // Phase 6: フォール／ギブアップの回避判定
+  // ============================================================
+  //
+  // 技が成立し `pendingEscape` がセットされている間、防御側は次の3種のうち
+  // いずれかで回避できる（仕様書9・10章）。いずれも使わない（使えない）場合は
+  // [concede] で明示的に敗北を認める。
+
+  /// [pendingEscape] を、防御側の手札にあるキックアウト／ロープブレイクカード
+  /// [entry] で回避できるかどうかを判定する（UIのボタン有効/無効判定用）。
+  static ({bool canEscape, String? reason}) canEscapeWithDefenseCard(
+    TechniqueMatchState state,
+    TechniqueDeckEntry entry,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final pending = state.pendingEscape;
+    if (pending == null) {
+      return (canEscape: false, reason: '決着の判定待ちではありません。');
+    }
+    final defender = state.playerAt(pending.defenderIndex);
+    if (!defender.hand.contains(entry)) {
+      return (canEscape: false, reason: 'このカードは手札にありません。');
+    }
+    final card = catalog.findDefenseCardById(entry.cardId);
+    if (card == null) {
+      return (canEscape: false, reason: 'このカードは防御カードではありません。');
+    }
+    final requiredType = pending.kind == TechniqueEscapeKind.fall
+        ? TechniqueDeckCardType.kickOut
+        : TechniqueDeckCardType.ropeBreak;
+    if (card.type != requiredType) {
+      return (
+        canEscape: false,
+        reason: pending.kind == TechniqueEscapeKind.fall
+            ? 'キックアウトカードが必要です。'
+            : 'ロープブレイクカードが必要です。',
+      );
+    }
+    // フォールでは通常キックアウトのみ有効（特殊キックアウトはフィニッシャー
+    // 成立後専用、仕様書9.1章）。Phase 6ではフィニッシャー由来のフォールは
+    // 発生しない（`hasFinisherEffect`が立つ技はPhase 6の対象外）。
+    if (pending.kind == TechniqueEscapeKind.fall &&
+        card.kickOutCategory != KickOutCardCategory.normal) {
+      return (
+        canEscape: false,
+        reason: '通常のフォールには通常キックアウトカードのみ使用できます。',
+      );
+    }
+    return (canEscape: true, reason: null);
+  }
+
+  /// キックアウト／ロープブレイクカードを使って回避する（成立後は捨て札へ）。
+  /// 成功すればダメージ等の追加効果は発生せず、制御はそのまま
+  /// `activePlayerIndex`のプレイヤーへ戻る。
+  static TechniqueMoveResult escapeWithDefenseCard(
+    TechniqueMatchState state,
+    TechniqueDeckEntry entry,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final check = canEscapeWithDefenseCard(state, entry, catalog);
+    if (!check.canEscape) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: check.reason,
+      );
+    }
+    final pending = state.pendingEscape!;
+    final defender = state.playerAt(pending.defenderIndex);
+    final card = catalog.findDefenseCardById(entry.cardId)!;
+    final newHand = List<TechniqueDeckEntry>.from(defender.hand)..remove(entry);
+    final updatedDefender = defender.copyWith(
+      hand: newHand,
+      discardPile: [...defender.discardPile, entry],
+    );
+    final kindLabel = pending.kind == TechniqueEscapeKind.fall ? 'フォール' : 'ギブアップ';
+    final log = [
+      ...state.log,
+      '${updatedDefender.wrestlerName}が「${card.name}」を使用し、$kindLabelを回避した',
+    ];
+    return TechniqueMoveResult(
+      state: state.copyWith(
+        playerA: pending.defenderIndex == 0 ? updatedDefender : state.playerA,
+        playerB: pending.defenderIndex == 1 ? updatedDefender : state.playerB,
+        pendingEscape: null,
+        log: log,
+      ),
+      success: true,
+    );
+  }
+
+  /// [pendingEscape] を、成立した技の`reversalEnergyCost`（Phase 5の返技と
+  /// 同じフィールド）を消費して回避できるかどうかを判定する。
+  static ({bool canEscape, String? reason}) canEscapeWithReversalEnergy(
+    TechniqueMatchState state,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final pending = state.pendingEscape;
+    if (pending == null) {
+      return (canEscape: false, reason: '決着の判定待ちではありません。');
+    }
+    final defender = state.playerAt(pending.defenderIndex);
+    final card = catalog.findTechniqueById(pending.cardId);
+    if (card == null) {
+      return (canEscape: false, reason: 'カードが見つかりません。');
+    }
+    for (final costEntry in card.reversalEnergyCost.entries) {
+      if (costEntry.value <= 0) continue;
+      if (defender.availableEnergyFor(costEntry.key) < costEntry.value) {
+        return (
+          canEscape: false,
+          reason:
+              '${moveAttributeLabel(costEntry.key)}の返技エネルギーが不足しています'
+              '（必要${costEntry.value}、使用可能${defender.availableEnergyFor(costEntry.key)}）。',
+        );
+      }
+    }
+    return (canEscape: true, reason: null);
+  }
+
+  /// 返技エネルギーを消費して回避する。
+  static TechniqueMoveResult escapeWithReversalEnergy(
+    TechniqueMatchState state,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final check = canEscapeWithReversalEnergy(state, catalog);
+    if (!check.canEscape) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: check.reason,
+      );
+    }
+    final pending = state.pendingEscape!;
+    final defender = state.playerAt(pending.defenderIndex);
+    final card = catalog.findTechniqueById(pending.cardId)!;
+    final spent = Map<MoveAttribute, int>.from(defender.spentEnergy);
+    for (final costEntry in card.reversalEnergyCost.entries) {
+      if (costEntry.value <= 0) continue;
+      spent[costEntry.key] = (spent[costEntry.key] ?? 0) + costEntry.value;
+    }
+    final updatedDefender = defender.copyWith(spentEnergy: spent);
+    final kindLabel = pending.kind == TechniqueEscapeKind.fall ? 'フォール' : 'ギブアップ';
+    final log = [
+      ...state.log,
+      '${updatedDefender.wrestlerName}が返技エネルギーを消費し、$kindLabelを回避した',
+    ];
+    return TechniqueMoveResult(
+      state: state.copyWith(
+        playerA: pending.defenderIndex == 0 ? updatedDefender : state.playerA,
+        playerB: pending.defenderIndex == 1 ? updatedDefender : state.playerB,
+        pendingEscape: null,
+        log: log,
+      ),
+      success: true,
+    );
+  }
+
+  /// [pendingEscape] をHP消費で回避できるかどうかを判定する。フォールは
+  /// `kickOutThreshold`／`kickOutHpRate`（現在HPに対する割合）、ギブアップは
+  /// `giveUpThreshold`／`giveUpHpCost`（固定値、open questions 7番の決定）を
+  /// 使う。しきい値未満のHPではこの方法は使えない（仕様書9・10章）。
+  static ({bool canEscape, String? reason}) canEscapeWithHp(
+    TechniqueMatchState state,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final pending = state.pendingEscape;
+    if (pending == null) {
+      return (canEscape: false, reason: '決着の判定待ちではありません。');
+    }
+    final defender = state.playerAt(pending.defenderIndex);
+    final card = catalog.findTechniqueById(pending.cardId);
+    if (card == null) {
+      return (canEscape: false, reason: 'カードが見つかりません。');
+    }
+    if (pending.kind == TechniqueEscapeKind.fall) {
+      final threshold = card.kickOutThreshold;
+      final rate = card.kickOutHpRate;
+      if (threshold == null || rate == null) {
+        return (canEscape: false, reason: 'この技はHP消費によるキックアウトに対応していません。');
+      }
+      if (defender.hp < threshold) {
+        return (
+          canEscape: false,
+          reason: 'HPが$threshold未満のため、HP消費によるキックアウトはできません（現在HP${defender.hp}）。',
+        );
+      }
+      return (canEscape: true, reason: null);
+    }
+    final threshold = card.giveUpThreshold;
+    final cost = card.giveUpHpCost;
+    if (threshold == null || cost == null) {
+      return (canEscape: false, reason: 'この技はHP消費によるギブアップ回避に対応していません。');
+    }
+    if (defender.hp < threshold) {
+      return (
+        canEscape: false,
+        reason: 'HPが$threshold未満のため、HP消費によるギブアップ回避はできません（現在HP${defender.hp}）。',
+      );
+    }
+    return (canEscape: true, reason: null);
+  }
+
+  /// HPを消費して回避する。HP0に到達しても回避自体は成功し、疲労状態へ
+  /// 移行する（仕様書9章の暫定案を踏襲）。
+  static TechniqueMoveResult escapeWithHp(
+    TechniqueMatchState state,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final check = canEscapeWithHp(state, catalog);
+    if (!check.canEscape) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: check.reason,
+      );
+    }
+    final pending = state.pendingEscape!;
+    final defender = state.playerAt(pending.defenderIndex);
+    final card = catalog.findTechniqueById(pending.cardId)!;
+
+    final int hpCost;
+    final String kindLabel;
+    if (pending.kind == TechniqueEscapeKind.fall) {
+      hpCost = (defender.hp * card.kickOutHpRate!).round();
+      kindLabel = 'フォール';
+    } else {
+      hpCost = card.giveUpHpCost!;
+      kindLabel = 'ギブアップ';
+    }
+    final newHp = (defender.hp - hpCost).clamp(0, defender.maxHp);
+    final becameFatigued =
+        newHp <= 0 && defender.posture != WrestlerPosture.fatigued;
+    final updatedDefender = defender.copyWith(
+      hp: newHp,
+      posture: becameFatigued ? WrestlerPosture.fatigued : defender.posture,
+    );
+    final log = [
+      ...state.log,
+      '${updatedDefender.wrestlerName}がHPを$hpCost消費し、$kindLabelを回避した'
+          '（HP ${defender.hp} → $newHp）',
+      if (becameFatigued) '${updatedDefender.wrestlerName}のHPが0になり、疲労状態になった',
+    ];
+    return TechniqueMoveResult(
+      state: state.copyWith(
+        playerA: pending.defenderIndex == 0 ? updatedDefender : state.playerA,
+        playerB: pending.defenderIndex == 1 ? updatedDefender : state.playerB,
+        pendingEscape: null,
+        log: log,
+      ),
+      success: true,
+    );
+  }
+
+  /// 防御側がキックアウト／ギブアップ回避を行わず（できず）、諦めて敗北を
+  /// 認める。攻撃側の勝利として試合を終了させる（[TechniqueMatchState.winnerIndex]
+  /// をセットする、エンジン初の勝敗確定処理）。
+  static TechniqueMatchState concede(TechniqueMatchState state) {
+    final pending = state.pendingEscape;
+    if (pending == null) return state;
+    final attacker = state.playerAt(pending.attackerIndex);
+    final defender = state.playerAt(pending.defenderIndex);
+    final kindLabel = pending.kind == TechniqueEscapeKind.fall ? 'フォール' : 'ギブアップ';
+    final winReason = pending.kind == TechniqueEscapeKind.fall
+        ? 'フォール勝利'
+        : 'ギブアップ勝利';
+    final log = [
+      ...state.log,
+      '${defender.wrestlerName}が$kindLabelを認めた。${attacker.wrestlerName}の$winReason！',
+    ];
+    return state.copyWith(
+      pendingEscape: null,
+      winnerIndex: pending.attackerIndex,
+      winReason: winReason,
+      log: log,
+    );
   }
 }
 

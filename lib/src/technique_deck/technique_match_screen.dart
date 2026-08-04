@@ -10,13 +10,14 @@ import 'technique_deck_models.dart';
 import 'technique_deck_storage.dart';
 import 'technique_match_state.dart';
 
-/// Technique Deck Rules Phase 3〜5: 最初のプレイアブル画面「Technique Match」。
+/// Technique Deck Rules Phase 3〜6: 最初のプレイアブル画面「Technique Match」。
 ///
 /// スタンド／ダウン／疲労・休息・ターン進行・HP／HEAT表示・手札／山札・
 /// エネルギーセット・技の応酬（攻撃宣言→返技判定→成功なら攻守交代して連続
-/// 攻撃）を扱う。フォール／ギブアップ・フィニッシャーの決着処理・
-/// キックアウト・エスケープカード・CPUは実装しない（Phase 6以降）。
-/// エネルギーセットはラリー中は行えない（ラリー外の行動として扱う）。
+/// 攻撃）・フォール／ギブアップの回避判定（キックアウト／ロープブレイク
+/// カード・返技エネルギー・HP消費・諦めによる決着）を扱う。フィニッシャーの
+/// 決着処理・特殊キックアウト・エスケープカード・CPUは実装しない
+/// （Phase 7以降）。エネルギーセットはラリー中・決着判定待ちの間は行えない。
 /// 現行のclassic／energyモード・Deck Simulator・レスラーエディタ・
 /// Technique Deck Builderの挙動には一切影響しない。
 class TechniqueMatchScreen extends StatefulWidget {
@@ -151,12 +152,14 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     setState(() => matchState = result.state);
   }
 
-  void _resolveHit() {
+  Future<void> _resolveHit() async {
     final state = matchState;
     if (state == null) return;
-    setState(
-      () => matchState = TechniqueMatchEngine.resolveHit(state, catalog),
-    );
+    final resolved = TechniqueMatchEngine.resolveHit(state, catalog);
+    setState(() => matchState = resolved);
+    if (resolved.pendingEscape != null) {
+      await _showEscapeDecisionDialog();
+    }
   }
 
   void _endRally() {
@@ -217,8 +220,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         actions: [
           TextButton(
             onPressed: () {
-              _resolveHit();
               Navigator.pop(dialogContext);
+              _resolveHit();
             },
             child: const Text('返技しない'),
           ),
@@ -232,6 +235,161 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
             child: const Text('返技する'),
           ),
         ],
+      ),
+    );
+  }
+
+  void _escapeWithDefenseCard(TechniqueDeckEntry entry) {
+    final state = matchState;
+    if (state == null) return;
+    final result = TechniqueMatchEngine.escapeWithDefenseCard(
+      state,
+      entry,
+      catalog,
+    );
+    setState(() => matchState = result.state);
+  }
+
+  void _escapeWithEnergy() {
+    final state = matchState;
+    if (state == null) return;
+    final result = TechniqueMatchEngine.escapeWithReversalEnergy(
+      state,
+      catalog,
+    );
+    setState(() => matchState = result.state);
+  }
+
+  void _escapeWithHp() {
+    final state = matchState;
+    if (state == null) return;
+    final result = TechniqueMatchEngine.escapeWithHp(state, catalog);
+    setState(() => matchState = result.state);
+  }
+
+  void _concede() {
+    final state = matchState;
+    if (state == null) return;
+    setState(() => matchState = TechniqueMatchEngine.concede(state));
+  }
+
+  /// 技が成立しフォール／ギブアップの回避判定待ちの間、決定するまで閉じられ
+  /// ないダイアログを表示する。キックアウト／ロープブレイクカード・返技
+  /// エネルギー・HP消費のいずれかで回避するか、諦めて敗北を認めるかを選ぶ。
+  Future<void> _showEscapeDecisionDialog() async {
+    final state = matchState;
+    final pending = state?.pendingEscape;
+    if (state == null || pending == null) return;
+    final card = catalog.findTechniqueById(pending.cardId);
+    if (card == null) return;
+    final attacker = state.playerAt(pending.attackerIndex);
+    final defender = state.playerAt(pending.defenderIndex);
+    final kindLabel = pending.kind == TechniqueEscapeKind.fall ? 'フォール' : 'ギブアップ';
+
+    final defenseEntries = defender.hand
+        .where(
+          (entry) =>
+              TechniqueMatchEngine.canEscapeWithDefenseCard(
+                state,
+                entry,
+                catalog,
+              ).canEscape,
+        )
+        .toList();
+    final energyCheck = TechniqueMatchEngine.canEscapeWithReversalEnergy(
+      state,
+      catalog,
+    );
+    final hpCheck = TechniqueMatchEngine.canEscapeWithHp(state, catalog);
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('${defender.wrestlerName}の$kindLabel回避判定'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${attacker.wrestlerName}の「${card.name}」が成立！$kindLabelの危機。'),
+            const SizedBox(height: 4),
+            const Text(
+              'いずれの方法でも回避できない（または選ばない）場合は諦めるしかありません。',
+              style: TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+            const SizedBox(height: 12),
+            if (defenseEntries.isNotEmpty) ...[
+              Text(
+                pending.kind == TechniqueEscapeKind.fall
+                    ? 'キックアウトカードを使う:'
+                    : 'ロープブレイクカードを使う:',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (final entry in defenseEntries)
+                    OutlinedButton(
+                      onPressed: () {
+                        Navigator.pop(dialogContext);
+                        _escapeWithDefenseCard(entry);
+                      },
+                      child: Text(
+                        catalog.findDefenseCardById(entry.cardId)?.name ??
+                            entry.cardId,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+            FilledButton(
+              onPressed: energyCheck.canEscape
+                  ? () {
+                      Navigator.pop(dialogContext);
+                      _escapeWithEnergy();
+                    }
+                  : null,
+              child: const Text('返技エネルギーを消費して回避する'),
+            ),
+            if (!energyCheck.canEscape)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  energyCheck.reason ?? '',
+                  style: const TextStyle(fontSize: 11, color: _red),
+                ),
+              ),
+            const SizedBox(height: 8),
+            FilledButton(
+              onPressed: hpCheck.canEscape
+                  ? () {
+                      Navigator.pop(dialogContext);
+                      _escapeWithHp();
+                    }
+                  : null,
+              child: const Text('HPを消費して耐える'),
+            ),
+            if (!hpCheck.canEscape)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  hpCheck.reason ?? '',
+                  style: const TextStyle(fontSize: 11, color: _red),
+                ),
+              ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _concede();
+              },
+              child: const Text('諦める（敗北を認める）'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -383,12 +541,12 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '開発中：Technique Deck Rules Phase 5',
+            '開発中：Technique Deck Rules Phase 6',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           Text(
-            '技の応酬（返技・連続攻撃）が動作します'
-            '（フォール／ギブアップ・フィニッシャー決着・CPUは未実装）',
+            '技の応酬（返技・連続攻撃）・フォール／ギブアップの回避判定が'
+            '動作します（フィニッシャー決着・特殊キックアウト・CPUは未実装）',
             style: TextStyle(fontSize: 12),
           ),
         ],
@@ -465,6 +623,10 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     children: [
       _devBanner(),
       const SizedBox(height: 12),
+      if (state.winnerIndex != null) ...[
+        _winBanner(state),
+        const SizedBox(height: 12),
+      ],
       Card(
         color: _bg,
         child: Padding(
@@ -500,7 +662,17 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         color: _bg,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: state.isRallyActive
+          child: state.winnerIndex != null
+              ? const Text(
+                  '試合は終了しました。右上の更新アイコンから新しい試合を始められます。',
+                  style: TextStyle(color: Colors.white70),
+                )
+              : state.pendingEscape != null
+              ? const Text(
+                  '決着判定中です…',
+                  style: TextStyle(color: Colors.white70),
+                )
+              : state.isRallyActive
               ? Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -550,6 +722,28 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     ],
   );
 
+  Widget _winBanner(TechniqueMatchState state) {
+    final winner = state.playerAt(state.winnerIndex!);
+    return Card(
+      color: _gold.withValues(alpha: 0.18),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            const Icon(Icons.emoji_events, color: _gold),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${winner.wrestlerName}の勝利！（${state.winReason ?? "決着"}）',
+                style: const TextStyle(fontWeight: FontWeight.bold, color: _gold),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   String _phaseLabel(TechniqueMatchPhase phase) => switch (phase) {
     TechniqueMatchPhase.start => '開始',
     TechniqueMatchPhase.draw => 'ドロー',
@@ -574,9 +768,13 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final isPendingDefender =
         state.pendingAttack != null &&
         playerIndex == 1 - state.pendingAttack!.attackerIndex;
-    // 手札をタップして攻撃を宣言できるのは、返技判定待ちが無く、かつ
-    // 現在の実質的な攻撃側であるプレイヤーのみ。
-    final canDeclare = state.pendingAttack == null && isEffectiveAttacker;
+    // 手札をタップして攻撃を宣言できるのは、返技判定待ち・決着判定待ちが
+    // 無く、試合が終了しておらず、かつ現在の実質的な攻撃側であるプレイヤーのみ。
+    final canDeclare =
+        state.pendingAttack == null &&
+        state.pendingEscape == null &&
+        state.winnerIndex == null &&
+        isEffectiveAttacker;
     final isPlayerA = playerIndex == 0;
     final hpRatio = player.maxHp == 0 ? 0.0 : player.hp / player.maxHp;
     final note = isPlayerA ? deckSourceNoteA : deckSourceNoteB;
