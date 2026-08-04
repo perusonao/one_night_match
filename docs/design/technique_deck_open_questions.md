@@ -1,6 +1,6 @@
 # Technique Deck Rules — 未決定事項一覧
 
-- ステータス: Phase 0時点の一覧（実装が進むにつれて追記・解決していく）
+- ステータス: Phase 1（データモデル基盤）完了時点の一覧（実装が進むにつれて追記・解決していく）
 - 関連: [`technique_deck_rules.md`](../rules/technique_deck_rules.md) /
   [`technique_deck_implementation_plan.md`](technique_deck_implementation_plan.md)
 
@@ -144,9 +144,45 @@
   部分であり、要検討。
 - 解決が必要なPhase: Phase 4
 
+## 19. allowedWrestlerIdsが空リストの場合の解釈
+
+- 関連章: 仕様書 6章・7章、実装: `TechniqueDeckTechniqueCard.allowedWrestlerIds`
+- 候補: (a) 空リスト＝全レスラー使用可能 / (b) 空リスト＝どのレスラーも
+  使用不可（要明示指定）
+- 参考: Phase 1では値の保持のみ行い、意味の確定はデッキ検証を実装する
+  Phase 2まで先送りした（Phase 1実装指示で明示的に指定された方針）。
+- 解決が必要なPhase: Phase 2
+
+## 20. TechniqueTargetStateに自分側の状態条件を追加する必要性
+
+- 関連章: 仕様書 11.3章、実装: `TechniqueTargetState`
+- 候補: 未提示。現在の `TechniqueTargetState` は相手の状態（`any`/`stand`/
+  `down`）のみを表す。「自分がダウン中のみ使用可能」等、自分側の状態を
+  条件とする技が今後必要になった場合、別enum・別フィールドの追加が要る。
+- 参考: Phase 0仕様書に明記がないため、Phase 1では先行実装しなかった。
+- 解決が必要なPhase: Phase 3（スタンド／ダウン実装時に要否を再検討）
+
 ---
 
 ## 解決済み
 
-（Phase 0時点では該当項目なし。決定した項目はここへ移動し、仕様書側にも
-反映すること。）
+### A. 新ルールモード識別子は独立enumとする（`MatchResourceMode`は拡張しない）
+
+- 関連: 実装計画Phase 1
+- 決定内容: `TechniqueDeckResourceMode { disabled, techniqueDeck }` を新設し、
+  既存 `MatchResourceMode`（classic/energy）へは追加しない。
+- 理由: `MatchResourceMode` は `LevelMatchEngine`/`LevelMatchState` 内の
+  数十箇所の網羅的switchで使われており、3値目を追加すると既存分岐にも
+  影響するリスクがある。独立させることで既存コードへの影響をゼロに保てる。
+- 解決日: Phase 1実装時。実戦エンジンへ接続する段階（Phase 4以降）で
+  正式統合するかは改めて判断する。
+
+### B. 技カード種別は独立enumとする（`MoveCategory`は拡張しない、案B採用）
+
+- 関連: 実装計画Phase 1、仕様書3章
+- 決定内容: `TechniqueCardCategory { normal, signature, finisher }` を
+  新設し、既存 `MoveCategory`（normal/counter/finisher/basic）へは追加しない。
+- 理由: 既存 `MoveCategory` はclassic/energyモードの実装・テスト資産と
+  強く結び付いており、Technique Deck専用の分類を混在させると将来的な
+  分岐の混乱を招くため（案A: 拡張／案B: 新設 のうち案Bを採用）。
+- 解決日: Phase 1実装時。
