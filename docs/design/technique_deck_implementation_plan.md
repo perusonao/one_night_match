@@ -1,6 +1,6 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 0（本書自体が成果物） 完了時点**
+- ステータス: **Phase 1（データモデル基盤） 完了時点**
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 
@@ -52,30 +52,68 @@ Phase 10として本計画の末尾にのみ記載し、Phase 1〜9では一切�
 
 ## Phase 1：データモデル基盤
 
-実装対象:
+**ステータス: 完了**
 
-- 新ルールモード識別子（`ResourceMode.techniqueDeck` 案、または既存
-  `MatchResourceMode` に3値目を追加するか、別enumとして独立させるかを設計判断する）
-- 技カード種別（`normal` / `signature` / `finisher`。既存 `MoveCategory` を
-  拡張するか新設するかは仕様書3章の案A/案Bから選定する）
-- 攻撃エネルギーコスト（`attackEnergyCost`）
-- 返技エネルギーコスト（`reversalEnergyCost`）
-- 使用可能レスラー（`allowedWrestlers`）
-- 対象状態（`targetState`）
-- ダウン効果（`causesDown`）
-- フォール・ギブアップ・フィニッシャー用パラメータ
-  （`kickOutThreshold` / `kickOutHpRate` / `giveUpThreshold` / `giveUpHpCost` /
-  `finisherRequirements` / `cannotEscape`）
-- JSON入出力
-- 後方互換（既存 `WrestlerDefinition` / `MoveDefinition` のJSON往復に新フィールドが
-  混入しても既存モードの読み込みが壊れないこと）
-- エディタ項目（wrestler_editor側での表示・編集。ただし新モード向けUIは
-  Phase 9まで最小限でよい）
+成果物: `lib/src/technique_deck/technique_deck_models.dart` /
+`lib/src/technique_deck/technique_deck_validation.dart` /
+`test/technique_deck_models_test.dart`（34テスト）。
 
-この段階では実戦ロジック（`LevelMatchEngine` 相当のTechnique Deck版）へ接続しなくてよい。
-データモデルの単体テストのみで完結させる。
+実際に採用した型・モデル名:
+
+- `TechniqueDeckResourceMode { disabled, techniqueDeck }` — 新ルールモード識別子。
+  既存 `MatchResourceMode`（classic/energy）へは追加せず、独立enumとした
+  （理由は `technique_deck_models.dart` 内の設計メモ、および本書「設計判断の記録」
+  を参照）。既定値 `disabled`。
+- `TechniqueCardCategory { normal, signature, finisher }` — 技カード種別。
+  既存 `MoveCategory` は拡張せず、独立enumとした（仕様書3章 案B採用）。
+- `TechniqueDeckCardType { technique, energy, escape, reversal, kickOut,
+  ropeBreak, action }` — カード種別。
+- `WrestlerPosture { stand, down, fatigued }`（`displayLabel` 拡張つき）、
+  `TechniqueTargetState { any, stand, down }`。
+- `TechniqueDeckTechniqueCard` — 技カード本体（`attackEnergyCost` /
+  `reversalEnergyCost` / `targetState` / `causesDown` / `kickOutThreshold` /
+  `kickOutHpRate` / `giveUpThreshold` / `giveUpHpCost` / `finisherRequirements` /
+  `sourceMoveId` 等、仕様書7章に準拠したフィールドを保持）。
+- `TechniqueEnergyCard` — 技エネルギーカード（ready/used状態は保持しない、
+  定義のみ）。
+- `TechniqueDefenseCard` — Escape/Reversal/KickOut/RopeBreak共通の最小モデル。
+- `TechniqueDeckWrestlerProfile` — レスラー別 `recoveryPower` 等（既存
+  `WrestlerDefinition` は変更せず分離）。
+- `TechniqueDeckCardCatalog` — ID検索・種別検索・重複ID検出を持つ定義コンテナ
+  （デッキ生成・30枚検証はPhase 2）。
+- `TechniqueDeckValidationIssue` / `validateTechniqueCard` などの軽量検証
+  （デッキ枚数・同名制限はPhase 2の対象）。
+
+JSON入出力は全モデルで「未知の値は安全な既定値へフォールバックし、例外を
+投げない」方針を徹底した（`enumOrDefault` / `_intOrNull` / `_doubleOrNull` /
+`_boolOrDefault` / `_stringOrDefault` 等の専用ヘルパーで実現。既存の
+`enumValue()` は未知値で例外を投げる仕様のため転用していない）。
+
+wrestler_editor側のエディタUIは今回追加していない（案A採用: JSON I/O・
+バリデーション・テストのみ）。理由は本書「設計判断の記録」を参照。
+
+この段階では実戦ロジック（`LevelMatchEngine` 相当のTechnique Deck版）へは
+一切接続していない。`classic`/`energy` モードのコード・テストへの変更もゼロ
+（`lib/src/level_match/`・`lib/src/wrestler_editor/` は無変更）。
 
 **依存関係**: Phase 0（仕様確定）。
+
+### 設計判断の記録（Phase 1）
+
+- **モード識別子を独立enumにした理由**: `MatchResourceMode` は
+  `LevelMatchEngine`/`LevelMatchState` 内の数十箇所の網羅的 `switch` で
+  使われており、値を追加すると既存の classic/energy 分岐にも新caseへの
+  対応を要求するリスクがある。Technique Deck専用の `TechniqueDeckResourceMode`
+  として独立させることで既存コードへの影響をゼロに保った。実戦エンジンへ
+  接続する段階（Phase 4以降）で `MatchResourceMode` へ正式統合するかは
+  改めて判断する。
+- **技カード種別を独立enumにした理由**: 案Bを採用。既存 `MoveCategory` は
+  classic/energyモードの実装・テスト資産と強く結び付いており、ここへ
+  Technique Deck専用の分類を混在させると将来的な分岐の混乱を招くため。
+- **エディタUIを追加しなかった理由**: 案Aを採用。Phase 1はJSON I/O・
+  バリデーション・テストの土台整備が目的であり、UIから編集可能にする前に
+  デッキ生成・検証（Phase 2）でモデルの使われ方が固まってから着手する方が
+  手戻りが少ないと判断した。
 
 ---
 
