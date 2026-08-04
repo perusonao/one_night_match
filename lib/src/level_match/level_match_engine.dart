@@ -1821,11 +1821,31 @@ class LevelMatchEngine {
     return _finisherCardsShort(actor, fin) > 0;
   }
 
+  /// Ver.0.9: energyモードでの「これまでにセットした属性別枚数」。
+  /// classicの actor.setAttributeCounts は actor.setCards を数えるが、
+  /// energyモードではカードは setCards ではなく energyZone へ入るため、
+  /// setAttributeCounts は常に0を返してしまう（CPUのAIが使うと、
+  /// 「まだ何も揃っていない」と永久に誤認し続けるバグの原因になる）。
+  /// Ready/Used を問わず、場に投入済みの総量を返す。
+  Map<MoveAttribute, int> _investedEnergyCounts(PlayerLevelMatchState actor) {
+    final map = <MoveAttribute, int>{};
+    for (final e in actor.energyZone) {
+      map[e.attribute] = (map[e.attribute] ?? 0) + 1;
+    }
+    return map;
+  }
+
   /// フィニッシャー成立まであと何枚必要か（不足合計）。
+  /// energyモードでは実際のエネルギーコスト（energyModeRequiredCards）と
+  /// 投入済みエネルギー総量を基準にする（classicのrequiredCards/
+  /// setAttributeCountsのままだと常に不足扱いのまま解消しない）。
   int _finisherCardsShort(PlayerLevelMatchState actor, MoveDefinition fin) {
-    final counts = actor.setAttributeCounts;
+    final isEnergy = state.resourceMode == MatchResourceMode.energy;
+    final counts =
+        isEnergy ? _investedEnergyCounts(actor) : actor.setAttributeCounts;
+    final cost = isEnergy ? fin.energyModeRequiredCards : fin.requiredCards;
     var short = 0;
-    for (final entry in fin.requiredCards.entries) {
+    for (final entry in cost.entries) {
       final lack = entry.value - (counts[entry.key] ?? 0);
       if (lack > 0) short += lack;
     }
@@ -1845,6 +1865,50 @@ class LevelMatchEngine {
 
   void _autoSetCard(PlayerLevelMatchState actor) {
     final id = actor.playerId;
+    final isEnergy = state.resourceMode == MatchResourceMode.energy;
+    // Ver.0.8.0 energyモード：技カードはセットできない（使用専用）ため、
+    // セット候補はエネルギーカード（isEnergyOnly）に限る。
+    final setable = isEnergy
+        ? actor.hand.where((c) => c.isEnergyOnly).toList()
+        : actor.hand;
+
+    if (isEnergy) {
+      // Ver.0.9: energyモードのCPUは実際のエネルギーコストを見て、
+      // 最も不足している属性へ優先投入する（1属性に偏らせない）。
+      final fin = _finisherToBank(actor);
+      final Map<MoveAttribute, int> shortfalls;
+      if (fin != null &&
+          _shouldPursueFinisher(actor) &&
+          _needsMoreForFinisher(actor, fin)) {
+        final invested = _investedEnergyCounts(actor);
+        shortfalls = {
+          for (final entry in fin.energyModeRequiredCards.entries)
+            if (entry.value > (invested[entry.key] ?? 0))
+              entry.key: entry.value - (invested[entry.key] ?? 0),
+        };
+      } else {
+        shortfalls = _desiredAttributeShortfalls(actor);
+      }
+      MoveAttribute? bestAttribute;
+      var bestShortfall = 0;
+      for (final entry in shortfalls.entries) {
+        if (setable.any((c) => c.attribute == entry.key) &&
+            entry.value > bestShortfall) {
+          bestShortfall = entry.value;
+          bestAttribute = entry.key;
+        }
+      }
+      final card = bestAttribute != null
+          ? setable.firstWhere((c) => c.attribute == bestAttribute)
+          : (setable.isEmpty ? null : setable.first);
+      if (card == null) {
+        skipSetCard(id);
+      } else {
+        setTechniqueCard(id, card.instanceId);
+      }
+      return;
+    }
+
     // Ver.0.7.3: フィニッシャー始動中は、不足している必須属性を最優先でバンクする。
     final fin = _finisherToBank(actor);
     final Set<MoveAttribute> desired;
@@ -1859,11 +1923,6 @@ class LevelMatchEngine {
     } else {
       desired = _desiredAttributes(actor);
     }
-    // Ver.0.8.0 energyモード：技カードはセットできない（使用専用）ため、
-    // セット候補はエネルギーカード（isEnergyOnly）に限る。
-    final setable = state.resourceMode == MatchResourceMode.energy
-        ? actor.hand.where((c) => c.isEnergyOnly).toList()
-        : actor.hand;
     final candidates = setable
         .where((card) => desired.contains(card.attribute))
         .toList();
@@ -1935,10 +1994,14 @@ class LevelMatchEngine {
     // Ver.0.7.3: フィニッシャー始動中は、必須属性カードを消費する固有技を温存し、
     // 切り札のバンクを優先する（切り札そのものは揃えば使う）。揃うまでは
     // 別属性の固有技か単体技（コスト消費なし）で攻める。
+    // Ver.0.9: これはclassic（カードを恒久的に消費する方式）専用の最適化。
+    // energyモードは使ってもエネルギーが恒久的に減るわけではなく自ターンで
+    // 全回復するため、温存の必要が無い（温存すると逆にただ手数が減るだけ）。
     final fin = _finisherToBank(actor);
     // 切り札まで残り1枚のときだけ、必須属性を消費する固有技を温存する
     // （序中盤は通常攻防で試合を作り、停滞＝“単体技しか出せない”期間を短くする）。
-    if (fin != null &&
+    if (state.resourceMode != MatchResourceMode.energy &&
+        fin != null &&
         _shouldPursueFinisher(actor) &&
         _finisherCardsShort(actor, fin) == 1) {
       final needed = <MoveAttribute>{
@@ -2193,6 +2256,9 @@ class LevelMatchEngine {
   }
 
   Set<MoveAttribute> _desiredAttributes(PlayerLevelMatchState actor) {
+    if (state.resourceMode == MatchResourceMode.energy) {
+      return _desiredAttributeShortfalls(actor).keys.toSet();
+    }
     final desired = <MoveAttribute>{};
     for (final level in actor.wrestler.levels) {
       if (level.level != actor.currentLevel &&
@@ -2213,6 +2279,40 @@ class LevelMatchEngine {
       }
     }
     return desired;
+  }
+
+  /// Ver.0.9: energyモード専用。属性ごとの「まだ足りていない枚数」を返す
+  /// （必要枚数は同一属性を使う技の中で最大値を採用＝その属性を賄うのに
+  /// 最低限必要な投資量）。_autoSetCard から、最も不足している属性へ
+  /// 優先してエネルギーを投入するために使う。
+  Map<MoveAttribute, int> _desiredAttributeShortfalls(
+    PlayerLevelMatchState actor,
+  ) {
+    final need = <MoveAttribute, int>{};
+    for (final level in actor.wrestler.levels) {
+      if (level.level != actor.currentLevel &&
+          !actor.unlockedLevels.contains(level.level)) {
+        continue;
+      }
+      for (final id in [
+        ...level.moveIds,
+        if (level.finisherId != null) level.finisherId!,
+      ]) {
+        final move = moves[id];
+        if (move == null) continue;
+        for (final entry in move.energyModeRequiredCards.entries) {
+          if (entry.value <= 0) continue;
+          need[entry.key] = max(need[entry.key] ?? 0, entry.value);
+        }
+      }
+    }
+    final invested = _investedEnergyCounts(actor);
+    final shortfalls = <MoveAttribute, int>{};
+    for (final entry in need.entries) {
+      final lack = entry.value - (invested[entry.key] ?? 0);
+      if (lack > 0) shortfalls[entry.key] = lack;
+    }
+    return shortfalls;
   }
 
   int _bestDamage(PlayerLevelMatchState actor, int levelNumber) {
