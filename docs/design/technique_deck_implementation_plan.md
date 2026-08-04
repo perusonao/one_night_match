@@ -1,8 +1,8 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 2（新デッキ生成・デッキ検証）前半 完了時点**
-  （手動デッキの検証・JSON入出力まで。デッキプレビューUI・自動生成・
-  構成不足時の理由表示は未着手）
+- ステータス: **Phase 2（新デッキ生成・デッキ検証）完了時点**
+  （手動デッキの検証・JSON入出力・デッキプレビューUI・構成不足理由表示・
+  暫定自動生成のすべてを実装。実戦エンジンへの接続はPhase 4以降）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 
@@ -121,19 +121,21 @@ wrestler_editor側のエディタUIは今回追加していない（案A採用: 
 
 ## Phase 2：新デッキ生成・デッキ検証
 
-**ステータス: 前半（手動デッキの検証・JSON入出力）完了。後半（デッキプレビュー
-UI・自動生成・構成不足時の理由表示）は未着手。**
+**ステータス: 完了。**
 
-推奨実装順（今回の判断）:
+推奨実装順（前半・後半とも完了）:
 
 1. ✅ 手動定義したデッキの検証
 2. ✅ JSON保存・読込
-3. ⬜ デッキプレビュー
-4. ⬜ 最低限の自動生成
-5. ⬜ 構成不足時の理由表示
+3. ✅ デッキプレビュー
+4. ✅ 最低限の自動生成
+5. ✅ 構成不足時の理由表示
 
 最初から強い自動生成AIを作るのではなく、まず「正しいデッキとは何か」を
-検証ロジックとして固める方を優先した。3〜5は後続の別作業とする。
+検証ロジックとして固め（前半）、その上に確認用UI・診断表示・暫定自動生成を
+積む（後半）方針を通した。
+
+### 前半（手動デッキの検証・JSON入出力）
 
 成果物: `lib/src/technique_deck/technique_deck_deck.dart`（`TechniqueDeckEntry`
 / `TechniqueDeckDefinition` / `TechniqueDeckBuilder` / `TechniqueDeckValidator`
@@ -141,8 +143,6 @@ UI・自動生成・構成不足時の理由表示）は未着手。**
 `test/technique_deck_deck_test.dart`（24テスト）。加えて Phase 1モデルへ
 `KickOutCardCategory { normal, finisherEscape }` と `TechniqueDefenseCard.
 kickOutCategory` を追加（仕様書9.1章）。
-
-実装対象（今回完了分）:
 
 - `TechniqueDeckEntry`（デッキ内の1枚の物理カード、`instanceId`/`cardId`/
   `cardType`）と `TechniqueDeckDefinition`（`id`/`wrestlerId`/`name`/
@@ -158,16 +158,82 @@ kickOutCategory` を追加（仕様書9.1章）。
   使用可能レベルの技が皆無警告）
 - `TechniqueDeckBuildResult`（`isValid`/`errors`/`warnings`）
 
+### 後半（デッキプレビューUI・診断表示・JSON入出力UI・暫定自動生成）
+
+成果物:
+
+- `lib/src/technique_deck/technique_deck_builder_screen.dart` — 管理画面
+  「Technique Deck Builder（テクニックデッキ）」。既存
+  `DebugScreen`（`lib/src/screens.dart`）からDeck Simulatorボタンの直後に
+  導線を追加した。「開発中：Technique Deck Rules Phase 2 / このデッキは
+  まだ試合では使用されません」バナーを常時表示する。
+- `lib/src/technique_deck/technique_deck_generator.dart` —
+  `TechniqueDeckAutoGenerator` / `TechniqueDeckGenerationConfig` /
+  `TechniqueDeckGenerationResult`。検証を通過する30枚（暫定枚数）を機械的に
+  組み立てる。**強いデッキ構築AIではない。**
+- `lib/src/technique_deck/technique_deck_storage.dart` — `TechniqueDeckSaveRecord`
+  / `TechniqueDeckRepository` / `LocalTechniqueDeckRepository`。
+  `SharedPreferences` キー `technique_deck_definitions_v1`
+  （既存の `one_night_match_wrestler_editor_v04` 等とは独立した名前空間）。
+- `lib/src/technique_deck/technique_deck_defaults.dart` — 画面を実際に
+  動かすための**暫定サンプルカタログ**（`buildProvisionalTechniqueDeckCatalog()`）。
+  既存レスラー `wrestler_akari` / `wrestler_jack`
+  （`lib/src/wrestler_editor/defaults.dart`）のIDを
+  `allowedWrestlerIds` の例として借用しているが、**ゲームバランス調整済みの
+  正式カードデータではない**。正式データ投入は別タスク（未着手、下記参照）。
+- `lib/src/technique_deck/technique_deck_file_io.dart`
+  （+ `_web.dart` / `_stub.dart`） — `report_export.dart`
+  （`lib/src/level_match/`）と同じ条件付きexportパターンで、Web環境のみ
+  ファイル選択→読込に対応（それ以外はテキスト貼り付けにフォールバック）。
+- テスト: `test/technique_deck_generator_test.dart`（13テスト）、
+  `test/technique_deck_storage_test.dart`（11テスト）、
+  `test/technique_deck_builder_screen_test.dart`（10ウィジェットテスト）。
+
+実装対象（今回完了分、詳細は作業報告を参照）:
+
+- デッキプレビューUI（カード種別ごとの折りたたみ表示、増減ボタン、即時再検証）
+- 検証結果・構成不足理由の表示（エラーは赤・保存不可、警告は黄・保存可、
+  各issueへ修正提案の文章を付与）
+- 属性バランス表示（6属性 × エネルギー枚数/必要コスト/該当技数、参考値）
+- 使用可能・使用不能カードの一覧（使用不能理由つき）
+- JSON入出力（コピー・ファイル出力・貼り付け読込・ファイル読込・現在デッキへ
+  上書き・別名複製）
+- 暫定自動生成（`TechniqueDeckAutoGenerator`。フィニッシャー/固有技/通常技/
+  エネルギー/防御カードの順に候補を割り当て、不足時は通常技→エネルギーで
+  端数調整。生成後は必ず`TechniqueDeckValidator`を通し、エラーが残る場合は
+  `success: false`とする）
+- デッキ保存（`schemaVersion`必須、`generatorVersion`は自動生成時のみ記録）
+- UI安全策（未保存変更表示、レスラー変更/自動生成前/JSON読込前の確認、
+  同名上限・フィニッシャー3枚到達時の追加ボタン無効化、使用不能カードの
+  追加不可、30枚超過時の赤表示）
+
 今回完了していない（次回以降）:
 
-- 技エネルギーカード・技カード・防御カードそのものの「生成」（Phase 0仕様書の
-  想定コンテンツの実データ投入。今回はテスト用の最小フィクスチャのみ）
-- デッキプレビューUI
-- 自動生成デッキ（最低限のものも含め未着手）
-- 構成不足時の理由表示UI
+- 技エネルギーカード・技カード・防御カードそのものの正式な「生成」
+  （実データ投入。今回は動作確認用の暫定サンプルカタログのみ）
+- カード編集UI（カタログ自体の追加・編集は対象外。今回はデッキ編集のみ）
+- Technique Deck Rules専用の実戦エンジンへの接続（Phase 4以降）
 
-現行デッキビルダー（`LevelMatchDeckBuilder`）は変更していない。新モード専用の
-`TechniqueDeckBuilder`として新規作成した。
+現行デッキビルダー（`LevelMatchDeckBuilder`）・Deck Simulator・レスラー
+エディタは変更していない。新モード専用の画面・クラスとして新規作成した。
+
+### JSON例（`TechniqueDeckDefinition.toJson()`）
+
+```json
+{
+  "id": "wrestler_akari_20260804",
+  "wrestlerId": "wrestler_akari",
+  "name": "火神アカリ 暫定デッキ",
+  "entries": [
+    { "instanceId": "td_normal_strike_1_#1", "cardId": "td_normal_strike_1", "cardType": "technique" },
+    { "instanceId": "td_energy_strike_#1", "cardId": "td_energy_strike", "cardType": "energy" }
+  ]
+}
+```
+
+保存領域（`TechniqueDeckSaveRecord.toJson()`）はこれに `deckId` / `createdAt`
+/ `updatedAt` / `schemaVersion` / `generatorVersion`（自動生成時のみ） /
+`notes` を加えたもの。
 
 **依存関係**: Phase 1（カードデータモデル）。
 

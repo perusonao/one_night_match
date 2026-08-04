@@ -1,6 +1,6 @@
 # Technique Deck Rules — 未決定事項一覧
 
-- ステータス: Phase 1（データモデル基盤）完了時点の一覧（実装が進むにつれて追記・解決していく）
+- ステータス: Phase 2（新デッキ生成・デッキ検証）完了時点の一覧（実装が進むにつれて追記・解決していく）
 - 関連: [`technique_deck_rules.md`](../rules/technique_deck_rules.md) /
   [`technique_deck_implementation_plan.md`](technique_deck_implementation_plan.md)
 
@@ -149,6 +149,25 @@
   条件とする技が今後必要になった場合、別enum・別フィールドの追加が要る。
 - 参考: Phase 0仕様書に明記がないため、Phase 1では先行実装しなかった。
 - 解決が必要なPhase: Phase 3（スタンド／ダウン実装時に要否を再検討）
+
+## 21. 自動生成の枚数構成比率
+
+- 関連章: 実装計画Phase 2後半、実装: `TechniqueDeckGenerationConfig`
+- 候補: 現在の既定値（技エネルギー14／通常技7／固有技3／フィニッシャー2／
+  エスケープ1／リバーサル1／通常キックアウト1／特殊キックアウト1、合計30）は
+  **正式ルールではなく暫定生成値**。プレイテストの結果次第で調整する
+  （コンストラクタ引数で変更可能な設計にしてある）。
+- 解決が必要なPhase: Phase 8（CPU・シミュレーション、実プレイでのバランス検証後）
+
+## 22. Technique Deck専用カードの正式データ投入
+
+- 関連章: 仕様書全般、実装: `technique_deck_defaults.dart`
+- 候補: 未提示。Technique Deck Builder画面を実際に試せるようにするため、
+  Phase 2後半で暫定サンプルカタログ（`wrestler_akari`/`wrestler_jack`の
+  IDを借用した約19枚）を用意したが、これは**ゲームバランス調整済みの正式
+  カードデータではない**。正式なカード内容（全レスラー分の通常技・固有技・
+  フィニッシャー・防御カード）をいつ・どの単位で投入するかは未検討。
+- 解決が必要なPhase: 未定（Phase 2後続または実戦接続前のPhase 4直前）
 
 ---
 

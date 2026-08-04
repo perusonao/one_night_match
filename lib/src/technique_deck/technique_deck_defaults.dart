@@ -1,0 +1,257 @@
+import '../wrestler_editor/models.dart' show MoveAttribute, moveAttributeLabel;
+import 'technique_deck_models.dart';
+
+/// Technique Deck Builder画面を実際に試せるようにするための暫定サンプル
+/// カタログ。
+///
+/// Technique Deck Rules専用の正式カードデータはまだ投入されていない
+/// （docs/design/technique_deck_implementation_plan.md Phase 2「未完了」
+/// 参照）。ここでは既存レスラー（`wrestler_akari` / `wrestler_jack`、
+/// `lib/src/wrestler_editor/defaults.dart`）のIDを [TechniqueDeckTechniqueCard.
+/// allowedWrestlerIds] の例として借用しつつ、画面の動作確認・自動生成の
+/// テストに使える最小限のカード一式を用意する。**ゲームバランス調整済みの
+/// 正式データではない。**
+TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
+  const akari = 'wrestler_akari';
+  const jack = 'wrestler_jack';
+
+  final techniques = <TechniqueDeckTechniqueCard>[
+    const TechniqueDeckTechniqueCard(
+      id: 'td_normal_strike_1',
+      name: 'ジャブ連打',
+      category: TechniqueCardCategory.normal,
+      attribute: MoveAttribute.strike,
+      attackEnergyCost: {MoveAttribute.strike: 1},
+      reversalEnergyCost: {MoveAttribute.strike: 1},
+      power: 8,
+      heatDelta: 5,
+      description: '基本の打撃技。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_normal_throw_1',
+      name: 'バックドロップ',
+      category: TechniqueCardCategory.normal,
+      attribute: MoveAttribute.throwMove,
+      attackEnergyCost: {MoveAttribute.throwMove: 2},
+      reversalEnergyCost: {MoveAttribute.throwMove: 1},
+      power: 12,
+      heatDelta: 6,
+      targetState: TechniqueTargetState.stand,
+      causesDown: true,
+      hasPinEffect: true,
+      kickOutThreshold: 20,
+      kickOutHpRate: 0.5,
+      description: '相手をダウンさせるスタンド限定の投げ技。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_normal_submission_1',
+      name: 'アームロック',
+      category: TechniqueCardCategory.normal,
+      attribute: MoveAttribute.submission,
+      attackEnergyCost: {MoveAttribute.submission: 2},
+      reversalEnergyCost: {MoveAttribute.submission: 1},
+      power: 6,
+      heatDelta: 4,
+      targetState: TechniqueTargetState.down,
+      hasSubmissionEffect: true,
+      giveUpThreshold: 20,
+      giveUpHpCost: 10,
+      description: 'ダウン中の相手に極める関節技。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_normal_rough_1',
+      name: '闘魂ビンタ',
+      category: TechniqueCardCategory.normal,
+      attribute: MoveAttribute.rough,
+      attackEnergyCost: {MoveAttribute.rough: 1},
+      reversalEnergyCost: {MoveAttribute.rough: 1},
+      power: 7,
+      heatDelta: 6,
+      description: '荒々しい反則気味の一撃。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_normal_aerial_1',
+      name: 'ミサイルキック',
+      category: TechniqueCardCategory.normal,
+      attribute: MoveAttribute.aerial,
+      attackEnergyCost: {MoveAttribute.aerial: 2},
+      reversalEnergyCost: {MoveAttribute.aerial: 1},
+      power: 10,
+      heatDelta: 5,
+      description: '飛び技の基本形。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_normal_counter_1',
+      name: 'カウンタースラップ',
+      category: TechniqueCardCategory.normal,
+      attribute: MoveAttribute.counter,
+      attackEnergyCost: {MoveAttribute.counter: 1},
+      reversalEnergyCost: {MoveAttribute.counter: 1},
+      power: 6,
+      heatDelta: 4,
+      description: '返し技を軸にした技。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_sig_akari_1',
+      name: '紅蓮ドロップキック',
+      category: TechniqueCardCategory.signature,
+      attribute: MoveAttribute.aerial,
+      allowedWrestlerIds: [akari],
+      minimumLevel: 2,
+      attackEnergyCost: {MoveAttribute.aerial: 2},
+      reversalEnergyCost: {MoveAttribute.aerial: 2},
+      power: 16,
+      heatDelta: 8,
+      description: '火神アカリの固有技（サンプル）。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_sig_akari_2',
+      name: '灼熱チョップ',
+      category: TechniqueCardCategory.signature,
+      attribute: MoveAttribute.strike,
+      allowedWrestlerIds: [akari],
+      minimumLevel: 2,
+      attackEnergyCost: {MoveAttribute.strike: 2},
+      reversalEnergyCost: {MoveAttribute.strike: 2},
+      power: 14,
+      heatDelta: 7,
+      description: '火神アカリの固有技（サンプル）。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_sig_jack_1',
+      name: '黒蝶スラム',
+      category: TechniqueCardCategory.signature,
+      attribute: MoveAttribute.throwMove,
+      allowedWrestlerIds: [jack],
+      minimumLevel: 2,
+      attackEnergyCost: {MoveAttribute.throwMove: 2},
+      reversalEnergyCost: {MoveAttribute.throwMove: 2},
+      power: 15,
+      heatDelta: 7,
+      description: '黒蝶ジャックの固有技（サンプル）。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_sig_jack_2',
+      name: '暗夜クラッチ',
+      category: TechniqueCardCategory.signature,
+      attribute: MoveAttribute.submission,
+      allowedWrestlerIds: [jack],
+      minimumLevel: 2,
+      attackEnergyCost: {MoveAttribute.submission: 2},
+      reversalEnergyCost: {MoveAttribute.submission: 2},
+      power: 13,
+      heatDelta: 7,
+      description: '黒蝶ジャックの固有技（サンプル）。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_fin_akari_1',
+      name: '紅蓮フェニックスドライバー',
+      category: TechniqueCardCategory.finisher,
+      attribute: MoveAttribute.throwMove,
+      allowedWrestlerIds: [akari],
+      minimumLevel: 3,
+      attackEnergyCost: {MoveAttribute.throwMove: 3},
+      reversalEnergyCost: {MoveAttribute.throwMove: 4},
+      power: 30,
+      heatDelta: 10,
+      hasFinisherEffect: true,
+      finisherRequirements: {'minimumHeat': 40},
+      description: '火神アカリのフィニッシャー（サンプル）。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_fin_akari_2',
+      name: '灼熱インフェルノロック',
+      category: TechniqueCardCategory.finisher,
+      attribute: MoveAttribute.submission,
+      allowedWrestlerIds: [akari],
+      minimumLevel: 3,
+      attackEnergyCost: {MoveAttribute.submission: 3},
+      reversalEnergyCost: {MoveAttribute.submission: 4},
+      power: 26,
+      heatDelta: 10,
+      hasFinisherEffect: true,
+      finisherRequirements: {'minimumHeat': 40},
+      description: '火神アカリのフィニッシャー（サンプル）。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_fin_jack_1',
+      name: '黒蝶ジャックナイフ',
+      category: TechniqueCardCategory.finisher,
+      attribute: MoveAttribute.strike,
+      allowedWrestlerIds: [jack],
+      minimumLevel: 3,
+      attackEnergyCost: {MoveAttribute.strike: 3},
+      reversalEnergyCost: {MoveAttribute.strike: 4},
+      power: 28,
+      heatDelta: 10,
+      hasFinisherEffect: true,
+      finisherRequirements: {'minimumHeat': 40},
+      description: '黒蝶ジャックのフィニッシャー（サンプル）。',
+    ),
+    const TechniqueDeckTechniqueCard(
+      id: 'td_fin_jack_2',
+      name: '暗夜デスバレー',
+      category: TechniqueCardCategory.finisher,
+      attribute: MoveAttribute.throwMove,
+      allowedWrestlerIds: [jack],
+      minimumLevel: 3,
+      attackEnergyCost: {MoveAttribute.throwMove: 3},
+      reversalEnergyCost: {MoveAttribute.throwMove: 4},
+      power: 27,
+      heatDelta: 10,
+      hasFinisherEffect: true,
+      finisherRequirements: {'minimumHeat': 40},
+      description: '黒蝶ジャックのフィニッシャー（サンプル）。',
+    ),
+  ];
+
+  final energies = [
+    for (final attribute in MoveAttribute.values)
+      TechniqueEnergyCard(
+        id: 'td_energy_${attribute.name}',
+        attribute: attribute,
+        name: '${moveAttributeLabel(attribute)}エネルギー',
+      ),
+  ];
+
+  const defenseCards = [
+    TechniqueDefenseCard(
+      id: 'td_escape_1',
+      name: 'エスケープ',
+      type: TechniqueDeckCardType.escape,
+      description: 'フィニッシャー発動をキャンセルする（サンプル）。',
+    ),
+    TechniqueDefenseCard(
+      id: 'td_reversal_1',
+      name: 'リバーサル',
+      type: TechniqueDeckCardType.reversal,
+      description: 'フィニッシャー発動をキャンセルする（サンプル、効果未実装）。',
+    ),
+    TechniqueDefenseCard(
+      id: 'td_kickout_normal_1',
+      name: 'キックアウト',
+      type: TechniqueDeckCardType.kickOut,
+      kickOutCategory: KickOutCardCategory.normal,
+      description: '通常のフォールから脱出する（サンプル）。',
+    ),
+    TechniqueDefenseCard(
+      id: 'td_kickout_special_1',
+      name: 'ラストスタンド',
+      type: TechniqueDeckCardType.kickOut,
+      kickOutCategory: KickOutCardCategory.finisherEscape,
+      description: '成功したフィニッシャーから脱出する（サンプル）。',
+    ),
+    TechniqueDefenseCard(
+      id: 'td_ropebreak_1',
+      name: 'ロープブレイク',
+      type: TechniqueDeckCardType.ropeBreak,
+      description: 'ギブアップから脱出する（サンプル）。',
+    ),
+  ];
+
+  return TechniqueDeckCardCatalog(
+    techniques: techniques,
+    energies: energies,
+    defenseCards: defenseCards,
+  );
+}
