@@ -47,6 +47,35 @@ enum LevelFinishReason {
 /// energy  = MTG風エネルギーゾーン制（毎自ターン開始時にアンタップ／全回復）。
 enum MatchResourceMode { classic, energy }
 
+/// Ver.0.9.2: energyモードの技カード（単体技）を使用後どう扱うか。
+/// 固有技が試合1回制限になったことで、通常技（技カード）が使い切りのまま
+/// 捨て札されると終盤に「使用可能な技なし」が連発する問題への対策候補。
+/// 既定はdiscardAfterUse（従来通り）。他は検証用オプション。
+enum BasicCardPolicy {
+  /// 従来通り：使用後は捨て札（再利用不可）。
+  discardAfterUse,
+  /// 案A：使用後は山札の底へ戻し、再ドローされれば再度使える。
+  recycleToDeck,
+  /// 案B：手札に残したまま、エネルギーが払える限り何度でも使い回せる。
+  unlimitedReuse,
+  /// 案C：discardAfterUse と同じ使い切りだが、エネルギーコストを1軽減する
+  /// （既定コスト1の通常技は実質無料になる）。
+  reducedCost,
+}
+
+/// Ver.0.9.2: 終盤に余ったエネルギーの処理方法（「使用可能な技なし」で
+/// 手詰まりになった時のみ発動する追加アクション）。既定はnone（何もしない、
+/// 従来通りスキップ）。
+enum EnergySurplusPolicy {
+  none,
+  /// 案A：余剰エネルギー2枚→HEAT+3に変換。
+  heatConversion,
+  /// 案B：余剰エネルギー2枚(属性X)→エネルギー1枚(属性Y、Ready)に変換。
+  attributeConversion,
+  /// 案C：「ラッシュ」— エネルギー2枚を消費し小ダメージを与える汎用アクション。
+  burstAction,
+}
+
 /// Ver.0.8.0 energyモード：場に置かれた技エネルギーカード（Ready/Used）。
 class EnergyCardState {
   EnergyCardState({
@@ -356,6 +385,18 @@ class LevelMatchState {
   // 引き分け率改善を確認）を経てVer.0.9.1で正式採用、既定trueに変更。
   bool signatureOncePerMatch = true;
 
+  // Ver.0.9.2: 1080試合比較シミュレーションの結果、通常技（技カード）が
+  // 使い切りのまま枯渇し終盤「使用可能な技なし」が連発する問題
+  // （4.07回/試合）を最も改善したunlimitedReuse（使用可能な技なし
+  // 0.22回/試合、引き分け0%を維持）を正式採用、既定に変更。
+  // recycleToDeckは山札が実質尽きなくなり200ターン膠着が復活したため不採用、
+  // reducedCostは根本原因（カード供給の枯渇）を解決せず不採用。
+  BasicCardPolicy basicCardPolicy = BasicCardPolicy.unlimitedReuse;
+  // energySurplusPolicyは複数案を比較したがbasicCardPolicy採用後は
+  // 「使用可能な技なし」自体が稀（0.22回/試合）になり効果差が測定できな
+  // かったため、既定はnone（不採用）のまま。オプションとしては温存。
+  EnergySurplusPolicy energySurplusPolicy = EnergySurplusPolicy.none;
+
   bool get isTimed => matchTimeSeconds > 0;
   int? get turnLimit => isTimed ? matchTimeSeconds ~/ secondsPerTurn : null;
 
@@ -421,6 +462,8 @@ class LevelMatchState {
       'remainingSeconds': remainingSeconds,
       'resourceMode': resourceMode.name,
       'signatureOncePerMatch': signatureOncePerMatch,
+      'basicCardPolicy': basicCardPolicy.name,
+      'energySurplusPolicy': energySurplusPolicy.name,
       'lastMove': lastMove,
       'pinAttempts': pinAttemptCount,
       'kickOuts': kickOutTotalCount,
@@ -456,6 +499,9 @@ class LevelMatchEngine {
     // 既定trueとする。classicモードは大量の旧テスト資産のバランス前提
     // （固有技の反復使用込み）を保持するため既定falseのまま据え置く。
     bool? signatureOncePerMatch,
+    // Ver.0.9.2: 正式採用（詳細はLevelMatchState側のコメント参照）。
+    BasicCardPolicy basicCardPolicy = BasicCardPolicy.unlimitedReuse,
+    EnergySurplusPolicy energySurplusPolicy = EnergySurplusPolicy.none,
   }) {
     final rng = random ?? Random();
     final effectiveSignatureOncePerMatch =
@@ -501,7 +547,9 @@ class LevelMatchEngine {
     )
       ..matchTimeSeconds = matchTimeSeconds
       ..resourceMode = resourceMode
-      ..signatureOncePerMatch = effectiveSignatureOncePerMatch;
+      ..signatureOncePerMatch = effectiveSignatureOncePerMatch
+      ..basicCardPolicy = basicCardPolicy
+      ..energySurplusPolicy = energySurplusPolicy;
     final engine = LevelMatchEngine(state: state, moves: moves, random: rng);
     for (final side in [player, cpu]) {
       engine._log(side, 'deckGenerated', '${side.wrestler.name}のデッキを自動生成', {
@@ -811,7 +859,7 @@ class LevelMatchEngine {
       // Ver.0.8.0 energyモード：単体技も固有技も等しくエネルギーを消費する
       // （「無料通常技」の廃止）。検証・観戦用に消費前後の内訳を記録する。
       readyBefore = Map.of(actor.readyEnergyCounts);
-      energySpent = _consumeEnergy(actor, move.energyModeRequiredCards);
+      energySpent = _consumeEnergy(actor, _effectiveEnergyCost(move));
       readyAfter = Map.of(actor.readyEnergyCounts);
     } else if (!isBasic) {
       consumed = _consumeCost(actor, move);
@@ -838,7 +886,7 @@ class LevelMatchEngine {
         'power': move.power,
         'consumedSetCards': consumed.map((e) => e.toJson()).toList(),
         if (state.resourceMode == MatchResourceMode.energy) ...{
-          'energyCost': _attributeJson(move.energyModeRequiredCards),
+          'energyCost': _attributeJson(_effectiveEnergyCost(move)),
           'energySpent': energySpent,
           'readyEnergyBefore': _attributeJson(readyBefore!),
           'readyEnergyAfter': _attributeJson(readyAfter!),
@@ -1059,19 +1107,19 @@ class LevelMatchEngine {
     final rawMove = moves[card.techniqueMoveId];
     if (rawMove == null) throw StateError('技が見つかりません');
     final move = rawMove.resolvedForEnergyMode;
-    if (!canAffordEnergy(defender, move.energyModeRequiredCards)) {
+    final cost = _effectiveEnergyCost(move);
+    if (!canAffordEnergy(defender, cost)) {
       throw StateError('エネルギーが不足しているため対応できません');
     }
-    defender.hand.removeAt(index);
-    defender.discardPile.add(card);
+    _disposeUsedTechniqueCard(defender, card, index);
     defender.previousMoveId = move.id;
     final readyBefore = Map.of(defender.readyEnergyCounts);
-    final spent = _consumeEnergy(defender, move.energyModeRequiredCards);
+    final spent = _consumeEnergy(defender, cost);
     final readyAfter = Map.of(defender.readyEnergyCounts);
     _log(defender, 'respondEnergyConsumed', '${move.name}（技カード）で対応（迎撃）', {
       'moveId': move.id,
       'isCounterMove': move.isCounterMove,
-      'energyCost': _attributeJson(move.energyModeRequiredCards),
+      'energyCost': _attributeJson(cost),
       'energySpent': spent,
       'readyEnergyBefore': _attributeJson(readyBefore),
       'readyEnergyAfter': _attributeJson(readyAfter),
@@ -1405,13 +1453,48 @@ class LevelMatchEngine {
     final rawMove = moves[card.techniqueMoveId];
     if (rawMove == null) throw StateError('技が見つかりません');
     final move = rawMove.resolvedForEnergyMode;
-    if (!canAffordEnergy(actor, move.energyModeRequiredCards)) {
+    if (!canAffordEnergy(actor, _effectiveEnergyCost(move))) {
       throw StateError('エネルギーが不足しているため使用できません');
     }
-    // 宣言＝コミット：手札から捨て札へ（エネルギー消費は_declareAttack内で行う）。
-    actor.hand.removeAt(cardIndex);
-    actor.discardPile.add(card);
+    // 宣言＝コミット：手札の扱いはbasicCardPolicyに従う
+    // （エネルギー消費は_declareAttack内で行う）。
+    _disposeUsedTechniqueCard(actor, card, cardIndex);
     _declareAttack(actor, move, isBasic: true);
+  }
+
+  /// Ver.0.9.2: basicCardPolicyに従って使用済み技カードの手札からの扱いを
+  /// 決める。discardAfterUse/reducedCost=捨て札、recycleToDeck=山札の底へ
+  /// 戻す（再ドロー可）、unlimitedReuse=手札に残す（何度でも使い回せる）。
+  void _disposeUsedTechniqueCard(
+    PlayerLevelMatchState actor,
+    TechniqueResourceCard card,
+    int cardIndex,
+  ) {
+    switch (state.basicCardPolicy) {
+      case BasicCardPolicy.unlimitedReuse:
+        return;
+      case BasicCardPolicy.recycleToDeck:
+        actor.hand.removeAt(cardIndex);
+        actor.deck.insert(0, card);
+        return;
+      case BasicCardPolicy.discardAfterUse:
+      case BasicCardPolicy.reducedCost:
+        actor.hand.removeAt(cardIndex);
+        actor.discardPile.add(card);
+        return;
+    }
+  }
+
+  /// Ver.0.9.2: basicCardPolicy==reducedCostの場合のみ、通常技（basic）の
+  /// エネルギーコストを属性ごとに1軽減する（下限0）。固有技・フィニッシャーは
+  /// 対象外。
+  Map<MoveAttribute, int> _effectiveEnergyCost(MoveDefinition move) {
+    final raw = move.energyModeRequiredCards;
+    if (move.category != MoveCategory.basic ||
+        state.basicCardPolicy != BasicCardPolicy.reducedCost) {
+      return raw;
+    }
+    return {for (final e in raw.entries) e.key: max(0, e.value - 1)};
   }
 
   bool canAffordEnergy(PlayerLevelMatchState actor, Map<MoveAttribute, int> cost) {
@@ -1764,7 +1847,10 @@ class LevelMatchEngine {
             .where((c) =>
                 !c.isEnergyOnly &&
                 moves[c.techniqueMoveId] != null &&
-                canAffordEnergy(defender, moves[c.techniqueMoveId]!.energyModeRequiredCards))
+                canAffordEnergy(
+                  defender,
+                  _effectiveEnergyCost(moves[c.techniqueMoveId]!),
+                ))
             .toList()
         : const <TechniqueResourceCard>[];
     final basicCards = isEnergyMode
@@ -2081,10 +2167,17 @@ class LevelMatchEngine {
       final techniqueOptions = <(MoveDefinition, TechniqueResourceCard)>[
         for (final card in actor.hand)
           if (!card.isEnergyOnly && moves[card.techniqueMoveId] != null)
-            if (canAffordEnergy(actor, moves[card.techniqueMoveId]!.energyModeRequiredCards))
+            if (canAffordEnergy(
+              actor,
+              _effectiveEnergyCost(moves[card.techniqueMoveId]!),
+            ))
               (moves[card.techniqueMoveId]!, card),
       ];
       if (candidates.isEmpty && techniqueOptions.isEmpty) {
+        _logNoUsableMove(actor);
+        // Ver.0.9.2 改修④: 余剰エネルギーの活用（energySurplusPolicy）。
+        // policyがnoneなら何もせずスキップに落ちる（従来通り）。
+        if (_tryEnergySurplusAction(actor)) return;
         _log(actor, 'cpuDecision', '使用可能な技なし', {'candidates': <String>[]});
         skipMove(id);
         return;
@@ -2163,6 +2256,138 @@ class LevelMatchEngine {
     }
   }
 
+  /// Ver.0.9.2 改修①: 「使用可能な技なし」になった原因を分類してログへ残す。
+  /// 手札不足／使用回数制限／レベル条件／エネルギー条件／その他のどれで
+  /// 固有技候補が0件になったか、技カードが手札に残っているかを可視化する。
+  void _logNoUsableMove(PlayerLevelMatchState actor) {
+    final reasonCounts = <String, int>{};
+    for (final move in _currentMoves(
+      actor,
+    ).where((move) => !move.isCounterMove || move.canUseAsNormalMove)) {
+      final avail = evaluateMove(actor, move);
+      if (avail.usable) continue;
+      for (final reason in avail.reasons) {
+        final String key;
+        if (reason.contains('使用回数制限') || reason.contains('1試合1回')) {
+          key = '使用回数制限（固有技/フィニッシャー使用済み）';
+        } else if (reason.contains('エネルギー') && reason.contains('不足')) {
+          key = 'エネルギー不足';
+        } else if (reason.contains('Levelカード')) {
+          key = 'レベル条件外';
+        } else if (reason.contains('カード') && reason.contains('不足')) {
+          key = '手札カード不足';
+        } else {
+          key = 'その他: $reason';
+        }
+        reasonCounts[key] = (reasonCounts[key] ?? 0) + 1;
+      }
+    }
+    final handTechniqueCards = actor.hand
+        .where((c) => !c.isEnergyOnly)
+        .length;
+    _log(actor, 'noUsableMove', '${actor.wrestler.name}は使用可能な技がない', {
+      'signatureFinisherReasonCounts': reasonCounts,
+      'handTechniqueCards': handTechniqueCards,
+      'handEnergyOnlyCards': actor.hand.length - handTechniqueCards,
+      'deckRemaining': actor.deck.length,
+      'discardedTechniqueCards': actor.discardPile
+          .where((c) => !c.isEnergyOnly)
+          .length,
+      'readyEnergyTotal': actor.readyEnergyCounts.values.fold(
+        0,
+        (a, b) => a + b,
+      ),
+    });
+  }
+
+  /// Ver.0.9.2 改修④: 「使用可能な技なし」局面で余剰エネルギーを活かす
+  /// 追加アクション。energySurplusPolicy==noneなら何もしない（false）。
+  bool _tryEnergySurplusAction(PlayerLevelMatchState actor) {
+    if (state.energySurplusPolicy == EnergySurplusPolicy.none) return false;
+    final ready = actor.readyEnergyCounts;
+    MapEntry<MoveAttribute, int>? mostReady;
+    for (final entry in ready.entries) {
+      if (entry.value < 2) continue;
+      if (mostReady == null || entry.value > mostReady.value) mostReady = entry;
+    }
+    if (mostReady == null) return false;
+    switch (state.energySurplusPolicy) {
+      case EnergySurplusPolicy.none:
+        return false;
+      case EnergySurplusPolicy.heatConversion:
+        _convertEnergyToHeat(actor, mostReady.key);
+        return true;
+      case EnergySurplusPolicy.attributeConversion:
+        MoveAttribute? target;
+        for (final a in MoveAttribute.values) {
+          if (a == mostReady.key) continue;
+          if (target == null || (ready[a] ?? 0) < (ready[target] ?? 0)) {
+            target = a;
+          }
+        }
+        if (target == null) return false;
+        _convertEnergyAttribute(actor, mostReady.key, target);
+        return true;
+      case EnergySurplusPolicy.burstAction:
+        _useBurstAction(actor, mostReady.key);
+        return true;
+    }
+  }
+
+  void _convertEnergyToHeat(PlayerLevelMatchState actor, MoveAttribute attribute) {
+    final spent = _consumeEnergy(actor, {attribute: 2});
+    state.sharedHeat += 3;
+    _log(actor, 'energySurplusConverted', '${actor.wrestler.name}が余剰エネルギーをHEATに変換', {
+      'attribute': attribute.name,
+      'energySpent': spent,
+      'heatGain': 3,
+      'heatAfter': state.sharedHeat,
+    });
+    endTurn();
+  }
+
+  void _convertEnergyAttribute(
+    PlayerLevelMatchState actor,
+    MoveAttribute from,
+    MoveAttribute to,
+  ) {
+    final spent = _consumeEnergy(actor, {from: 2});
+    actor.energyZone.add(
+      EnergyCardState(
+        instanceId:
+            '${actor.playerId}-conv-${state.turnNumber}-${actor.energyZone.length}',
+        attribute: to,
+        name: moveAttributeLabel(to),
+        ready: true,
+      ),
+    );
+    _log(actor, 'energySurplusConverted', '${actor.wrestler.name}が余剰エネルギーを属性変換', {
+      'from': from.name,
+      'to': to.name,
+      'energySpent': spent,
+    });
+    endTurn();
+  }
+
+  void _useBurstAction(PlayerLevelMatchState actor, MoveAttribute attribute) {
+    final opponent = _opponentOf(actor);
+    final spent = _consumeEnergy(actor, {attribute: 2});
+    final resistance = opponent.levelCard.resistances[attribute] ?? 0;
+    final damage = _roundDamage(10 - resistance);
+    final hpBefore = opponent.currentHp;
+    opponent.currentHp = max(0, opponent.currentHp - damage);
+    state.sharedHeat += 4;
+    _log(actor, 'burstAction', '${actor.wrestler.name}のラッシュ！', {
+      'attribute': attribute.name,
+      'energySpent': spent,
+      'damage': damage,
+      'targetHpBefore': hpBefore,
+      'targetHpAfter': opponent.currentHp,
+      'heatAfter': state.sharedHeat,
+    });
+    endTurn();
+  }
+
   /// CPU の技評価値（§13）。actor 視点で相手を評価する。
   int _scoreMoveFor(PlayerLevelMatchState cpu, MoveDefinition move) {
     final opponent = _opponentOf(cpu);
@@ -2207,11 +2432,15 @@ class LevelMatchEngine {
     // 高威力・高コスト技だけが常に選ばれる偏りを緩和し、軽い技にも
     // 「コストの割に見合う」独自の勝ち筋を持たせる。
     if (state.resourceMode == MatchResourceMode.energy) {
-      final totalCost = move.energyModeRequiredCards.values.fold(
+      final totalCost = _effectiveEnergyCost(move).values.fold(
         0,
         (a, b) => a + b,
       );
-      if (totalCost > 0) {
+      if (totalCost == 0) {
+        // Ver.0.9.2: basicCardPolicy==reducedCostで無料化された通常技は
+        // ノーリスクで出せるため積極的に評価する。
+        score += 6;
+      } else if (totalCost > 0) {
         score += (damage / totalCost).round();
         // 保有エネルギーが乏しく大技を撃つ余裕が無いときほど、
         // 「今すぐ確実に出せる」軽量技を優遇する。
@@ -2231,7 +2460,32 @@ class LevelMatchEngine {
       if (opponent.kickOutCards == 0) score += 8;
       if (state.sharedHeat >= 40) score += 4;
     }
+    // Ver.0.9.2 改修③: エンドゲームモード。決着技→フォール／ギブアップ→
+    // 高火力技→通常技の優先順位で「勝ち切る」思考へ切り替える。
+    if (_isEndGameMode(cpu)) {
+      if (move.category == MoveCategory.finisher) {
+        score += 40;
+      } else if (move.offersPin || move.offersSubmission) {
+        score += 25;
+      } else {
+        score += damage ~/ 2;
+      }
+    }
     return score;
+  }
+
+  /// Ver.0.9.2 改修③: HP・HEAT・残り時間のいずれかが閾値を超えたら
+  /// エンドゲームモードとみなす（cpu視点、相手のHPも見る）。
+  bool _isEndGameMode(PlayerLevelMatchState cpu) {
+    final opponent = _opponentOf(cpu);
+    if (cpu.currentHp <= 50 || opponent.currentHp <= 50) return true;
+    if (state.sharedHeat >= 50) return true;
+    final limit = state.turnLimit;
+    if (limit != null && limit > 0) {
+      final remaining = limit - state.turnNumber;
+      if (remaining <= limit * 0.25) return true;
+    }
+    return false;
   }
 
   void _autoPinDecision(PlayerLevelMatchState attacker) {
