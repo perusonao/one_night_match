@@ -10,13 +10,15 @@ import 'technique_deck_models.dart';
 import 'technique_deck_storage.dart';
 import 'technique_match_state.dart';
 
-/// Technique Deck Rules Phase 3〜4: 最初のプレイアブル画面「Technique Match」。
+/// Technique Deck Rules Phase 3〜5: 最初のプレイアブル画面「Technique Match」。
 ///
 /// スタンド／ダウン／疲労・休息・ターン進行・HP／HEAT表示・手札／山札・
-/// エネルギーセット・単発技の使用（ダメージ・HEAT・ダウンの即時反映）を扱う。
-/// 返技・連続攻撃・フォール／ギブアップ・フィニッシャーの決着処理・CPUは
-/// 実装しない（Phase 5以降）。現行のclassic／energyモード・Deck Simulator・
-/// レスラーエディタ・Technique Deck Builderの挙動には一切影響しない。
+/// エネルギーセット・技の応酬（攻撃宣言→返技判定→成功なら攻守交代して連続
+/// 攻撃）を扱う。フォール／ギブアップ・フィニッシャーの決着処理・
+/// キックアウト・エスケープカード・CPUは実装しない（Phase 6以降）。
+/// エネルギーセットはラリー中は行えない（ラリー外の行動として扱う）。
+/// 現行のclassic／energyモード・Deck Simulator・レスラーエディタ・
+/// Technique Deck Builderの挙動には一切影響しない。
 class TechniqueMatchScreen extends StatefulWidget {
   const TechniqueMatchScreen({
     super.key,
@@ -132,11 +134,106 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     setState(() => matchState = result.state);
   }
 
-  void _useMove(TechniqueDeckEntry entry) {
+  Future<void> _declareAttack(TechniqueDeckEntry entry) async {
     final state = matchState;
     if (state == null) return;
-    final result = TechniqueMatchEngine.useMove(state, entry, catalog);
+    final result = TechniqueMatchEngine.declareAttack(state, entry, catalog);
     setState(() => matchState = result.state);
+    if (result.success) {
+      await _showDefenseDecisionDialog();
+    }
+  }
+
+  void _counterAttack() {
+    final state = matchState;
+    if (state == null) return;
+    final result = TechniqueMatchEngine.counterAttack(state, catalog);
+    setState(() => matchState = result.state);
+  }
+
+  void _resolveHit() {
+    final state = matchState;
+    if (state == null) return;
+    setState(
+      () => matchState = TechniqueMatchEngine.resolveHit(state, catalog),
+    );
+  }
+
+  void _endRally() {
+    final state = matchState;
+    if (state == null) return;
+    setState(() => matchState = TechniqueMatchEngine.endRally(state));
+  }
+
+  /// 攻撃が宣言され防御側の返技判定を待っている間、決定するまで閉じられない
+  /// ダイアログを表示する（読み合いの核: 返技エネルギーが足りていても
+  /// 「返技しない」選択が常にできる）。
+  Future<void> _showDefenseDecisionDialog() async {
+    final state = matchState;
+    final pending = state?.pendingAttack;
+    if (state == null || pending == null) return;
+    final card = catalog.findTechniqueById(pending.cardId);
+    if (card == null) return;
+    final attacker = state.playerAt(pending.attackerIndex);
+    final defender = state.playerAt(1 - pending.attackerIndex);
+    final check = TechniqueMatchEngine.checkCounterEligibility(state, catalog);
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('[Chain ${pending.chain}] ${defender.wrestlerName}の返技判定'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${attacker.wrestlerName}が「${card.name}」を使用'),
+            Text(
+              '威力: ${card.power} ・ HEAT+${card.heatDelta}'
+              '${card.causesDown ? " ・ 成立するとダウン" : ""}',
+            ),
+            if (card.reversalEnergyCost.values.any((v) => v > 0))
+              Text(
+                '返技に必要なエネルギー: ${card.reversalEnergyCost.entries.where((e) => e.value > 0).map((e) => '${moveAttributeLabel(e.key)}${e.value}').join('・')}',
+              )
+            else
+              const Text('この技には返技エネルギーの設定がありません（返技不可）。'),
+            const SizedBox(height: 8),
+            const Text(
+              '返技すると攻守が交代し、ダメージ・HEAT・ダウンは一切発生しません。'
+              '返技しないと技が成立し、ラリーはここで終了します。',
+              style: TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+            if (!check.canCounter)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  check.reason ?? '返技できません。',
+                  style: const TextStyle(color: _red),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _resolveHit();
+              Navigator.pop(dialogContext);
+            },
+            child: const Text('返技しない'),
+          ),
+          FilledButton(
+            onPressed: check.canCounter
+                ? () {
+                    _counterAttack();
+                    Navigator.pop(dialogContext);
+                  }
+                : null,
+            child: const Text('返技する'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showHandCardSheet(TechniqueDeckEntry entry) async {
@@ -174,7 +271,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     }
 
     if (technique != null) {
-      final check = TechniqueMatchEngine.canUseMove(state, entry, catalog);
+      final check = TechniqueMatchEngine.canDeclareAttack(
+        state,
+        entry,
+        catalog,
+      );
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
@@ -191,6 +292,10 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
               if (technique.attackEnergyCost.values.any((v) => v > 0))
                 Text(
                   '必要エネルギー: ${technique.attackEnergyCost.entries.where((e) => e.value > 0).map((e) => '${moveAttributeLabel(e.key)}${e.value}').join('・')}',
+                ),
+              if (technique.reversalEnergyCost.values.any((v) => v > 0))
+                Text(
+                  '相手の返技に必要なエネルギー: ${technique.reversalEnergyCost.entries.where((e) => e.value > 0).map((e) => '${moveAttributeLabel(e.key)}${e.value}').join('・')}',
                 ),
               if (technique.causesDown) const Text('成立すると相手をダウンさせます。'),
               const SizedBox(height: 8),
@@ -209,8 +314,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
             FilledButton(
               onPressed: check.canUse
                   ? () {
-                      _useMove(entry);
                       Navigator.pop(dialogContext);
+                      _declareAttack(entry);
                     }
                   : null,
               child: const Text('使用する'),
@@ -278,12 +383,12 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '開発中：Technique Deck Rules Phase 4',
+            '開発中：Technique Deck Rules Phase 5',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           Text(
-            '単発技のみ動作します（返技・連続攻撃・フォール／ギブアップ・'
-            'フィニッシャー決着・CPUは未実装）',
+            '技の応酬（返技・連続攻撃）が動作します'
+            '（フォール／ギブアップ・フィニッシャー決着・CPUは未実装）',
             style: TextStyle(fontSize: 12),
           ),
         ],
@@ -364,47 +469,80 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         color: _bg,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: Text(
-            'ターン${state.turnNumber} ・ ${state.active.wrestlerName}の手番 '
-            '・ フェーズ: ${_phaseLabel(state.phase)}',
-            style: const TextStyle(fontWeight: FontWeight.bold),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'ターン${state.turnNumber} ・ ${state.active.wrestlerName}の手番 '
+                '・ フェーズ: ${_phaseLabel(state.phase)}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              if (state.isRallyActive)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Chain ${state.rallyChain} ・ '
+                    '${state.playerAt(state.rallyAttackerIndex!).wrestlerName}が攻撃側'
+                    '${state.pendingAttack != null ? "（返技判定待ち）" : "（次の技を選択、または終了）"}',
+                    style: const TextStyle(color: _gold, fontSize: 12),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
       const SizedBox(height: 8),
-      _playerCard(state, isActive: true),
+      _playerCard(state, 0),
       const SizedBox(height: 8),
-      _playerCard(state, isActive: false),
+      _playerCard(state, 1),
       const SizedBox(height: 8),
       Card(
         color: _bg,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton.tonalIcon(
-                onPressed: state.active.posture == WrestlerPosture.stand
-                    ? _goDown
-                    : null,
-                icon: const Icon(Icons.arrow_downward),
-                label: const Text('ダウンする'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: state.active.posture == WrestlerPosture.down
-                    ? _rest
-                    : null,
-                icon: const Icon(Icons.self_improvement),
-                label: const Text('休息'),
-              ),
-              FilledButton.icon(
-                onPressed: _endTurn,
-                icon: const Icon(Icons.skip_next),
-                label: const Text('ターン終了'),
-              ),
-            ],
-          ),
+          child: state.isRallyActive
+              ? Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (state.pendingAttack == null)
+                      OutlinedButton.icon(
+                        onPressed: _endRally,
+                        icon: const Icon(Icons.stop_circle_outlined),
+                        label: const Text('ラリーを終了する'),
+                      )
+                    else
+                      const Text(
+                        '返技判定中です…',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                  ],
+                )
+              : Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.tonalIcon(
+                      onPressed: state.active.posture == WrestlerPosture.stand
+                          ? _goDown
+                          : null,
+                      icon: const Icon(Icons.arrow_downward),
+                      label: const Text('ダウンする'),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: state.active.posture == WrestlerPosture.down
+                          ? _rest
+                          : null,
+                      icon: const Icon(Icons.self_improvement),
+                      label: const Text('休息'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: _endTurn,
+                      icon: const Icon(Icons.skip_next),
+                      label: const Text('ターン終了'),
+                    ),
+                  ],
+                ),
         ),
       ),
       const SizedBox(height: 8),
@@ -427,13 +565,28 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     WrestlerPosture.fatigued => _red,
   };
 
-  Widget _playerCard(TechniqueMatchState state, {required bool isActive}) {
-    final player = isActive ? state.active : state.inactive;
-    final isPlayerA = player.wrestlerId == state.playerA.wrestlerId;
+  Widget _playerCard(TechniqueMatchState state, int playerIndex) {
+    final player = state.playerAt(playerIndex);
+    final isTurnOwner = playerIndex == state.activePlayerIndex;
+    final effectiveAttackerIndex =
+        state.rallyAttackerIndex ?? state.activePlayerIndex;
+    final isEffectiveAttacker = playerIndex == effectiveAttackerIndex;
+    final isPendingDefender =
+        state.pendingAttack != null &&
+        playerIndex == 1 - state.pendingAttack!.attackerIndex;
+    // 手札をタップして攻撃を宣言できるのは、返技判定待ちが無く、かつ
+    // 現在の実質的な攻撃側であるプレイヤーのみ。
+    final canDeclare = state.pendingAttack == null && isEffectiveAttacker;
+    final isPlayerA = playerIndex == 0;
     final hpRatio = player.maxHp == 0 ? 0.0 : player.hp / player.maxHp;
     final note = isPlayerA ? deckSourceNoteA : deckSourceNoteB;
+    final roleLabel = isPendingDefender
+        ? '返技判定待ち'
+        : (state.isRallyActive && isEffectiveAttacker ? '攻撃側' : null);
     return Card(
-      color: isActive ? const Color(0xff2a1c33) : _bg,
+      color: isEffectiveAttacker || isPendingDefender
+          ? const Color(0xff2a1c33)
+          : _bg,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -443,7 +596,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    '${player.wrestlerName}${isActive ? "（手番）" : ""}',
+                    '${player.wrestlerName}'
+                    '${isTurnOwner ? "（手番）" : ""}'
+                    '${roleLabel != null ? " ・ $roleLabel" : ""}',
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -506,21 +661,31 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
               runSpacing: 4,
               children: [
                 for (final entry in player.hand)
-                  ActionChip(
-                    label: Text(
-                      catalog.findTechniqueById(entry.cardId)?.name ??
-                          catalog.findEnergyById(entry.cardId)?.name ??
-                          catalog.findDefenseCardById(entry.cardId)?.name ??
-                          entry.cardId,
-                      style: const TextStyle(fontSize: 11),
-                    ),
-                    backgroundColor:
-                        catalog.findEnergyById(entry.cardId) != null
-                        ? _gold.withValues(alpha: 0.2)
-                        : null,
-                    onPressed: isActive
-                        ? () => _showHandCardSheet(entry)
-                        : null,
+                  Builder(
+                    builder: (context) {
+                      final isEnergyCard =
+                          catalog.findEnergyById(entry.cardId) != null;
+                      // エネルギーセットはラリー外（ターンの行動選択時）
+                      // のみ行える。技の宣言は現在の実質的な攻撃側のみ。
+                      final tappable = isEnergyCard
+                          ? (canDeclare && !state.isRallyActive)
+                          : canDeclare;
+                      return ActionChip(
+                        label: Text(
+                          catalog.findTechniqueById(entry.cardId)?.name ??
+                              catalog.findEnergyById(entry.cardId)?.name ??
+                              catalog.findDefenseCardById(entry.cardId)?.name ??
+                              entry.cardId,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        backgroundColor: isEnergyCard
+                            ? _gold.withValues(alpha: 0.2)
+                            : null,
+                        onPressed: tappable
+                            ? () => _showHandCardSheet(entry)
+                            : null,
+                      );
+                    },
                   ),
               ],
             ),
