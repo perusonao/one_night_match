@@ -897,9 +897,32 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
                   children: [
                     GestureDetector(
                       onTap: isCpu ? null : () => _showHandSheet(f),
-                      child: _chip(
-                        '手札 ${f.hand.length}',
-                        color: isCpu ? null : _pink,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: (isCpu ? Colors.white24 : _pink)
+                                .withValues(alpha: 0.6),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('手札 ${f.hand.length}',
+                                style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: isCpu ? Colors.white70 : _pink,
+                                    fontWeight: FontWeight.bold)),
+                            if (!isCpu) ...[
+                              const SizedBox(width: 2),
+                              const Icon(Icons.visibility,
+                                  size: 11, color: _pink),
+                            ],
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -911,7 +934,7 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
                     else
                       _chip('セット ${f.setCards.length}'),
                     const SizedBox(width: 6),
-                    _chip(ready ? 'FIN READY' : 'FIN USED',
+                    _chip(ready ? 'FIN○' : 'FIN✕',
                         color: ready ? Colors.greenAccent : Colors.white38),
                     const Spacer(),
                     InkWell(
@@ -2485,14 +2508,31 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
 
   // Ver.0.9 UX改善⑤：レベル選択はその場でタップして変更できるようにする
   // （旧: タイルをタップ→ボトムシートを開く→行を選ぶ、の2段階だった）。
+  // Ver.0.9 UX改善：「維持」ボタンは末尾ではなくヘッダー直下に固定表示し、
+  // タイル数が多くスクロールが必要な端末でも決定操作が隠れないようにする。
   Widget _levelPhase(PlayerLevelMatchState player) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Padding(
-        padding: EdgeInsets.fromLTRB(12, 2, 12, 4),
-        child: Text('レベルを選ぶ（解放済みなら上下どちらへも変更可）',
-            style: TextStyle(
-                fontWeight: FontWeight.bold, color: _gold, fontSize: 13)),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+        child: Row(
+          children: [
+            const Expanded(
+              child: Text('レベルを選ぶ（解放済みなら上下どちらへも変更可）',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, color: _gold, fontSize: 13)),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => _act(() => engine.skipLevelChange('player')),
+              icon: const Icon(Icons.check, size: 16),
+              label: Text('Level ${player.currentLevel}を維持'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          ],
+        ),
       ),
       Wrap(
         alignment: WrapAlignment.center,
@@ -2503,13 +2543,6 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
         ],
       ),
       const SizedBox(height: 8),
-      Center(
-        child: OutlinedButton.icon(
-          onPressed: () => _act(() => engine.skipLevelChange('player')),
-          icon: const Icon(Icons.check, size: 16),
-          label: Text('現在のLevel ${player.currentLevel}を維持'),
-        ),
-      ),
     ],
   );
 
@@ -3317,13 +3350,16 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
     BattleBeatKind.finisherCutin,
   };
 
+  // Ver.0.9: 「オート」＝normal速度がメッセージを読み切る前に流れてしまう
+  // との指摘を受け、通常/ゆっくりの基準倍率を底上げ（fast/manualは意図的に
+  // 素早いままにする）。
   Duration _scaled(Duration base, BattleBeatKind kind) {
     if (base <= Duration.zero) return Duration.zero;
     final important = _importantBeatKinds.contains(kind);
     final factor = switch (_speed) {
       MatchSpeed.fast => important ? 0.6 : 0.18,
-      MatchSpeed.normal => 1.0,
-      MatchSpeed.slow => 1.4,
+      MatchSpeed.normal => 1.4,
+      MatchSpeed.slow => 2.0,
       MatchSpeed.manual => important ? 0.7 : 0.3,
     };
     return Duration(milliseconds: (base.inMilliseconds * factor).round());

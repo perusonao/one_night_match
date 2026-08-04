@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'defaults.dart';
@@ -27,9 +26,15 @@ class LocalWrestlerRepository implements WrestlerRepository {
            abilities ??
            {for (final item in defaultEditorAbilities) item.id: item};
 
-  static const storageKey = 'one_night_match_wrestler_editor_v03';
-  static const moveStorageKey = 'one_night_match_move_editor_v03';
-  static const abilityStorageKey = 'one_night_match_ability_editor_v03';
+  // Ver.0.9: レスラー/技名の刷新（旧ルール廃止・技カード名整理等）が
+  // 既存ユーザーの端末に保存済みの古いデータへ反映されない不具合があった
+  // （_loadDefaults()が古いassets/data/wrestlers.jsonを読んでいた上、一度
+  // ローカル保存されると以後はDart側の変更を一切拾わなかった）。
+  // ストレージキーをv04へ上げることで、保存済みの古いデータを破棄し
+  // 全員が最新のdefaultEditorWrestlers/defaultEditorMovesから再出発する。
+  static const storageKey = 'one_night_match_wrestler_editor_v04';
+  static const moveStorageKey = 'one_night_match_move_editor_v04';
+  static const abilityStorageKey = 'one_night_match_ability_editor_v04';
   final WrestlerValidator validator;
   final Map<String, MoveDefinition> moves;
   final Map<String, AbilityDefinition> abilities;
@@ -55,19 +60,12 @@ class LocalWrestlerRepository implements WrestlerRepository {
     }
   }
 
-  Future<List<WrestlerDefinition>> _loadDefaults() async {
-    try {
-      final source = await rootBundle.loadString('assets/data/wrestlers.json');
-      return (jsonDecode(source) as List)
-          .map(
-            (item) =>
-                WrestlerDefinition.fromJson(Map<String, dynamic>.from(item)),
-          )
-          .toList();
-    } on Object {
-      return List.of(defaultEditorWrestlers);
-    }
-  }
+  // Ver.0.9: 以前はassets/data/wrestlers.jsonという同梱JSONから既定値を
+  // 読み込んでいたが、このファイルはVer.0.7.7以前のスナップショットのまま
+  // 更新されておらず、技名・レベル構成が古いまま出続ける不具合の原因だった。
+  // defaultEditorWrestlers（Dartソース）を唯一の正とする。
+  Future<List<WrestlerDefinition>> _loadDefaults() async =>
+      List.of(defaultEditorWrestlers);
 
   @override
   Future<WrestlerDefinition?> loadById(String id) async {
