@@ -14,10 +14,12 @@ void main() {
     expect(report.total, defaultEditorWrestlers.length * 3 * 10);
     // すべての試合が最後まで進む。
     expect(report.results.every((r) => r.completed), isTrue);
-    // 決着理由は pinfall / submission / exhaustion のいずれか。
+    // 決着理由は pinfall / submission / exhaustion / koStoppage のいずれか。
+    // Ver.0.9.1: 山札切れ後にHPも尽きた側はkoStoppage（レフェリーストップ）で
+    // 即決着する。
     for (final reason in report.finishReasonCounts.keys) {
       expect(
-        ['pinfall', 'submission', 'exhaustion'],
+        ['pinfall', 'submission', 'exhaustion', 'koStoppage'],
         contains(reason),
       );
     }

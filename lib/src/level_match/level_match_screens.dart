@@ -123,6 +123,7 @@ Duration matchStepDelay(MatchSpeed s) => switch (s) {
 String finishReasonLabel(LevelFinishReason? reason) => switch (reason) {
   LevelFinishReason.pinfall => '3カウント',
   LevelFinishReason.submission => 'ギブアップ',
+  LevelFinishReason.koStoppage => 'レフェリーストップ（TKO）',
   LevelFinishReason.exhaustion => '引き分け（消耗の果て）',
   LevelFinishReason.decision => '時間切れ判定(旧仕様)',
   LevelFinishReason.draw => '引き分け（時間切れ）',
