@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_deck.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_models.dart';
 import 'package:one_night_match/src/technique_deck/technique_match_state.dart';
+import 'package:one_night_match/src/wrestler_editor/models.dart' show MoveAttribute;
 
 void main() {
   TechniqueDeckDefinition deckWithCards(String prefix, int count) =>
@@ -204,6 +205,279 @@ void main() {
       expect(updated.heat, 5);
       expect(updated.posture, WrestlerPosture.down);
       expect(updated.wrestlerId, 'w1');
+    });
+  });
+
+  group('Phase 4: エネルギーセット・技の使用', () {
+    TechniqueDeckCardCatalog catalog() => const TechniqueDeckCardCatalog(
+      techniques: [
+        TechniqueDeckTechniqueCard(
+          id: 'normal_strike',
+          name: '通常打撃技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.strike,
+          attackEnergyCost: {MoveAttribute.strike: 1},
+          power: 10,
+          heatDelta: 5,
+          causesDown: true,
+        ),
+        TechniqueDeckTechniqueCard(
+          id: 'down_only',
+          name: 'ダウン限定技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.strike,
+          targetState: TechniqueTargetState.down,
+          power: 15,
+        ),
+        TechniqueDeckTechniqueCard(
+          id: 'stand_only',
+          name: 'スタンド限定技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.strike,
+          targetState: TechniqueTargetState.stand,
+          power: 5,
+        ),
+        TechniqueDeckTechniqueCard(
+          id: 'sig_akari',
+          name: '固有技（アカリ専用）',
+          category: TechniqueCardCategory.signature,
+          attribute: MoveAttribute.strike,
+          allowedWrestlerIds: ['wrestler_a'],
+          minimumLevel: 1,
+          power: 20,
+        ),
+        TechniqueDeckTechniqueCard(
+          id: 'lv2_move',
+          name: 'レベル2技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.strike,
+          minimumLevel: 2,
+          power: 30,
+        ),
+        TechniqueDeckTechniqueCard(
+          id: 'lethal_move',
+          name: '大技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.strike,
+          power: 9999,
+        ),
+      ],
+      energies: [
+        TechniqueEnergyCard(
+          id: 'energy_strike',
+          attribute: MoveAttribute.strike,
+          name: '打エネルギー',
+        ),
+      ],
+      defenseCards: [],
+    );
+
+    TechniqueDeckDefinition deckWithSpecificCards(
+      String wrestlerId,
+      List<String> cardIds,
+    ) => TechniqueDeckDefinition(
+      id: '${wrestlerId}_deck',
+      wrestlerId: wrestlerId,
+      entries: [
+        for (var i = 0; i < cardIds.length; i++)
+          TechniqueDeckEntry(
+            instanceId: '${wrestlerId}_entry_$i',
+            cardId: cardIds[i],
+            cardType: TechniqueDeckCardType.technique,
+          ),
+      ],
+    );
+
+    TechniqueMatchState matchWithHand(List<String> cardIdsA) {
+      final deckA = deckWithSpecificCards('wrestler_a', cardIdsA);
+      final deckB = deckWithCards('b', 30);
+      return TechniqueMatchEngine.start(
+        wrestlerAId: 'wrestler_a',
+        wrestlerAName: 'レスラーA',
+        wrestlerAMaxHp: 100,
+        deckA: deckA,
+        wrestlerBId: 'wrestler_b',
+        wrestlerBName: 'レスラーB',
+        wrestlerBMaxHp: 100,
+        deckB: deckB,
+        handSize: cardIdsA.length,
+        random: Random(1),
+      );
+    }
+
+    test('エネルギーカードは技カードとしては使用できない', () {
+      final state = matchWithHand(['normal_strike']);
+      final result = TechniqueMatchEngine.setEnergy(
+        state,
+        state.active.hand.first,
+        catalog(),
+      );
+      // normal_strikeは技カードなのでエネルギーとしてセットできない。
+      expect(result.success, isFalse);
+    });
+
+    test('エネルギーカードをセットするとenergyPoolに加算され手札から消える', () {
+      final deckA = deckWithSpecificCards('wrestler_a', ['energy_strike']);
+      final state = TechniqueMatchEngine.start(
+        wrestlerAId: 'wrestler_a',
+        wrestlerAName: 'レスラーA',
+        wrestlerAMaxHp: 100,
+        deckA: deckA,
+        wrestlerBId: 'wrestler_b',
+        wrestlerBName: 'レスラーB',
+        wrestlerBMaxHp: 100,
+        deckB: deckWithCards('b', 30),
+        handSize: 1,
+        random: Random(1),
+      );
+      final entry = state.active.hand.first;
+      final result = TechniqueMatchEngine.setEnergy(state, entry, catalog());
+      expect(result.success, isTrue);
+      expect(result.state.active.energyPool[MoveAttribute.strike], 1);
+      expect(result.state.active.hand, isEmpty);
+    });
+
+    test('エネルギー不足の技は使用できない', () {
+      final state = matchWithHand(['normal_strike']);
+      final check = TechniqueMatchEngine.canUseMove(
+        state,
+        state.active.hand.first,
+        catalog(),
+      );
+      expect(check.canUse, isFalse);
+      expect(check.reason, contains('エネルギー'));
+    });
+
+    test('エネルギーを満たすと技を使用でき、ダメージ・HEAT・ダウンが即時反映される', () {
+      var state = matchWithHand(['normal_strike']);
+      // 手動でエネルギーをセットする代わりに、直接energyPoolを持つ状態を作る。
+      state = state.copyWith(
+        playerA: state.playerA.copyWith(
+          energyPool: const {MoveAttribute.strike: 1},
+        ),
+      );
+      final entry = state.active.hand.first;
+      final result = TechniqueMatchEngine.useMove(state, entry, catalog());
+      expect(result.success, isTrue);
+      final updated = result.state;
+      expect(updated.playerB.hp, 90); // 100 - 10
+      expect(updated.playerA.heat, 5);
+      expect(updated.playerB.posture, WrestlerPosture.down);
+      expect(updated.playerA.hand, isEmpty);
+      expect(updated.playerA.discardPile, [entry]);
+      expect(updated.playerA.spentEnergy[MoveAttribute.strike], 1);
+      expect(updated.playerA.availableEnergyFor(MoveAttribute.strike), 0);
+    });
+
+    test('HPが0になると疲労状態になる（0未満にはならない）', () {
+      var state = matchWithHand(['lethal_move']);
+      final entry = state.active.hand.first;
+      final result = TechniqueMatchEngine.useMove(state, entry, catalog());
+      expect(result.success, isTrue);
+      expect(result.state.playerB.hp, 0);
+      expect(result.state.playerB.posture, WrestlerPosture.fatigued);
+    });
+
+    test('スタンド限定技はダウン中の相手には使用できない', () {
+      var state = matchWithHand(['stand_only']);
+      state = state.copyWith(
+        playerB: state.playerB.copyWith(posture: WrestlerPosture.down),
+      );
+      final check = TechniqueMatchEngine.canUseMove(
+        state,
+        state.active.hand.first,
+        catalog(),
+      );
+      expect(check.canUse, isFalse);
+      expect(check.reason, contains('スタンド'));
+    });
+
+    test('ダウン限定技はスタンド中の相手には使用できない', () {
+      final state = matchWithHand(['down_only']);
+      final check = TechniqueMatchEngine.canUseMove(
+        state,
+        state.active.hand.first,
+        catalog(),
+      );
+      expect(check.canUse, isFalse);
+      expect(check.reason, contains('ダウン'));
+    });
+
+    test('ダウン限定技は疲労中の相手にも使用できる', () {
+      var state = matchWithHand(['down_only']);
+      state = state.copyWith(
+        playerB: state.playerB.copyWith(posture: WrestlerPosture.fatigued),
+      );
+      final check = TechniqueMatchEngine.canUseMove(
+        state,
+        state.active.hand.first,
+        catalog(),
+      );
+      expect(check.canUse, isTrue);
+    });
+
+    test('固有技は許可されたレスラー以外は使用できない', () {
+      final state = matchWithHand(['sig_akari']).copyWith(activePlayerIndex: 1);
+      // Bの手札にはsig_akariが無いため、代わりに直接手札へ差し込んで検証する。
+      final withHand = state.copyWith(
+        playerB: state.playerB.copyWith(
+          hand: [
+            const TechniqueDeckEntry(
+              instanceId: 'x',
+              cardId: 'sig_akari',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+          ],
+        ),
+      );
+      final check = TechniqueMatchEngine.canUseMove(
+        withHand,
+        withHand.active.hand.first,
+        catalog(),
+      );
+      expect(check.canUse, isFalse);
+      expect(check.reason, contains('使用できません'));
+    });
+
+    test('固有技は許可されたレスラーなら使用できる', () {
+      final state = matchWithHand(['sig_akari']);
+      final check = TechniqueMatchEngine.canUseMove(
+        state,
+        state.active.hand.first,
+        catalog(),
+      );
+      expect(check.canUse, isTrue);
+    });
+
+    test('レベル不足の技は使用できない', () {
+      final state = matchWithHand(['lv2_move']);
+      final check = TechniqueMatchEngine.canUseMove(
+        state,
+        state.active.hand.first,
+        catalog(),
+      );
+      expect(check.canUse, isFalse);
+      expect(check.reason, contains('レベル'));
+    });
+
+    test('手札に無いカードは使用できない', () {
+      final state = matchWithHand(['normal_strike']);
+      const notInHand = TechniqueDeckEntry(
+        instanceId: 'not_in_hand',
+        cardId: 'down_only',
+        cardType: TechniqueDeckCardType.technique,
+      );
+      final check = TechniqueMatchEngine.canUseMove(state, notInHand, catalog());
+      expect(check.canUse, isFalse);
+      expect(check.reason, contains('手札'));
+    });
+
+    test('検証に失敗した場合、useMoveは状態を変化させない', () {
+      final state = matchWithHand(['lv2_move']);
+      final entry = state.active.hand.first;
+      final result = TechniqueMatchEngine.useMove(state, entry, catalog());
+      expect(result.success, isFalse);
+      expect(result.state, same(state));
     });
   });
 }

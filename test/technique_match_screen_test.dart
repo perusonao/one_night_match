@@ -22,6 +22,7 @@ void main() {
         category: TechniqueCardCategory.normal,
         attribute: MoveAttribute.strike,
         attackEnergyCost: {MoveAttribute.strike: 1},
+        power: 10,
       ),
     ],
     energies: [
@@ -141,6 +142,99 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('保存済みデッキ「保存デッキ」を使用'), findsOneWidget);
+    });
+  });
+
+  group('TechniqueMatchScreen: Phase 4 技の使用', () {
+    Future<String> startWithFixedDeck(
+      WidgetTester tester,
+      LocalTechniqueDeckRepository repo,
+      List<TechniqueDeckEntry> entries,
+    ) async {
+      await pumpScreen(tester, deckRepository: repo);
+      final state = tester.state(find.byType(TechniqueMatchScreen));
+      // ignore: avoid_dynamic_calls
+      final wrestlerAId = (state as dynamic).wrestlerA.id as String;
+      await repo.save(
+        TechniqueDeckSaveRecord(
+          deckId: 'combat_deck',
+          name: '戦闘テスト用デッキ',
+          wrestlerId: wrestlerAId,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          entries: entries,
+        ),
+      );
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+      return wrestlerAId;
+    }
+
+    testWidgets('エネルギーをセットしてから技を使用すると相手にダメージが入る', (tester) async {
+      final repo = LocalTechniqueDeckRepository();
+      await startWithFixedDeck(tester, repo, const [
+        TechniqueDeckEntry(
+          instanceId: 'e1',
+          cardId: 'normal_1',
+          cardType: TechniqueDeckCardType.technique,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 'e2',
+          cardId: 'energy_strike',
+          cardType: TechniqueDeckCardType.energy,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 'e3',
+          cardId: 'energy_strike',
+          cardType: TechniqueDeckCardType.energy,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 'e4',
+          cardId: 'energy_strike',
+          cardType: TechniqueDeckCardType.energy,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 'e5',
+          cardId: 'energy_strike',
+          cardType: TechniqueDeckCardType.energy,
+        ),
+      ]);
+
+      await tester.tap(find.text('打エネルギー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('セットする'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('エネルギーとしてセットした'), findsOneWidget);
+
+      await tester.tap(find.text('通常技A').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('使用する'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('を使用した'), findsOneWidget);
+      expect(find.textContaining('ダメージ'), findsOneWidget);
+    });
+
+    testWidgets('エネルギー不足の技は使用不可の理由が表示され、使用するボタンが無効になる', (
+      tester,
+    ) async {
+      final repo = LocalTechniqueDeckRepository();
+      await startWithFixedDeck(tester, repo, const [
+        TechniqueDeckEntry(
+          instanceId: 'e1',
+          cardId: 'normal_1',
+          cardType: TechniqueDeckCardType.technique,
+        ),
+      ]);
+
+      await tester.tap(find.text('通常技A').first);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('エネルギーが不足しています'), findsOneWidget);
+      final useButton = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, '使用する'),
+      );
+      expect(useButton.onPressed, isNull);
     });
   });
 }
