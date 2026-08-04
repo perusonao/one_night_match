@@ -76,6 +76,50 @@ class BattleEventQueue {
     Map<String, MoveDefinition> moves,
   ) {
     switch (log.action) {
+      case 'draw':
+        return _draw(log, state, moves);
+      case 'setEnergy':
+        return [
+          BattleEvent(
+            kind: BattleBeatKind.info,
+            text: '${_actorName(log, state)}がエネルギーをセット',
+            subtitle: log.message,
+            hold: const Duration(milliseconds: 220),
+          ),
+        ];
+      case 'setCard':
+        return [
+          BattleEvent(
+            kind: BattleBeatKind.info,
+            text: '${_actorName(log, state)}がカードをセット',
+            subtitle: log.message,
+            hold: const Duration(milliseconds: 220),
+          ),
+        ];
+      case 'skipSet':
+        return [
+          BattleEvent(
+            kind: BattleBeatKind.info,
+            text: '${_actorName(log, state)}はセットを見送った',
+            hold: const Duration(milliseconds: 180),
+          ),
+        ];
+      case 'changeLevel':
+        return [
+          BattleEvent(
+            kind: BattleBeatKind.info,
+            text: '${_actorName(log, state)}: ${log.message}',
+            hold: const Duration(milliseconds: 260),
+          ),
+        ];
+      case 'skipMove':
+        return [
+          BattleEvent(
+            kind: BattleBeatKind.info,
+            text: '${_actorName(log, state)}は技を使わず終了',
+            hold: const Duration(milliseconds: 180),
+          ),
+        ];
       case 'attackDeclared':
         return _attackDeclared(log, state, moves);
       case 'responseTake':
@@ -86,6 +130,8 @@ class BattleEventQueue {
             hold: const Duration(milliseconds: 220),
           ),
         ];
+      case 'respondEnergyConsumed':
+        return _respondEnergyConsumed(log, state, moves);
       case 'clashResolution':
         return _clashResolution(log, state);
       case 'moveResolved':
@@ -227,10 +273,78 @@ class BattleEventQueue {
       BattleEvent(
         kind: BattleBeatKind.announce,
         text: '$actorの$name！',
-        hold: const Duration(milliseconds: 300),
+        subtitle: _energyCostSubtitle(log),
+        hold: const Duration(milliseconds: 320),
       ),
     );
     return events;
+  }
+
+  /// Ver.0.9: どのエネルギーを何枚消費したかを分かりやすく1行にする。
+  String? _energyCostSubtitle(LevelMatchLogEntry log) {
+    final cost = log.details['energyCost'];
+    if (cost is! Map) return null;
+    final parts = <String>[];
+    for (final entry in cost.entries) {
+      final amount = (entry.value as num?)?.toInt() ?? 0;
+      if (amount <= 0) continue;
+      final attribute = MoveAttribute.values
+          .cast<MoveAttribute?>()
+          .firstWhere((a) => a?.name == entry.key, orElse: () => null);
+      if (attribute == null) continue;
+      parts.add('${moveAttributeLabel(attribute)}×$amount');
+    }
+    if (parts.isEmpty) return null;
+    return 'エネルギー消費: ${parts.join(' ')}';
+  }
+
+  List<BattleEvent> _draw(
+    LevelMatchLogEntry log,
+    LevelMatchState state,
+    Map<String, MoveDefinition> moves,
+  ) {
+    final drawn = log.details['drawnCard'];
+    String? cardName;
+    if (drawn is Map) {
+      final techId = drawn['techniqueMoveId'] as String?;
+      if (techId != null) {
+        cardName = moves[techId]?.name;
+      } else {
+        final attribute = MoveAttribute.values
+            .cast<MoveAttribute?>()
+            .firstWhere(
+                (a) => a?.name == drawn['attribute'], orElse: () => null);
+        cardName =
+            attribute != null ? '${moveAttributeLabel(attribute)}カード' : null;
+      }
+    }
+    return [
+      BattleEvent(
+        kind: BattleBeatKind.info,
+        text: '${_actorName(log, state)}がドロー',
+        subtitle: cardName,
+        hold: const Duration(milliseconds: 200),
+      ),
+    ];
+  }
+
+  List<BattleEvent> _respondEnergyConsumed(
+    LevelMatchLogEntry log,
+    LevelMatchState state,
+    Map<String, MoveDefinition> moves,
+  ) {
+    final moveId = log.details['moveId'] as String?;
+    final move = moveId == null ? null : moves[moveId];
+    final isCounter = log.details['isCounterMove'] as bool? ?? false;
+    final actor = _actorName(log, state);
+    return [
+      BattleEvent(
+        kind: BattleBeatKind.response,
+        text: '$actorが${move?.name ?? "技"}で${isCounter ? "返し技" : "迎撃"}！',
+        subtitle: _energyCostSubtitle(log),
+        hold: const Duration(milliseconds: 300),
+      ),
+    ];
   }
 
   List<BattleEvent> _clashResolution(

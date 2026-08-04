@@ -20,10 +20,11 @@ void main() {
       random: Random(1),
       playerStarts: true,
     );
-    // Ver.0.9: 通常技は固有技と混同しないよう属性名で統一（性能はレスラーごとに個別）。
-    expect(m.basicMoveFor(MoveAttribute.strike, m.state.player)!.name, '打撃');
+    // Ver.0.9: 技カードは固有技（ド派手な固有名）とも技エネルギーカード
+    // （属性名のみ）とも混同しないよう、実在感のある技名で統一。
+    expect(m.basicMoveFor(MoveAttribute.strike, m.state.player)!.name, '速射ジャブ');
     expect(m.basicMoveFor(MoveAttribute.strike, m.state.player)!.id, 'akari_nt_strike');
-    expect(m.basicMoveFor(MoveAttribute.strike, m.state.cpu)!.name, '打撃');
+    expect(m.basicMoveFor(MoveAttribute.strike, m.state.cpu)!.name, '不意打ちジャブ');
     expect(m.basicMoveFor(MoveAttribute.strike, m.state.cpu)!.id, 'jack_nt_strike');
     // 未指定属性は共通の通常技へフォールバック。
     expect(m.basicMoveFor(MoveAttribute.counter, m.state.player)!.id, 'basic_counter');

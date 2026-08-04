@@ -15,6 +15,7 @@ import 'level_match_cost_preview.dart';
 import 'level_match_deck_builder.dart';
 import 'level_match_engine.dart';
 import 'level_match_finish_models.dart';
+import 'report_export.dart';
 
 const _pink = Color(0xffff477e);
 const _gold = Color(0xffffc857);
@@ -150,18 +151,19 @@ class LevelMatchIntroScreen extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             for (final line in const [
-              '毎ターン、技カードを1枚セット',
-              'セット属性で各Levelの技が解放',
-              '全Levelの技コストを確認できる',
+              '毎ターン、技エネルギーカードを1枚セット（場に残り続ける）',
+              '自分のターン開始時にエネルギーは全回復（アンタップ）',
+              'エネルギーが貯まった属性の固有技・技カードが使える',
+              '固有技＝レスラー専用（決着＝フォール/ギブアップ可）',
+              '技カード＝手札のカードをそのまま繰り出す（使うと捨て札）',
               'レスラーごとに30枚デッキを自動生成',
-              '手札は「単体技」で直接使用も可能（コスト不要）',
-              '決着（フォール/ギブアップ/KO）は固有技のみ',
-              '技を宣言 → 相手が対応（速い技・返し・受ける）',
+              '技を宣言 → 相手が対応（固有技で迎撃・返し技・受ける）',
               '速い技が先に命中し、遅い技を潰す',
               '返し技は対応する相手技があるときだけ使える',
               'HPは消耗の指標（0でも試合は続く）',
               'キックアウトは返すほど重くなる',
               '山札切れは敗北でなく“疲労”（毎ターンHP減）',
+              '決着は3カウントかギブアップのみ。時間切れは引き分け',
             ])
               Card(
                 child: ListTile(
@@ -320,11 +322,13 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
   }
 
   void _showDeckPreview(WrestlerDefinition wrestler) {
-    final deck = const LevelMatchDeckBuilder().build(
+    final deck = const LevelMatchDeckBuilder().buildEnergyMode(
       wrestler: wrestler,
       moves: repository.moves,
       owner: 'preview',
     );
+    final techCount = deck.cards.where((c) => !c.isEnergyOnly).length;
+    final energyCount = deck.cards.length - techCount;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -345,7 +349,8 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
               ),
               Text(
                 '合計 ${deck.cards.length} 枚'
-                '${deck.usedFallback ? "（フォールバック）" : ""}',
+                '${deck.usedFallback ? "（フォールバック）" : ""}'
+                '　🥊技カード $techCount / ⚡エネルギーカード $energyCount',
                 style: const TextStyle(color: _gold),
               ),
               const Divider(),
@@ -359,7 +364,9 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
                       child: Text(moveAttributeLabel(attribute)),
                     ),
                     title: Text(
-                      '${moveAttributeLabel(attribute)}属性 ${deck.counts[attribute] ?? 0} 枚',
+                      '${moveAttributeLabel(attribute)}属性 ${deck.counts[attribute] ?? 0} 枚'
+                      '（技${deck.cards.where((c) => c.attribute == attribute && !c.isEnergyOnly).length}'
+                      ' / エネ${deck.cards.where((c) => c.attribute == attribute && c.isEnergyOnly).length}）',
                     ),
                     subtitle: Text(
                       deck.attributeReasons[attribute]!.isEmpty
@@ -384,8 +391,7 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
   }
 
   Future<void> _start(WrestlerDefinition player) async {
-    final mode = await _pickResourceMode();
-    if (mode == null || !mounted) return;
+    // Ver.0.9: 旧ルール（クラシック）は廃止。エネルギールールのみで開始する。
     final seconds = await _pickMatchTime();
     if (seconds == null || !mounted) return;
     final candidates = wrestlers!
@@ -403,43 +409,12 @@ class _LevelMatchSelectScreenState extends State<LevelMatchSelectScreen> {
             moves: repository.moves,
             playerStarts: true,
             matchTimeSeconds: seconds,
-            resourceMode: mode,
+            resourceMode: MatchResourceMode.energy,
           ),
         ),
       ),
     );
   }
-
-  Future<MatchResourceMode?> _pickResourceMode() =>
-      showModalBottomSheet<MatchResourceMode>(
-        context: context,
-        builder: (_) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('ルールを選択',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              ),
-              ListTile(
-                leading: const Icon(Icons.style),
-                title: const Text('クラシック（推奨）'),
-                subtitle: const Text('技カードをセットして消費するVer.0.7方式'),
-                onTap: () =>
-                    Navigator.pop(context, MatchResourceMode.classic),
-              ),
-              ListTile(
-                leading: const Icon(Icons.bolt),
-                title: const Text('エネルギー（新ルール）'),
-                subtitle: const Text('毎ターン回復するエネルギーで技を使う。返し用の温存が鍵'),
-                onTap: () =>
-                    Navigator.pop(context, MatchResourceMode.energy),
-              ),
-            ],
-          ),
-        ),
-      );
 
   Future<int?> _pickMatchTime() => showModalBottomSheet<int>(
     context: context,
@@ -920,7 +895,13 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    _chip('手札 ${f.hand.length}'),
+                    GestureDetector(
+                      onTap: isCpu ? null : () => _showHandSheet(f),
+                      child: _chip(
+                        '手札 ${f.hand.length}',
+                        color: isCpu ? null : _pink,
+                      ),
+                    ),
                     const SizedBox(width: 6),
                     if (state.resourceMode == MatchResourceMode.energy)
                       _chip(
@@ -2011,9 +1992,15 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
                     fontSize: 11,
                     fontWeight: FontWeight.w900,
                     color: _gold)),
+            const SizedBox(width: 4),
+            const Text('(共有)',
+                style: TextStyle(fontSize: 8.5, color: Colors.white38)),
             const SizedBox(width: 6),
-            Text('$heat / $max',
-                style: const TextStyle(fontSize: 11, color: Colors.white70)),
+            Expanded(
+              child: Text('$heat / $max',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: Colors.white70)),
+            ),
           ],
         ),
         const SizedBox(height: 2),
@@ -2049,6 +2036,68 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
 
   // ===== 自分レスラーの簡易パネル（⑨） =====
   // ===== 詳細情報シート（KO/RB/FIN/山札 等を集約） =====
+  // ===== Ver.0.9 UX改善②：手札はいつでもタップして中身を確認できる =====
+  void _showHandSheet(PlayerLevelMatchState f) {
+    final energyCards = f.hand.where((c) => c.isEnergyOnly).toList();
+    final techCards = f.hand.where((c) => !c.isEnergyOnly).toList();
+    Widget cardRow(TechniqueResourceCard card) {
+      final move = card.isEnergyOnly ? null : engine.moves[card.techniqueMoveId];
+      return ListTile(
+        dense: true,
+        leading: attributeBadge(card.attribute, size: 26),
+        title: Text(card.isEnergyOnly ? card.name : (move?.name ?? card.name)),
+        subtitle: Text(
+          card.isEnergyOnly
+              ? '⚡ 場にセットする燃料になる（このカード自体は攻撃しない）'
+              : '🥊 このまま攻撃に使える（使うと捨て札）'
+                  '${move != null ? '　威力${move.power}/速度${move.speed}' : ''}',
+          style: const TextStyle(fontSize: 11),
+        ),
+      );
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => SafeArea(
+        child: DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.6,
+          builder: (_, controller) => ListView(
+            controller: controller,
+            padding: const EdgeInsets.all(14),
+            children: [
+              Text('あなたの手札（${f.hand.length}枚）',
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Text('⚡ 技エネルギーカード（${energyCards.length}枚）',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.lightBlueAccent)),
+              if (energyCards.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Text('なし', style: TextStyle(color: Colors.white38)),
+                )
+              else
+                for (final c in energyCards) cardRow(c),
+              const Divider(),
+              Text('🥊 技カード（手札から使う・使うと捨て札）（${techCards.length}枚）',
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: _pink)),
+              if (techCards.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Text('なし', style: TextStyle(color: Colors.white38)),
+                )
+              else
+                for (final c in techCards) cardRow(c),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showDetailSheet() {
     Widget stat(PlayerLevelMatchState f, bool isCpu) => Card(
       child: Padding(
@@ -2434,19 +2483,127 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
     );
   }
 
-  Widget _levelPhase(PlayerLevelMatchState player) => Card(
-    child: ListTile(
-      title: Text('現在 Level ${player.currentLevel}'),
-      subtitle: const Text('解放済みレベルへ変更できます（飛び級可）。'),
-      trailing: const Icon(Icons.swap_horiz),
-      onTap: _showLevels,
-      contentPadding: const EdgeInsets.all(12),
-      leading: OutlinedButton(
-        onPressed: () => _act(() => engine.skipLevelChange('player')),
-        child: const Text('維持'),
+  // Ver.0.9 UX改善⑤：レベル選択はその場でタップして変更できるようにする
+  // （旧: タイルをタップ→ボトムシートを開く→行を選ぶ、の2段階だった）。
+  Widget _levelPhase(PlayerLevelMatchState player) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Padding(
+        padding: EdgeInsets.fromLTRB(12, 2, 12, 4),
+        child: Text('レベルを選ぶ（解放済みなら上下どちらへも変更可）',
+            style: TextStyle(
+                fontWeight: FontWeight.bold, color: _gold, fontSize: 13)),
       ),
-    ),
+      Wrap(
+        alignment: WrapAlignment.center,
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final level in player.wrestler.levels) _levelTile(player, level),
+        ],
+      ),
+      const SizedBox(height: 8),
+      Center(
+        child: OutlinedButton.icon(
+          onPressed: () => _act(() => engine.skipLevelChange('player')),
+          icon: const Icon(Icons.check, size: 16),
+          label: Text('現在のLevel ${player.currentLevel}を維持'),
+        ),
+      ),
+    ],
   );
+
+  Widget _levelTile(
+    PlayerLevelMatchState player,
+    WrestlerLevelDefinition level,
+  ) {
+    final unlocked = player.unlockedLevels.contains(level.level);
+    final isCurrent = level.level == player.currentLevel;
+    final evaluation = engine.evaluateUnlockCondition(player, level);
+    final moveNames =
+        level.moveIds.map((id) => engine.moves[id]?.name ?? id).join(' / ');
+    final selectable = unlocked && !isCurrent;
+    final accent = isCurrent ? _gold : Colors.white24;
+    return Opacity(
+      opacity: unlocked ? 1 : 0.55,
+      child: GestureDetector(
+        onTap: selectable
+            ? () => _act(() => engine.changeLevel('player', level.level))
+            : null,
+        child: Container(
+          width: 172,
+          padding: const EdgeInsets.all(9),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+                colors: [accent.withValues(alpha: 0.22), Colors.black26]),
+            borderRadius: BorderRadius.circular(12),
+            border:
+                Border.all(color: accent, width: isCurrent ? 2 : 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text('Level ${level.level}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w900, fontSize: 13)),
+                  const Spacer(),
+                  if (isCurrent)
+                    const Text('現在',
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: _gold,
+                            fontWeight: FontWeight.bold))
+                  else
+                    Icon(
+                      unlocked ? Icons.lock_open : Icons.lock,
+                      size: 14,
+                      color: unlocked ? Colors.greenAccent : Colors.white38,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(moveNames,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10.5, color: Colors.white70)),
+              const SizedBox(height: 4),
+              Text(
+                unlocked ? '解放済み' : evaluation.details.join(' / '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 9.5,
+                    color: unlocked ? Colors.greenAccent : Colors.white38),
+              ),
+              const SizedBox(height: 5),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                decoration: BoxDecoration(
+                  color: selectable ? _pink : Colors.white12,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  isCurrent
+                      ? '選択中'
+                      : (unlocked ? 'このLevelにする' : 'ロック中'),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.bold,
+                      color: selectable ? Colors.white : Colors.white54),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   // ⑪/#3：固有技（セット消費）と単体技（1枚使用）をカードで並べ、
   // どちらで攻めるかをその場で選べるようにする。スクロールなし（Wrapで収める）。
@@ -3037,51 +3194,6 @@ class _LevelMatchBattleScreenState extends State<LevelMatchBattleScreen>
     );
   }
 
-  Future<void> _showLevels() async {
-    final player = state.player;
-    final changed = await showModalBottomSheet<int>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.all(16),
-          children: [
-            const Text(
-              'LEVEL CHANGE',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            for (final level in player.wrestler.levels)
-              Builder(
-                builder: (_) {
-                  final unlocked = player.unlockedLevels.contains(level.level);
-                  final evaluation = engine.evaluateUnlockCondition(
-                    player,
-                    level,
-                  );
-                  return Card(
-                    child: ListTile(
-                      title: Text(
-                        'Level ${level.level} ${unlocked ? "UNLOCKED" : "LOCKED"}',
-                      ),
-                      subtitle: Text(
-                        '技 ${level.moveIds.map((id) => engine.moves[id]?.name ?? id).join(" / ")}\n'
-                        '条件 ${evaluation.details.join(" / ")}${evaluation.supported ? "" : "（未対応）"}',
-                      ),
-                      onTap: unlocked && level.level != player.currentLevel
-                          ? () => Navigator.pop(context, level.level)
-                          : null,
-                    ),
-                  );
-                },
-              ),
-          ],
-        ),
-      ),
-    );
-    if (changed != null) _act(() => engine.changeLevel('player', changed));
-  }
-
   Future<void> _useMove(MoveDefinition move) async {
     // Ver.0.7.1: 技は「宣言」。相手（CPU）が自動でレスポンスして解決する。
     _act(() => engine.useMove('player', move.id));
@@ -3402,6 +3514,12 @@ class LevelMatchResultScreen extends StatelessWidget {
                 'CPU ${state.cpu.finisherUsed ? "有" : "無"}',
           ),
           FilledButton.icon(
+            onPressed: () => _downloadReport(context, json, state),
+            icon: const Icon(Icons.download),
+            label: const Text('試合ログをファイルで保存'),
+          ),
+          const SizedBox(height: 6),
+          OutlinedButton.icon(
             onPressed: () => Clipboard.setData(ClipboardData(text: json)),
             icon: const Icon(Icons.copy),
             label: const Text('試合JSONをコピー'),
@@ -3415,6 +3533,8 @@ class LevelMatchResultScreen extends StatelessWidget {
                     playerWrestler: state.player.wrestler,
                     cpuWrestler: state.cpu.wrestler,
                     moves: moves,
+                    matchTimeSeconds: state.matchTimeSeconds,
+                    resourceMode: state.resourceMode,
                   ),
                 ),
               ),
@@ -3440,6 +3560,30 @@ class LevelMatchResultScreen extends StatelessWidget {
 Widget _result(String label, String value) => Card(
   child: ListTile(title: Text(label), trailing: Text(value)),
 );
+
+/// Ver.0.9 UX改善⑬：試合結果ログをファイルとしてダウンロードする
+/// （Web以外や失敗時はクリップボードへフォールバック）。
+Future<void> _downloadReport(
+  BuildContext context,
+  String json,
+  LevelMatchState state,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final stamp = DateTime.now()
+      .toUtc()
+      .toIso8601String()
+      .replaceAll(RegExp(r'[:.]'), '-');
+  final name = 'onm_match_$stamp.json';
+  final ok = await downloadTextFile(name, json);
+  if (ok) {
+    messenger.showSnackBar(SnackBar(content: Text('$name を保存しました')));
+  } else {
+    await Clipboard.setData(ClipboardData(text: json));
+    messenger.showSnackBar(
+      const SnackBar(content: Text('このプラットフォームではダウンロード非対応のためクリップボードにコピーしました')),
+    );
+  }
+}
 
 String _attributeCounts(Map<MoveAttribute, int> values) => MoveAttribute.values
     .where((attribute) => (values[attribute] ?? 0) != 0)
