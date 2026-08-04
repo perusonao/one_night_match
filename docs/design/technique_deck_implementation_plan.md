@@ -1,10 +1,9 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 3（スタンド・ダウン・休息、最初のプレイアブル）完了時点**
-  （縮小スコープ版。「Technique Match」画面でPlayer A/B・ターン進行・
-  スタンド／ダウン／休息・手札5枚・山札／捨て札が実際に動く。技の使用・
-  ダメージ・返技・連続攻撃・フォール／ギブアップ・フィニッシャー・CPUは
-  Phase 4以降）
+- ステータス: **Phase 4（単発技の使用）完了時点**
+  （「Technique Match」画面でエネルギーセット・通常技/固有技の使用が動作する。
+  ダメージ・HEAT・ダウン付与・HP0時の疲労状態は即時反映される。
+  返技・連続攻撃・フォール／ギブアップ・フィニッシャー決着・CPUはPhase 5以降）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 
@@ -294,20 +293,54 @@ HP0時の細かな行動制限（[open questions 3番](technique_deck_open_quest
 
 ## Phase 4：単発技の使用
 
-実装対象:
+**ステータス: 完了。**
 
-- 手札から技カードを1枚使用する基本フロー
-- 攻撃エネルギー消費
-- 状態・レベル・レスラー条件判定
-- 技カードの捨て札化
-- ダメージ適用
-- HEAT処理
-- ダウン付与
-- ログ出力
-- UI（最小限、技選択〜結果表示）
+実装対象（すべて完了）:
 
-この段階ではまだ連続攻撃（Phase 5）を実装しない。1ターンに1技のみ成立する
-単純化されたフローで、コアループを先に検証する。
+- 手札から技カードを1枚使用する基本フロー（`TechniqueMatchEngine.useMove`）
+- エネルギーセットの実質化（`TechniqueMatchEngine.setEnergy`。手札の
+  エネルギーカードを永続的な属性別プールへ移す。仕様書3.3章の
+  「使用済みエネルギーの回復」も自分のターン開始時に実装）
+- 攻撃エネルギー消費（即時。使用可能量は`availableEnergyFor()` = セット済み
+  総数 − 使用済み）
+- 状態・レベル・レスラー条件判定（`TechniqueMatchEngine.canUseMove`。
+  `targetState`・`minimumLevel`・固有技/フィニッシャーの`allowedWrestlerIds`）
+- 技カードの捨て札化（使用後は必ず捨て札。Phase 4には防御が無いため常に成立）
+- ダメージ適用（即時。HPは0未満にしない）
+- HEAT処理（即時、`heatDelta`をそのまま加算）
+- ダウン付与（`causesDown`。相手が既に疲労状態なら上書きしない）
+- HP0到達時の疲労状態への移行（`WrestlerPosture.fatigued`）
+- ログ出力（技使用・ダメージ・HEAT上昇・ダウン/疲労を1行ずつ記録）
+- UI（技選択ダイアログ〜使用結果反映、`TechniqueMatchScreen`）
+
+**ダメージ適用方式の判断（open questions 1番）**: 即時適用を「暫定ではなく
+現時点の有力候補」として採用（ユーザー指示）。単発技のみのPhase 4では
+一括適用との結果差が無いため、抽象的な保留ダメージ機構を先行実装せず、
+最短で確定可能な即時適用を選んだ。理由: 技Aの成立で相手がダウンし、
+直後にダウン限定技Bが使用可能になるという連携（`targetState`による判定）を
+成立させるには即時反映が必須。Phase 5（連続攻撃）でも、この方式を維持する
+方が自然という判断を踏まえて実装している（`technique_match_state.dart`の
+モジュール冒頭コメント参照）。
+
+フォール・ギブアップ・フィニッシャー効果（`hasPinEffect` /
+`hasSubmissionEffect` / `hasFinisherEffect`）は技の属性としてカードに
+残るのみで、決着処理へは接続していない（Phase 6・7）。
+
+今回のPhase 4スコープでは扱わなかったもの:
+
+- 返技・連続攻撃（Phase 5。Phase 4には防御が一切無く、技は必ず成立する）
+- フォール／ギブアップ／フィニッシャーの決着（Phase 6・7）
+- レベル変更アクション（プレイヤーの`level`は1で固定。open questions 12番は
+  未解決のまま）
+- レスラー別`recoveryPower`のカタログ接続（Phase 3から持ち越し、
+  open questions 23番）
+
+成果物: `TechniqueMatchEngine.setEnergy` / `canUseMove` / `useMove`、
+`TechniqueMoveResult`。`TechniqueMatchPlayerState`へ`level` /
+`energyPool` / `spentEnergy`を追加。`TechniqueMatchScreen`の手札チップを
+タップ可能にし、技/エネルギーカードごとの選択ダイアログを追加。
+テスト: `test/technique_match_state_test.dart`に13件追加（計30件）、
+`test/technique_match_screen_test.dart`に2件追加（計8件）。
 
 **依存関係**: Phase 1（カード）、Phase 3（状態）。
 
