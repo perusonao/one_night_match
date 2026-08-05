@@ -214,6 +214,194 @@ TechniqueDeckDefinition buildJackPhase7ModelDeck({
     .addCard('td_reversal_1', TechniqueDeckCardType.reversal)
     .build();
 
+/// Phase 7.5（モデルデッキ最適化＋フィニッシャー条件分散）向けに追加した
+/// 4人分のモデルデッキ。
+///
+/// Phase 7の1000試合検証で、フィニッシャー宣言率76.5%・決着率47.2%・
+/// 通常決着率52.8%・技を使えないターン率59.4%と、いずれもユーザーの目標
+/// レンジから逸脱していることが判明した。ユーザー指示により、フィニッシャー
+/// 側の数値調整（HEAT閾値・威力・宣言確率）は行わず、代わりに以下の2点を
+/// 見直して再検証する。
+///
+/// 1. **通常技を6枚→8枚に戻し、フィニッシャーを3枚→2枚へ**（「3枚は
+///    投入できる上限であって、全員必ず3積みする必要はない」というユーザー
+///    指示に基づく）。固有技も3枚→2枚に減らし、合計30枚に収めた。
+/// 2. **フィニッシャー3枚の発動条件をレスラーごとに分散**（既存の
+///    `td_p7_*`カード側で対応、`technique_deck_defaults.dart`参照）。
+///
+/// | 種別 | Phase 7 | Phase 7.5 |
+/// |---|---|---|
+/// | 技エネルギー | 13 | 13 |
+/// | 通常技 | 6（3種×2枚） | 8（3種×3+3+2枚） |
+/// | 固有技 | 3 | 2 |
+/// | フィニッシャー | 3 | 2 |
+/// | 通常キックアウト | 1 | 1 |
+/// | ロープブレイク | 1 | 1 |
+/// | 特殊キックアウト | 1 | 1 |
+/// | エスケープ | 1 | 1 |
+/// | リバーサル | 1 | 1 |
+/// | 合計 | 30 | 30 |
+///
+/// フィニッシャー2枚の選定は、各レスラーの3枚のうち「targetState: any」枠と
+/// 「得意状態限定（Phase 7.5で条件を撤去済み）」枠を採用し、最も条件が厳しい
+/// 「条件付き高性能技」枠はカタログには残しつつ本デッキからは外した
+/// （3枚同時投入前提を崩す、というユーザー指示の趣旨に沿った選定）。
+/// 固有技2枚は各レスラーのPhase 7モデルデッキで採用していた3枚のうち先頭
+/// 2枚を継続採用する。
+
+/// 火神アカリのPhase 7.5モデルデッキ（30枚）。
+/// エネルギー配分: 打撃7・投げ4・返し2（Phase 6・7と同じ）。
+TechniqueDeckDefinition buildAkariPhase75ModelDeck({
+  String deckId = 'model_akari_phase75',
+  String deckName = '火神アカリ Phase 7.5モデルデッキ',
+}) => TechniqueDeckBuilder(
+  wrestlerId: 'wrestler_akari',
+  id: deckId,
+  name: deckName,
+)
+    // 技エネルギー13枚（打撃7・投げ4・返し2）。
+    .addCard('td_energy_strike', TechniqueDeckCardType.energy, count: 7)
+    .addCard('td_energy_throwMove', TechniqueDeckCardType.energy, count: 4)
+    .addCard('td_energy_counter', TechniqueDeckCardType.energy, count: 2)
+    // 通常技8枚（3種、同名上限3枚以内で3+3+2）。
+    .addCard('td_normal_strike_1', TechniqueDeckCardType.technique, count: 3)
+    .addCard('td_normal_throw_1', TechniqueDeckCardType.technique, count: 3)
+    .addCard('td_normal_counter_1', TechniqueDeckCardType.technique, count: 2)
+    // 固有技2枚（Phase 7の3枚から先頭2枚を継続採用）。
+    .addCard('td_p6_akari_sig_kneestrike', TechniqueDeckCardType.technique)
+    .addCard('td_p6_akari_sig_german', TechniqueDeckCardType.technique)
+    // フィニッシャー2枚（any / スタンド得意。条件付き高性能技は本デッキ
+    // からは除外）。
+    .addCard(
+      'td_p7_akari_fin_burningdrive',
+      TechniqueDeckCardType.technique,
+    )
+    .addCard(
+      'td_p7_akari_fin_phoenixdriver',
+      TechniqueDeckCardType.technique,
+    )
+    // 通常キックアウト1枚・ロープブレイク1枚・特殊キックアウト1枚・
+    // エスケープ1枚・リバーサル1枚。
+    .addCard('td_kickout_normal_1', TechniqueDeckCardType.kickOut)
+    .addCard('td_ropebreak_1', TechniqueDeckCardType.ropeBreak)
+    .addCard('td_kickout_special_1', TechniqueDeckCardType.kickOut)
+    .addCard('td_escape_1', TechniqueDeckCardType.escape)
+    .addCard('td_reversal_1', TechniqueDeckCardType.reversal)
+    .build();
+
+/// 白銀レイナのPhase 7.5モデルデッキ（30枚）。
+/// エネルギー配分: 関節7・投げ3・返し3（Phase 6・7と同じ）。
+TechniqueDeckDefinition buildReinaPhase75ModelDeck({
+  String deckId = 'model_reina_phase75',
+  String deckName = '白銀レイナ Phase 7.5モデルデッキ',
+}) => TechniqueDeckBuilder(
+  wrestlerId: 'wrestler_reina',
+  id: deckId,
+  name: deckName,
+)
+    // 技エネルギー13枚（関節7・投げ3・返し3）。
+    .addCard('td_energy_submission', TechniqueDeckCardType.energy, count: 7)
+    .addCard('td_energy_throwMove', TechniqueDeckCardType.energy, count: 3)
+    .addCard('td_energy_counter', TechniqueDeckCardType.energy, count: 3)
+    // 通常技8枚（3種、同名上限3枚以内で3+3+2）。
+    .addCard(
+      'td_normal_submission_1',
+      TechniqueDeckCardType.technique,
+      count: 3,
+    )
+    .addCard('td_p6_normal_takedown', TechniqueDeckCardType.technique, count: 3)
+    .addCard('td_normal_counter_1', TechniqueDeckCardType.technique, count: 2)
+    // 固有技2枚（Phase 7の3枚から先頭2枚を継続採用）。
+    .addCard('td_p6_reina_sig_kneebar', TechniqueDeckCardType.technique)
+    .addCard('td_p6_reina_sig_brainbuster', TechniqueDeckCardType.technique)
+    // フィニッシャー2枚（any / ダウン得意。条件付き高性能技は本デッキ
+    // からは除外）。
+    .addCard('td_p7_reina_fin_silverwing', TechniqueDeckCardType.technique)
+    .addCard('td_p7_reina_fin_armbar_ex', TechniqueDeckCardType.technique)
+    // 通常キックアウト1枚・ロープブレイク1枚・特殊キックアウト1枚・
+    // エスケープ1枚・リバーサル1枚。
+    .addCard('td_kickout_normal_1', TechniqueDeckCardType.kickOut)
+    .addCard('td_ropebreak_1', TechniqueDeckCardType.ropeBreak)
+    .addCard('td_kickout_special_1', TechniqueDeckCardType.kickOut)
+    .addCard('td_escape_1', TechniqueDeckCardType.escape)
+    .addCard('td_reversal_1', TechniqueDeckCardType.reversal)
+    .build();
+
+/// 豪田ミサキのPhase 7.5モデルデッキ（30枚）。
+/// エネルギー配分: 投げ7・打撃4・返し2（Phase 6・7と同じ）。
+TechniqueDeckDefinition buildMisakiPhase75ModelDeck({
+  String deckId = 'model_misaki_phase75',
+  String deckName = '豪田ミサキ Phase 7.5モデルデッキ',
+}) => TechniqueDeckBuilder(
+  wrestlerId: 'wrestler_misaki',
+  id: deckId,
+  name: deckName,
+)
+    // 技エネルギー13枚（投げ7・打撃4・返し2）。
+    .addCard('td_energy_throwMove', TechniqueDeckCardType.energy, count: 7)
+    .addCard('td_energy_strike', TechniqueDeckCardType.energy, count: 4)
+    .addCard('td_energy_counter', TechniqueDeckCardType.energy, count: 2)
+    // 通常技8枚（3種、同名上限3枚以内で3+3+2）。
+    .addCard('td_normal_throw_1', TechniqueDeckCardType.technique, count: 3)
+    .addCard('td_normal_strike_1', TechniqueDeckCardType.technique, count: 3)
+    .addCard('td_normal_counter_1', TechniqueDeckCardType.technique, count: 2)
+    // 固有技2枚（Phase 7の3枚から先頭2枚を継続採用）。
+    .addCard('td_p6_misaki_sig_elbow', TechniqueDeckCardType.technique)
+    .addCard('td_p6_misaki_sig_bodyslam', TechniqueDeckCardType.technique)
+    // フィニッシャー2枚（any / ダウン得意。条件付き高性能技は本デッキ
+    // からは除外）。
+    .addCard('td_p7_misaki_fin_ironpress', TechniqueDeckCardType.technique)
+    .addCard('td_p7_misaki_fin_gouda', TechniqueDeckCardType.technique)
+    // 通常キックアウト1枚・ロープブレイク1枚・特殊キックアウト1枚・
+    // エスケープ1枚・リバーサル1枚。
+    .addCard('td_kickout_normal_1', TechniqueDeckCardType.kickOut)
+    .addCard('td_ropebreak_1', TechniqueDeckCardType.ropeBreak)
+    .addCard('td_kickout_special_1', TechniqueDeckCardType.kickOut)
+    .addCard('td_escape_1', TechniqueDeckCardType.escape)
+    .addCard('td_reversal_1', TechniqueDeckCardType.reversal)
+    .build();
+
+/// 黒蝶ジャックのPhase 7.5モデルデッキ（30枚）。
+/// エネルギー配分: 関節7・ラフ4・返し2（Phase 6・7と同じ）。
+TechniqueDeckDefinition buildJackPhase75ModelDeck({
+  String deckId = 'model_jack_phase75',
+  String deckName = '黒蝶ジャック Phase 7.5モデルデッキ',
+}) => TechniqueDeckBuilder(
+  wrestlerId: 'wrestler_jack',
+  id: deckId,
+  name: deckName,
+)
+    // 技エネルギー13枚（関節7・ラフ4・返し2）。
+    .addCard('td_energy_submission', TechniqueDeckCardType.energy, count: 7)
+    .addCard('td_energy_rough', TechniqueDeckCardType.energy, count: 4)
+    .addCard('td_energy_counter', TechniqueDeckCardType.energy, count: 2)
+    // 通常技8枚（3種、同名上限3枚以内で3+3+2）。
+    .addCard(
+      'td_normal_submission_1',
+      TechniqueDeckCardType.technique,
+      count: 3,
+    )
+    .addCard('td_normal_rough_1', TechniqueDeckCardType.technique, count: 3)
+    .addCard('td_normal_counter_1', TechniqueDeckCardType.technique, count: 2)
+    // 固有技2枚（Phase 7の3枚から先頭2枚を継続採用）。
+    .addCard('td_p6_jack_sig_lowblow', TechniqueDeckCardType.technique)
+    .addCard('td_p6_jack_sig_neckbreaker', TechniqueDeckCardType.technique)
+    // フィニッシャー2枚（any / ダウン得意。条件付き高性能技は本デッキ
+    // からは除外）。
+    .addCard(
+      'td_p7_jack_fin_blackbutterfly',
+      TechniqueDeckCardType.technique,
+    )
+    .addCard('td_p7_jack_fin_darkfall', TechniqueDeckCardType.technique)
+    // 通常キックアウト1枚・ロープブレイク1枚・特殊キックアウト1枚・
+    // エスケープ1枚・リバーサル1枚。
+    .addCard('td_kickout_normal_1', TechniqueDeckCardType.kickOut)
+    .addCard('td_ropebreak_1', TechniqueDeckCardType.ropeBreak)
+    .addCard('td_kickout_special_1', TechniqueDeckCardType.kickOut)
+    .addCard('td_escape_1', TechniqueDeckCardType.escape)
+    .addCard('td_reversal_1', TechniqueDeckCardType.reversal)
+    .build();
+
 /// 火神アカリのPhase 6モデルデッキ（30枚）。
 /// エネルギー配分: 打撃7・投げ4・返し2。
 TechniqueDeckDefinition buildAkariPhase6ModelDeck({

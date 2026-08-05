@@ -627,6 +627,18 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
     // 既存td_fin_*（minimumLevel: 3）はレベル変更アクション未実装のため
     // 実戦投入できず、モデルデッキでは使わない（minimumLevel: 1の新規
     // カードとして追加。既存td_fin_*は変更・削除しない）。
+    //
+    // 【Phase 7.5で追加】1000試合検証で「アカリ対アカリのミラー戦のみ
+    // フィニッシャー宣言率1.0%」という個体差が判明した。原因はアカリの
+    // 3枚すべてが`minimumHeat: 60`以上を要求しており、HEATの蓄積速度に
+    // 対して条件が事実上機能していなかったこと（open questions O番）。
+    // ユーザー指示により、HEAT数値そのもの（60→50等）は調整せず、
+    // 「3枚とも違う役割にする」という条件の分散のみを行った。アカリ・
+    // ミサキ・ジャックの2枚目（得意状態限定枠）から追加条件を外し
+    // （targetStateの一致だけで使える「素直な決め技」にした）、3枚目
+    // （条件付き高性能技）からもHEAT条件を外して相手HP／自分HPのみの
+    // 条件へ変更した。白銀レイナはもともと3枚がHEAT／ダウン限定（無条件）／
+    // ダウン+HPと分散していたため変更していない。
     // ============================================================
     const TechniqueDeckTechniqueCard(
       id: 'td_p7_akari_fin_burningdrive',
@@ -654,8 +666,9 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       heatDelta: 10,
       targetState: TechniqueTargetState.stand,
       hasFinisherEffect: true,
-      finisherRequirements: {'minimumHeat': 60},
-      description: '火神アカリのフィニッシャー。スタンド中の相手に対する高火力技。',
+      finisherRequirements: {},
+      description: '火神アカリのフィニッシャー。スタンド中の相手に決めるお得意の一撃'
+          '（Phase 7.5でHEAT条件を撤去。スタンド状態にさえできれば狙える）。',
     ),
     const TechniqueDeckTechniqueCard(
       id: 'td_p7_akari_fin_finalflame',
@@ -669,8 +682,9 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
-      finisherRequirements: {'minimumHeat': 70, 'maximumOpponentHp': 60},
-      description: '火神アカリのフィニッシャー。条件は厳しいが最高火力を誇る。',
+      finisherRequirements: {'maximumOpponentHp': 60},
+      description: '火神アカリのフィニッシャー。相手が弱っているダウン中に狙う止め'
+          '（Phase 7.5でHEAT条件を撤去し、相手HP条件のみへ変更）。',
     ),
     const TechniqueDeckTechniqueCard(
       id: 'td_p7_misaki_fin_ironpress',
@@ -698,8 +712,9 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
-      finisherRequirements: {'maximumOpponentHp': 50},
-      description: '豪田ミサキのフィニッシャー。ダウン中の相手に対する高火力技。',
+      finisherRequirements: {},
+      description: '豪田ミサキのフィニッシャー。ダウン中の相手に決めるお得意の一撃'
+          '（Phase 7.5で相手HP条件を撤去。ダウンさせられれば狙える）。',
     ),
     const TechniqueDeckTechniqueCard(
       id: 'td_p7_misaki_fin_ultimate',
@@ -786,8 +801,9 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
-      finisherRequirements: {'maximumOwnHp': 40},
-      description: '黒蝶ジャックのフィニッシャー。ダウン中の相手に対する高火力技。',
+      finisherRequirements: {},
+      description: '黒蝶ジャックのフィニッシャー。ダウン中の相手に決めるお得意の一撃'
+          '（Phase 7.5で自分HP条件を撤去。ダウンさせられれば狙える）。',
     ),
     const TechniqueDeckTechniqueCard(
       id: 'td_p7_jack_fin_judgment',
