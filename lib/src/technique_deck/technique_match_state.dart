@@ -16,15 +16,22 @@ import 'technique_deck_models.dart';
 ///
 /// Phase 6で追加したのは、技が成立した際に`hasPinEffect`
 /// （フォール）／`hasSubmissionEffect`（ギブアップ）が立っている場合の決着
-/// 判定。防御側は「キックアウト／ロープブレイクカードを使う」「返技エネルギー
-/// を払う」「HPを消費する」のいずれかで回避でき、いずれもできない（または
-/// 選ばない）場合はそこで試合が終わる（`TechniqueMatchState.winnerIndex`が
-/// セットされる）。優先度は仕様書どおりフォール＞ギブアップとし、
-/// `hasFinisherEffect`が立っている技はPhase 6の対象外（Phase 7でフィニッシャー
-/// 専用の決着処理を実装するまでは、通常のフォール／ギブアップ判定も発生しない
-/// ——通常の技として扱う）。
-/// キックアウト・エスケープカード・フィニッシャー決着・CPUは実装しない
-/// （Phase 7以降）。既存の `LevelMatchEngine`
+/// 判定。防御側は「キックアウト／ロープブレイクカードを使う」「HPを消費する」
+/// のいずれかで回避でき、いずれもできない（または選ばない）場合はそこで
+/// 試合が終わる（`TechniqueMatchState.winnerIndex`がセットされる）。優先度は
+/// 仕様書どおりフォール＞ギブアップとし、`hasFinisherEffect`が立っている技は
+/// Phase 6の対象外（Phase 7でフィニッシャー専用の決着処理を実装するまでは、
+/// 通常のフォール／ギブアップ判定も発生しない——通常の技として扱う）。
+///
+/// 【返技エネルギーの用途は決着回避には使わない（ユーザー指示、Phase 6完了後の
+/// 追加ルール変更）】`reversalEnergyCost`はラリー中の返技（`counterAttack`。
+/// ダメージ無効化・攻守交代）専用のリソースとし、フォール／ギブアップ／
+/// フィニッシャーからの決着回避には使えない。通常攻防用のリソースと決着回避
+/// 手段を明確に分離する設計判断（旧`canEscapeWithReversalEnergy`/
+/// `escapeWithReversalEnergy`は削除済み）。
+///
+/// 特殊キックアウト・エスケープカード・リバーサルカード・フィニッシャー決着・
+/// CPUは実装しない（Phase 7以降）。既存の `LevelMatchEngine`
 /// （classic/energy）とは完全に独立しており、一切の変更・依存を持たない。
 ///
 /// 【ダメージ適用方式について】open questions 1番。Phase 4に続きPhase 5でも
@@ -76,12 +83,14 @@ class TechniquePendingAttack {
 
 /// 技成立後の決着判定の種類。
 enum TechniqueEscapeKind {
-  /// フォール（`hasPinEffect`）。キックアウトカード／返技エネルギー／
-  /// HP消費（`kickOutThreshold`・`kickOutHpRate`）で回避する。
+  /// フォール（`hasPinEffect`）。キックアウトカード／HP消費
+  /// （`kickOutThreshold`・`kickOutHpRate`）で回避する（返技エネルギーは
+  /// 使えない、ユーザー指示）。
   fall,
 
-  /// ギブアップ（`hasSubmissionEffect`）。ロープブレイクカード／返技エネルギー
-  /// ／HP消費（`giveUpThreshold`・`giveUpHpCost`）で回避する。
+  /// ギブアップ（`hasSubmissionEffect`）。ロープブレイクカード／HP消費
+  /// （`giveUpThreshold`・`giveUpHpCost`）で回避する（返技エネルギーは
+  /// 使えない、ユーザー指示）。
   giveUp,
 }
 
@@ -1098,9 +1107,11 @@ class TechniqueMatchEngine {
   // Phase 6: フォール／ギブアップの回避判定
   // ============================================================
   //
-  // 技が成立し `pendingEscape` がセットされている間、防御側は次の3種のうち
-  // いずれかで回避できる（仕様書9・10章）。いずれも使わない（使えない）場合は
-  // [concede] で明示的に敗北を認める。
+  // 技が成立し `pendingEscape` がセットされている間、防御側は次の2種のうち
+  // いずれかで回避できる（仕様書9・10章）。返技エネルギーは通常攻防用
+  // （`counterAttack`）専用のリソースとして分離し、決着回避には使えない
+  // （ユーザー指示、Phase 6完了後の追加ルール変更）。いずれも使わない
+  // （使えない）場合は [concede] で明示的に敗北を認める。
 
   /// [pendingEscape] を、防御側の手札にあるキックアウト／ロープブレイクカード
   /// [entry] で回避できるかどうかを判定する（UIのボタン有効/無効判定用）。
@@ -1178,73 +1189,6 @@ class TechniqueMatchEngine {
     final log = [
       ...state.log,
       '${updatedDefender.wrestlerName}が「${card.name}」を使用し、$kindLabelを回避した',
-    ];
-    return TechniqueMoveResult(
-      state: state.copyWith(
-        playerA: pending.defenderIndex == 0 ? updatedDefender : state.playerA,
-        playerB: pending.defenderIndex == 1 ? updatedDefender : state.playerB,
-        pendingEscape: null,
-        log: log,
-      ),
-      success: true,
-    );
-  }
-
-  /// [pendingEscape] を、成立した技の`reversalEnergyCost`（Phase 5の返技と
-  /// 同じフィールド）を消費して回避できるかどうかを判定する。
-  static ({bool canEscape, String? reason}) canEscapeWithReversalEnergy(
-    TechniqueMatchState state,
-    TechniqueDeckCardCatalog catalog,
-  ) {
-    final pending = state.pendingEscape;
-    if (pending == null) {
-      return (canEscape: false, reason: '決着の判定待ちではありません。');
-    }
-    final defender = state.playerAt(pending.defenderIndex);
-    final card = catalog.findTechniqueById(pending.cardId);
-    if (card == null) {
-      return (canEscape: false, reason: 'カードが見つかりません。');
-    }
-    for (final costEntry in card.reversalEnergyCost.entries) {
-      if (costEntry.value <= 0) continue;
-      if (defender.availableEnergyFor(costEntry.key) < costEntry.value) {
-        return (
-          canEscape: false,
-          reason:
-              '${moveAttributeLabel(costEntry.key)}の返技エネルギーが不足しています'
-              '（必要${costEntry.value}、使用可能${defender.availableEnergyFor(costEntry.key)}）。',
-        );
-      }
-    }
-    return (canEscape: true, reason: null);
-  }
-
-  /// 返技エネルギーを消費して回避する。
-  static TechniqueMoveResult escapeWithReversalEnergy(
-    TechniqueMatchState state,
-    TechniqueDeckCardCatalog catalog,
-  ) {
-    final check = canEscapeWithReversalEnergy(state, catalog);
-    if (!check.canEscape) {
-      return TechniqueMoveResult(
-        state: state,
-        success: false,
-        failureReason: check.reason,
-      );
-    }
-    final pending = state.pendingEscape!;
-    final defender = state.playerAt(pending.defenderIndex);
-    final card = catalog.findTechniqueById(pending.cardId)!;
-    final spent = Map<MoveAttribute, int>.from(defender.spentEnergy);
-    for (final costEntry in card.reversalEnergyCost.entries) {
-      if (costEntry.value <= 0) continue;
-      spent[costEntry.key] = (spent[costEntry.key] ?? 0) + costEntry.value;
-    }
-    final updatedDefender = defender.copyWith(spentEnergy: spent);
-    final kindLabel = pending.kind == TechniqueEscapeKind.fall ? 'フォール' : 'ギブアップ';
-    final log = [
-      ...state.log,
-      '${updatedDefender.wrestlerName}が返技エネルギーを消費し、$kindLabelを回避した',
     ];
     return TechniqueMoveResult(
       state: state.copyWith(
