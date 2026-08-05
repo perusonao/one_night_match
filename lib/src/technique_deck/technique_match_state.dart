@@ -39,6 +39,21 @@ import 'technique_deck_models.dart';
 /// 制御は常に`activePlayerIndex`のプレイヤーへ戻る。フォール／ギブアップの
 /// 判定はラリー終了後（`pendingEscape`）に発生し、決着すれば`winnerIndex`が
 /// セットされて試合は終了する。
+///
+/// 【Phase 6完了後のプレイテストによる追加】12試合の自動シミュレーションで
+/// 「0試合が決着せず、山札が1試合で数百回再構築される」という膠着が判明した
+/// （ユーザー指摘）。これを受けて以下を追加した。
+/// - `maxDeckReshuffles`（既定2回）: 山札切れ→捨て札再構築の上限。上限後に
+///   さらに山札が尽きると、`endTurn`は試合を時間切れ引き分け
+///   （`TechniqueMatchState.isDraw`）で終了させる。
+/// - キックアウト／ロープブレイクカードは使用後、捨て札ではなく
+///   `TechniqueMatchPlayerState.removedPile`（ゲームから完全除外）へ送る。
+///   捨て札のままだと山札再構築のたびに何度も手札へ戻り、防御側が実質
+///   無敵化していたため。
+/// - `TechniqueDeckTechniqueCard.downBonusPower`: 相手がダウン系状態の
+///   ときに追加威力を得る技パラメータ。`targetState`を`down`限定にせずとも
+///   「ダウン中に狙うと強い」という誘因を持たせられる（ギブアップ技が
+///   一度も使われなかった問題への対応）。
 
 /// ターンの進行段階。
 enum TechniqueMatchPhase { start, draw, energySet, end }
@@ -102,6 +117,8 @@ class TechniqueMatchPlayerState {
     this.drawPile = const [],
     this.hand = const [],
     this.discardPile = const [],
+    this.removedPile = const [],
+    this.reshuffleCount = 0,
   });
 
   final String wrestlerId;
@@ -132,6 +149,17 @@ class TechniqueMatchPlayerState {
   final List<TechniqueDeckEntry> hand;
   final List<TechniqueDeckEntry> discardPile;
 
+  /// 山札にも捨て札にも戻らず、ゲームから完全に除外されたカード
+  /// （Phase 6のユーザー指摘を受けた変更。キックアウト／ロープブレイク
+  /// カードは使用後、山札再構築で何度も引き直せると「防御側が実質無敵化
+  /// する」ため、これらのカードは捨て札ではなくここへ送る）。
+  final List<TechniqueDeckEntry> removedPile;
+
+  /// 山札切れ→捨て札再構築を行った回数（[TechniqueMatchEngine.
+  /// maxDeckReshuffles] との比較に使う。Phase 6完了後のプレイテストで
+  /// 「1試合で山札が何百回も再構築される」問題が発覚したため導入）。
+  final int reshuffleCount;
+
   /// 現在使用可能な（セット済みかつ未使用の）指定属性のエネルギー枚数。
   int availableEnergyFor(MoveAttribute attribute) =>
       (energyPool[attribute] ?? 0) - (spentEnergy[attribute] ?? 0);
@@ -146,6 +174,8 @@ class TechniqueMatchPlayerState {
     List<TechniqueDeckEntry>? drawPile,
     List<TechniqueDeckEntry>? hand,
     List<TechniqueDeckEntry>? discardPile,
+    List<TechniqueDeckEntry>? removedPile,
+    int? reshuffleCount,
   }) => TechniqueMatchPlayerState(
     wrestlerId: wrestlerId,
     wrestlerName: wrestlerName,
@@ -160,6 +190,8 @@ class TechniqueMatchPlayerState {
     drawPile: drawPile ?? this.drawPile,
     hand: hand ?? this.hand,
     discardPile: discardPile ?? this.discardPile,
+    removedPile: removedPile ?? this.removedPile,
+    reshuffleCount: reshuffleCount ?? this.reshuffleCount,
   );
 }
 
@@ -182,6 +214,7 @@ class TechniqueMatchState {
     this.pendingEscape,
     this.winnerIndex,
     this.winReason,
+    this.isDraw = false,
     this.log = const [],
   });
 
@@ -212,7 +245,12 @@ class TechniqueMatchState {
   final int? winnerIndex;
 
   /// 勝敗が決した理由（例:「フォール勝利」）。[winnerIndex] がnullの間はnull。
+  /// [isDraw] がtrueの場合は引き分けの理由をここに入れる。
   final String? winReason;
+
+  /// 引き分け（時間切れ）で試合が終了したかどうか（Phase 6完了後に追加。
+  /// 仕様書14章「時間切れ」）。[winnerIndex] はnullのまま。
+  final bool isDraw;
 
   final List<String> log;
 
@@ -230,8 +268,8 @@ class TechniqueMatchState {
   /// 防御側の返技判定を待っているかどうか。
   bool get isAwaitingDefense => pendingAttack != null;
 
-  /// 試合が決着済みかどうか。
-  bool get isOver => winnerIndex != null;
+  /// 試合が決着済みかどうか（勝敗確定・引き分けのいずれかで試合が終了した）。
+  bool get isOver => winnerIndex != null || isDraw;
 
   TechniqueMatchState copyWith({
     TechniqueMatchPlayerState? playerA,
@@ -245,6 +283,7 @@ class TechniqueMatchState {
     Object? pendingEscape = _unset,
     Object? winnerIndex = _unset,
     Object? winReason = _unset,
+    bool? isDraw,
     List<String>? log,
   }) => TechniqueMatchState(
     playerA: playerA ?? this.playerA,
@@ -268,6 +307,7 @@ class TechniqueMatchState {
     winReason: identical(winReason, _unset)
         ? this.winReason
         : winReason as String?,
+    isDraw: isDraw ?? this.isDraw,
     log: log ?? this.log,
   );
 
@@ -295,6 +335,14 @@ class TechniqueMatchState {
 const int defaultRecoveryPower = 15;
 
 const int _handSize = 5;
+
+/// 1人のプレイヤーが試合中に山札を再構築（捨て札シャッフル）できる回数の
+/// 上限（暫定値）。Phase 6完了後のプレイテストで「1試合で山札が何百回も
+/// 再構築され、決着が事実上発生しない」ことが判明したため導入した
+/// （open questions 21・27番参照）。上限に達した状態でさらに山札が
+/// 尽きた場合、[TechniqueMatchEngine.endTurn] は試合を時間切れ引き分け
+/// （[TechniqueMatchState.isDraw]）で終了させる。
+const int maxDeckReshuffles = 2;
 
 /// [TechniqueMatchState] の状態遷移を行う純粋関数群。
 class TechniqueMatchEngine {
@@ -384,22 +432,28 @@ class TechniqueMatchEngine {
   /// 山札から1枚引く。山札が0枚なら捨て札をシャッフルして山札にしてから引く
   /// （仕様書13章）。捨て札も0枚なら何も起きない（open questions 4番、
   /// 正式な「手詰まり」処理は未決定のため、Phase 3では単に引けないだけ）。
+  /// 再構築を行った場合は[TechniqueMatchPlayerState.reshuffleCount]を
+  /// 1増やす（Phase 6完了後に追加。呼び出し側が[maxDeckReshuffles]との
+  /// 比較で時間切れ引き分けを判定するのに使う）。
   static TechniqueMatchPlayerState _drawOne(
     TechniqueMatchPlayerState player,
     Random random,
   ) {
     var drawPile = player.drawPile;
     var discardPile = player.discardPile;
+    var reshuffleCount = player.reshuffleCount;
     if (drawPile.isEmpty) {
       if (discardPile.isEmpty) return player;
       drawPile = List<TechniqueDeckEntry>.from(discardPile)..shuffle(random);
       discardPile = const [];
+      reshuffleCount++;
     }
     final drawn = drawPile.first;
     return player.copyWith(
       drawPile: drawPile.skip(1).toList(),
       hand: [...player.hand, drawn],
       discardPile: discardPile,
+      reshuffleCount: reshuffleCount,
     );
   }
 
@@ -448,6 +502,11 @@ class TechniqueMatchEngine {
   /// 自動的に進める（メインアクションが無いPhase 3では、これらの段階に
   /// プレイヤーの選択は発生しない）。ラリー中・決着判定待ち・試合終了後は
   /// 何もしない（Phase 6でガードを追加）。
+  ///
+  /// 次に手番となるプレイヤーの山札が尽きており、かつ既に
+  /// [maxDeckReshuffles] 回再構築済みの場合、ドローせずに試合を時間切れ
+  /// 引き分け（[TechniqueMatchState.isDraw]）で終了させる（Phase 6完了後の
+  /// プレイテストで発覚した「山札が無限に再構築され続ける」問題への対応）。
   static TechniqueMatchState endTurn(TechniqueMatchState state, {Random? random}) {
     if (state.isOver || state.isRallyActive || state.pendingEscape != null) {
       return state;
@@ -458,6 +517,20 @@ class TechniqueMatchEngine {
     var nextPlayer = nextIndex == 0 ? state.playerA : state.playerB;
 
     final log = [...state.log, '${state.active.wrestlerName}のターンを終了した'];
+
+    final needsReshuffle =
+        nextPlayer.drawPile.isEmpty && nextPlayer.discardPile.isNotEmpty;
+    if (needsReshuffle && nextPlayer.reshuffleCount >= maxDeckReshuffles) {
+      log.add(
+        '${nextPlayer.wrestlerName}の山札が尽き、再構築の上限'
+        '（$maxDeckReshuffles回）に達したため試合は時間切れ引き分けとなった',
+      );
+      return state.copyWith(
+        isDraw: true,
+        winReason: '時間切れ引き分け（山札再構築上限到達）',
+        log: log,
+      );
+    }
 
     // 仕様書11.4章: 自分のターン開始時、通常はスタンド状態へ戻す。
     // 疲労（HP0到達時）についても、Phase 4時点では他に回復手段が無いため
@@ -636,7 +709,16 @@ class TechniqueMatchEngine {
       heat: updatedAttacker.heat + card.heatDelta,
     );
 
-    final damage = card.power < 0 ? 0 : card.power;
+    // 相手がダウン系状態（down／fatigued）のときに発動する追加威力
+    // （`downBonusPower`、Phase 6完了後のユーザー指摘を受けた追加）。
+    // `targetState`を`down`限定にしないギブアップ技（関節技等）に、
+    // 「ダウン中に狙うと強い」という誘因を持たせる。
+    final defenderDownLikeNow =
+        defender.posture == WrestlerPosture.down ||
+        defender.posture == WrestlerPosture.fatigued;
+    final bonus = defenderDownLikeNow ? (card.downBonusPower ?? 0) : 0;
+    final basePower = card.power < 0 ? 0 : card.power;
+    final damage = basePower + bonus;
     final newHp = (defender.hp - damage).clamp(0, defender.maxHp);
     final becameFatigued =
         newHp <= 0 && defender.posture != WrestlerPosture.fatigued;
@@ -651,7 +733,9 @@ class TechniqueMatchEngine {
 
     final log = [
       if (damage > 0)
-        '${updatedDefender.wrestlerName}に$damageダメージ（HP ${defender.hp} → $newHp）',
+        '${updatedDefender.wrestlerName}に$damageダメージ'
+            '${bonus > 0 ? "（ダウン中ボーナス+$bonus込み）" : ""}'
+            '（HP ${defender.hp} → $newHp）',
       if (card.heatDelta != 0)
         '${updatedAttacker.wrestlerName}のHEATが${card.heatDelta}上昇した'
             '（HEAT ${updatedAttacker.heat}）',
@@ -1061,9 +1145,14 @@ class TechniqueMatchEngine {
     return (canEscape: true, reason: null);
   }
 
-  /// キックアウト／ロープブレイクカードを使って回避する（成立後は捨て札へ）。
-  /// 成功すればダメージ等の追加効果は発生せず、制御はそのまま
-  /// `activePlayerIndex`のプレイヤーへ戻る。
+  /// キックアウト／ロープブレイクカードを使って回避する（成立後はゲームから
+  /// 完全に除外される。捨て札には送らない）。成功すればダメージ等の追加効果は
+  /// 発生せず、制御はそのまま`activePlayerIndex`のプレイヤーへ戻る。
+  ///
+  /// 【捨て札ではなく除外にした理由】Phase 6完了後のプレイテストで、捨て札に
+  /// 送っていた頃はキックアウトカードが山札再構築のたびに何度も手札へ戻り、
+  /// 防御側が実質無敵化する問題が確認された（ユーザー指摘）。実際のプロレスの
+  /// 「最後の粘り」に近い、使い切りのリソースとして扱う。
   static TechniqueMoveResult escapeWithDefenseCard(
     TechniqueMatchState state,
     TechniqueDeckEntry entry,
@@ -1083,7 +1172,7 @@ class TechniqueMatchEngine {
     final newHand = List<TechniqueDeckEntry>.from(defender.hand)..remove(entry);
     final updatedDefender = defender.copyWith(
       hand: newHand,
-      discardPile: [...defender.discardPile, entry],
+      removedPile: [...defender.removedPile, entry],
     );
     final kindLabel = pending.kind == TechniqueEscapeKind.fall ? 'フォール' : 'ギブアップ';
     final log = [
