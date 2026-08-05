@@ -1109,47 +1109,37 @@ void main() {
       expect(check.reason, contains('ロープブレイク'));
     });
 
-    test('返技エネルギーを消費してフォールを回避できる', () {
-      var state = resolveToEscape('fall_move');
-      state = state.copyWith(
-        playerB: state.playerB.copyWith(
-          energyPool: const {MoveAttribute.counter: 1},
-        ),
-      );
-      final check = TechniqueMatchEngine.canEscapeWithReversalEnergy(
-        state,
-        catalog(),
-      );
-      expect(check.canEscape, isTrue);
-
-      final result = TechniqueMatchEngine.escapeWithReversalEnergy(
-        state,
-        catalog(),
-      );
-      expect(result.success, isTrue);
-      expect(result.state.pendingEscape, isNull);
-      expect(
-        result.state.playerB.availableEnergyFor(MoveAttribute.counter),
-        0,
-      );
-    });
-
-    test('返技エネルギーが不足しているとフォールを回避できない', () {
-      final state = resolveToEscape('fall_move');
-      final check = TechniqueMatchEngine.canEscapeWithReversalEnergy(
-        state,
-        catalog(),
-      );
-      expect(check.canEscape, isFalse);
-      expect(check.reason, contains('返技エネルギー'));
-
-      final result = TechniqueMatchEngine.escapeWithReversalEnergy(
-        state,
-        catalog(),
-      );
-      expect(result.success, isFalse);
-      expect(result.state, same(state));
-    });
+    test(
+      '返技エネルギーはフォール／ギブアップの回避には使えない'
+      '（TechniqueMatchEngineにcanEscapeWithReversalEnergy等のAPIは存在しない、'
+      'ユーザー指示による仕様変更）',
+      () {
+        // 返技エネルギーは`counterAttack`（ラリー中の返技）専用のリソースと
+        // して分離された。カード／HP消費のいずれも使えない（不足している）
+        // 状況では、返技エネルギーが潤沢にあっても回避手段はconcedeのみ。
+        var state = resolveToEscape('fall_move', hpB: 5);
+        state = state.copyWith(
+          playerB: state.playerB.copyWith(
+            energyPool: const {MoveAttribute.counter: 99},
+          ),
+        );
+        expect(
+          TechniqueMatchEngine.canEscapeWithDefenseCard(
+            state,
+            const TechniqueDeckEntry(
+              instanceId: 'dummy',
+              cardId: 'kickout_normal',
+              cardType: TechniqueDeckCardType.kickOut,
+            ),
+            catalog(),
+          ).canEscape,
+          isFalse, // 手札に無いので使えない
+        );
+        expect(TechniqueMatchEngine.canEscapeWithHp(state, catalog()).canEscape, isFalse);
+        final result = TechniqueMatchEngine.concede(state);
+        expect(result.winnerIndex, 0);
+      },
+    );
 
     test('HP消費でフォールを回避できる（現在HPの割合を消費、閾値以上のみ）', () {
       // fall_move（威力10）を受けてHPは100→90になった状態でpendingEscapeへ
