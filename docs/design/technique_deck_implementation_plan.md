@@ -13,10 +13,14 @@
   フィニッシャー発動条件の分散・検証Botの温存判断（加点式スコアリング）を
   実施して再検証したが、**宣言率は88.9%へさらに悪化**し、目標レンジは
   依然未達成のまま（詳細は[open questions O・P番]
-  (technique_deck_open_questions.md)参照）。バランス調整は継続課題。
-  CPU判断はPhase 8）
+  (technique_deck_open_questions.md)参照）。ユーザー判断により検証Botの
+  これ以上のスコア調整は行わず、Phase 7.5はここで終了。バランス調整は
+  Phase 8の正式CPU実装後に持ち越す。Phase 8のCPU設計書
+  （[`technique_deck_cpu_design.md`](technique_deck_cpu_design.md)）は
+  完成済みだが、実装（Phase 8.0以降）は未着手）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
+- CPU設計: [`technique_deck_cpu_design.md`](technique_deck_cpu_design.md)
 
 ## 非目標（Non-Goals）
 
@@ -663,7 +667,11 @@ no-opする）。
 
 ## Phase 7.5：モデルデッキ最適化・フィニッシャー条件分散・検証Bot改善
 
-**ステータス: 完了（ただし目標レンジは依然未達成。継続課題として残る）**
+**ステータス: 完了・終了（ユーザー判断）。これ以上の検証Botのスコア調整は
+行わない。目標レンジは未達成のまま残るが、原因（「カードの価値」は評価
+できても「今使う価値＝温存判断」を評価できない検証Botの構造的限界）は
+特定済みであり、対応はPhase 8の正式CPU実装（[CPU設計書]
+(technique_deck_cpu_design.md)参照）に委ねる**
 
 Phase 7の1000試合検証で目標レンジからの逸脱（宣言率76.5%・決着率47.2%・
 通常決着率52.8%・使えないターン率59.4%）が判明した際、ユーザーから
@@ -703,22 +711,45 @@ Botが“必殺技を温存する”という発想を持たないことが真�
 
 ## Phase 8：CPU・シミュレーション
 
-実装対象:
+**ステータス: 未着手（設計書は完成済み）**
 
-- 新ルール専用CPU（現行 `_scoreMoveFor` / `CpuDifficulty` 相当の再設計）
-- 攻撃エネルギーと返技エネルギーの温存判断
-- 連続攻撃の継続／終了判断
+Phase 7.5完了後のユーザー指示により、CPUの実装に入る前に設計を確定させた
+（[`technique_deck_cpu_design.md`](technique_deck_cpu_design.md)）。以下の
+サブフェーズ構成で段階的に実装する（ユーザー指定の順序）。CPUの思考ログ
+（Decision Trace）を各段階から組み込む点が本設計の核。
+
+| サブフェーズ | 内容 | ステータス |
+|---|---|---|
+| Phase 8.0 | CPU基盤: `TechniqueCpuLevel` enum・CPUコントローラのAPI骨格・
+  `TechniqueCpuDecisionTrace`データモデル（JSON変換込み） | 未着手 |
+| Phase 8.1 | CPU Level 1（初心者、Phase 7.5検証Botの正式な後継） | 未着手 |
+| Phase 8.2 | CPU Level 2（中級：フォール率・HP・防御札の残数を自分の
+  観測情報のみで評価） | 未着手 |
+| Phase 8.3 | CPU Level 3（上級：手札予測・デッキ残数・エネルギー効率・
+  フィニッシャー温存） | 未着手 |
+| Phase 8.4 | 1000試合シミュレーション（CPU対CPU、Decision Traceで分析、
+  目標レンジと再比較） | 未着手 |
+| Phase 8.5 | 必要ならモデルデッキ・カード数値を調整（CPUの意思決定込みで
+  検証して初めて着手する） | 未着手 |
+
+実装対象の詳細（各サブフェーズに割り振る）:
+
+- 新ルール専用CPU（現行 `_scoreMoveFor` / `CpuDifficulty` とは独立した新規
+  設計。既存モードへの変更・依存は非目標のまま）
+- 攻撃エネルギーと返技エネルギーの温存判断（Level 3）
+- 連続攻撃の継続／終了判断（Level 2〜3）
 - フィニッシャー対策（発動条件を読んで警戒する、エスケープ／リバーサルを
-  適切に温存する）
-- ダウン追撃の判断
-- 休息の判断
-- デッキ評価
-- CPU対CPUシミュレーション
-- Deck Simulator対応（`DeckSimConfig` / `DeckBalanceReport` を新モードへ拡張、
-  または新モード専用のシミュレータを用意するかは実装時に判断）
-- 観戦性評価（既存 `EntertainmentScore` の考え方を踏襲するか再設計するか）
+  適切に温存する。Level 3）
+- ダウン追撃の判断（Level 2〜3）
+- 休息の判断（Level 1〜3）
+- CPU対CPUシミュレーション・Decision Traceの記録（Phase 8.4）
+- デッキ評価・Deck Simulator対応（`DeckSimConfig` / `DeckBalanceReport` を
+  新モードへ拡張するか、新モード専用のシミュレータを用意するかは実装時に
+  判断。優先度は低く、Phase 8.5以降）
+- 観戦性評価（既存 `EntertainmentScore` の考え方を踏襲するか再設計するか。
+  優先度は低い）
 
-**依存関係**: Phase 4〜7（ルール全体の実装完了後でなければAIの意思決定を
+**依存関係**: Phase 4〜7.5（ルール全体の実装完了後でなければAIの意思決定を
 正しく評価できない）。
 
 ---
