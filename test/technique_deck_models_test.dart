@@ -79,12 +79,26 @@ void main() {
       finisherRequirements: {'minimumHeat': 40},
       description: 'テスト用固有技',
       sourceMoveId: 'akari_dropkick',
+      imagePath: 'assets/images/wrestlers/akari.png',
     );
 
     test('全項目のJSON往復', () {
       final card = fullCard();
       final round = TechniqueDeckTechniqueCard.fromJson(card.toJson());
       expect(round, card);
+      expect(round.imagePath, 'assets/images/wrestlers/akari.png');
+    });
+
+    // Technique Deck Rules Phase 7A（⑦画像）で追加したフィールド。
+    test('imagePathは未設定時にnull（技専用イラストが無い間のプレースホルダー扱い）', () {
+      const card = TechniqueDeckTechniqueCard(
+        id: 'td_no_image',
+        name: '画像未設定技',
+        attribute: MoveAttribute.strike,
+      );
+      expect(card.imagePath, isNull);
+      final round = TechniqueDeckTechniqueCard.fromJson(card.toJson());
+      expect(round.imagePath, isNull);
     });
 
     test('最小JSONの読み込み（欠落項目は既定値で補完）', () {
@@ -379,6 +393,42 @@ void main() {
         'recoveryPower': 12,
       });
       expect(profile.recoveryPower, 12);
+    });
+
+    // Technique Deck Rules Phase 7A（レスラーカード）で追加したフィールド。
+    test('Phase 7A追加フィールドのJSON往復', () {
+      const profile = TechniqueDeckWrestlerProfile(
+        wrestlerId: 'wrestler_akari',
+        name: '火神アカリ',
+        hp: 125,
+        recoveryPower: 12,
+        initialHeat: 0,
+        attributeBonus: {MoveAttribute.strike: 3, MoveAttribute.aerial: 2},
+        passiveAbility: 'バーニングスピリット',
+        description: '紅蓮のニューヒロイン。',
+        imagePath: 'assets/images/wrestlers/akari.png',
+        themeColor: '#E53935',
+      );
+      final round = TechniqueDeckWrestlerProfile.fromJson(profile.toJson());
+      expect(round, profile);
+      expect(round.name, '火神アカリ');
+      expect(round.hp, 125);
+      expect(round.attributeBonus[MoveAttribute.strike], 3);
+      expect(round.attributeBonus[MoveAttribute.submission], 0);
+      expect(round.imagePath, 'assets/images/wrestlers/akari.png');
+      expect(round.themeColor, '#E53935');
+    });
+
+    test('Phase 7A追加フィールドの既定値', () {
+      const profile = TechniqueDeckWrestlerProfile(wrestlerId: 'w1');
+      expect(profile.name, '');
+      expect(profile.hp, 0);
+      expect(profile.initialHeat, 0);
+      expect(profile.attributeBonus, const {});
+      expect(profile.passiveAbility, '');
+      expect(profile.description, '');
+      expect(profile.imagePath, isNull);
+      expect(profile.themeColor, isNull);
     });
   });
 

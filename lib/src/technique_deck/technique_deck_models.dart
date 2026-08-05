@@ -262,6 +262,7 @@ class TechniqueDeckTechniqueCard {
     this.finisherRequirements = const {},
     this.description = '',
     this.sourceMoveId,
+    this.imagePath,
   });
 
   final String id;
@@ -306,6 +307,14 @@ class TechniqueDeckTechniqueCard {
   /// Phase 1では保持のみ。解決・整合性検証は行わない。
   final String? sourceMoveId;
 
+  /// 技カード用の画像アセットパス（Technique Deck Rules Phase 7A、仕様書
+  /// 「⑦画像」）。現時点では個々の技専用イラストが存在しないため、
+  /// Phase 7Aで追加した全カードはnull（未設定）のまま構造だけ用意している。
+  /// 画面側はnullの場合アイコン表示へフォールバックする想定（レスラー
+  /// 立ち絵の`techniqueWrestlerPortraits`と同じ考え方）。将来イラストが
+  /// 用意でき次第、このフィールドへ差し替えるだけで反映できる。
+  final String? imagePath;
+
   TechniqueDeckTechniqueCard copyWith({
     String? id,
     String? name,
@@ -330,6 +339,7 @@ class TechniqueDeckTechniqueCard {
     Map<String, dynamic>? finisherRequirements,
     String? description,
     Object? sourceMoveId = _unset,
+    Object? imagePath = _unset,
   }) => TechniqueDeckTechniqueCard(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -366,6 +376,9 @@ class TechniqueDeckTechniqueCard {
     sourceMoveId: identical(sourceMoveId, _unset)
         ? this.sourceMoveId
         : sourceMoveId as String?,
+    imagePath: identical(imagePath, _unset)
+        ? this.imagePath
+        : imagePath as String?,
   );
 
   Map<String, dynamic> toJson() => {
@@ -392,6 +405,7 @@ class TechniqueDeckTechniqueCard {
     'finisherRequirements': finisherRequirements,
     'description': description,
     if (sourceMoveId != null) 'sourceMoveId': sourceMoveId,
+    if (imagePath != null) 'imagePath': imagePath,
   };
 
   /// 欠落フィールドは既定値で補完し、不正な値でクラッシュしない。
@@ -440,6 +454,7 @@ class TechniqueDeckTechniqueCard {
           : const {},
       description: _stringOrDefault(json['description'], ''),
       sourceMoveId: _stringOrNull(json['sourceMoveId']),
+      imagePath: _stringOrNull(json['imagePath']),
     );
   }
 
@@ -468,7 +483,8 @@ class TechniqueDeckTechniqueCard {
       downBonusPower == other.downBonusPower &&
       _mapEquals(finisherRequirements, other.finisherRequirements) &&
       description == other.description &&
-      sourceMoveId == other.sourceMoveId;
+      sourceMoveId == other.sourceMoveId &&
+      imagePath == other.imagePath;
 
   @override
   int get hashCode => Object.hash(
@@ -696,24 +712,87 @@ class TechniqueDefenseCard {
 class TechniqueDeckWrestlerProfile {
   const TechniqueDeckWrestlerProfile({
     required this.wrestlerId,
+    this.name = '',
+    this.hp = 0,
     this.recoveryPower = 0,
+    this.initialHeat = 0,
+    this.attributeBonus = const {},
+    this.passiveAbility = '',
+    this.description = '',
+    this.imagePath,
+    this.themeColor,
     this.allowedSignatureCardIds = const [],
     this.allowedFinisherCardIds = const [],
   });
 
   final String wrestlerId;
+
+  /// Technique Deck Rules Phase 7A（仕様書「①レスラーカード」）で追加した
+  /// 表示用フィールド群。既存の `WrestlerDefinition`（classic/energyモード）
+  /// とは独立しており、実戦エンジン（`TechniqueMatchEngine`）へは接続しない
+  /// （データ保持のみ。現状の試合開始時HP/HEATは引き続き
+  /// `TechniqueMatchScreen`が`WrestlerDefinition.maxHp`／HEAT初期値0を使う）。
+  final String name;
+
+  /// レスラーカードの基準HP（表示・将来のバランス調整用）。
+  final int hp;
   final int recoveryPower;
+
+  /// 試合開始時のHEAT基準値（表示・将来のエンジン接続用、現状は未使用で
+  /// 全レスラー0固定）。
+  final int initialHeat;
+
+  /// 属性別の技威力補正値（仕様書: 打撃/投げ/関節/飛び/ラフ）。
+  /// 既存の[_costMapFromJson]/[_costMapToJson]（攻撃・返技エネルギー
+  /// コストと同じ仕組み）を流用し、専用のJSON補助関数は追加しない。
+  /// 現状はフレーバー・将来のバランス調整用の値であり、
+  /// `TechniqueMatchEngine`のダメージ計算には接続していない。
+  final Map<MoveAttribute, int> attributeBonus;
+
+  /// パッシブ能力の説明文（フレーバーテキスト。効果としては未実装）。
+  final String passiveAbility;
+
+  /// レスラーカードの説明文。
+  final String description;
+
+  /// 立ち絵アセットパス（`technique_wrestler_portraits.dart`の
+  /// `techniqueWrestlerPortraits`と同じ画像を指す想定。未設定時はnull）。
+  final String? imagePath;
+
+  /// レスラーカードのテーマカラー（`#RRGGBB`形式の16進文字列）。
+  final String? themeColor;
+
   final List<String> allowedSignatureCardIds;
   final List<String> allowedFinisherCardIds;
 
   TechniqueDeckWrestlerProfile copyWith({
     String? wrestlerId,
+    String? name,
+    int? hp,
     int? recoveryPower,
+    int? initialHeat,
+    Map<MoveAttribute, int>? attributeBonus,
+    String? passiveAbility,
+    String? description,
+    Object? imagePath = _unset,
+    Object? themeColor = _unset,
     List<String>? allowedSignatureCardIds,
     List<String>? allowedFinisherCardIds,
   }) => TechniqueDeckWrestlerProfile(
     wrestlerId: wrestlerId ?? this.wrestlerId,
+    name: name ?? this.name,
+    hp: hp ?? this.hp,
     recoveryPower: recoveryPower ?? this.recoveryPower,
+    initialHeat: initialHeat ?? this.initialHeat,
+    attributeBonus: attributeBonus ?? this.attributeBonus,
+    passiveAbility: passiveAbility ?? this.passiveAbility,
+    description: description ?? this.description,
+    imagePath: identical(imagePath, _unset)
+        ? this.imagePath
+        : imagePath as String?,
+    themeColor: identical(themeColor, _unset)
+        ? this.themeColor
+        : themeColor as String?,
     allowedSignatureCardIds:
         allowedSignatureCardIds ?? this.allowedSignatureCardIds,
     allowedFinisherCardIds:
@@ -722,7 +801,15 @@ class TechniqueDeckWrestlerProfile {
 
   Map<String, dynamic> toJson() => {
     'wrestlerId': wrestlerId,
+    'name': name,
+    'hp': hp,
     'recoveryPower': recoveryPower,
+    'initialHeat': initialHeat,
+    'attributeBonus': _costMapToJson(attributeBonus),
+    'passiveAbility': passiveAbility,
+    'description': description,
+    if (imagePath != null) 'imagePath': imagePath,
+    if (themeColor != null) 'themeColor': themeColor,
     'allowedSignatureCardIds': allowedSignatureCardIds,
     'allowedFinisherCardIds': allowedFinisherCardIds,
   };
@@ -733,7 +820,15 @@ class TechniqueDeckWrestlerProfile {
       wrestlerId: wrestlerId is String && wrestlerId.isNotEmpty
           ? wrestlerId
           : '',
+      name: _stringOrDefault(json['name'], ''),
+      hp: _intOrNull(json['hp']) ?? 0,
       recoveryPower: _intOrNull(json['recoveryPower']) ?? 0,
+      initialHeat: _intOrNull(json['initialHeat']) ?? 0,
+      attributeBonus: _costMapFromJson(json['attributeBonus']),
+      passiveAbility: _stringOrDefault(json['passiveAbility'], ''),
+      description: _stringOrDefault(json['description'], ''),
+      imagePath: _stringOrNull(json['imagePath']),
+      themeColor: _stringOrNull(json['themeColor']),
       allowedSignatureCardIds: (json['allowedSignatureCardIds'] as List?)
               ?.whereType<String>()
               .toList() ??
@@ -749,21 +844,35 @@ class TechniqueDeckWrestlerProfile {
   bool operator ==(Object other) =>
       other is TechniqueDeckWrestlerProfile &&
       wrestlerId == other.wrestlerId &&
+      name == other.name &&
+      hp == other.hp &&
       recoveryPower == other.recoveryPower &&
+      initialHeat == other.initialHeat &&
+      _costMapEquals(attributeBonus, other.attributeBonus) &&
+      passiveAbility == other.passiveAbility &&
+      description == other.description &&
+      imagePath == other.imagePath &&
+      themeColor == other.themeColor &&
       _listEquals(allowedSignatureCardIds, other.allowedSignatureCardIds) &&
       _listEquals(allowedFinisherCardIds, other.allowedFinisherCardIds);
 
   @override
   int get hashCode => Object.hash(
     wrestlerId,
+    name,
+    hp,
     recoveryPower,
+    initialHeat,
+    _costMapHash(attributeBonus),
+    passiveAbility,
+    Object.hash(description, imagePath, themeColor),
     allowedSignatureCardIds.length,
     allowedFinisherCardIds.length,
   );
 
   @override
   String toString() =>
-      'TechniqueDeckWrestlerProfile(wrestlerId: $wrestlerId, recoveryPower: $recoveryPower)';
+      'TechniqueDeckWrestlerProfile(wrestlerId: $wrestlerId, name: $name, hp: $hp)';
 }
 
 // ============================================================
