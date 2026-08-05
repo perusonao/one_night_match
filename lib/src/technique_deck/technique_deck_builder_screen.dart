@@ -11,6 +11,7 @@ import 'technique_deck_deck.dart';
 import 'technique_deck_defaults.dart';
 import 'technique_deck_file_io.dart';
 import 'technique_deck_generator.dart';
+import 'technique_deck_model_decks.dart';
 import 'technique_deck_models.dart';
 import 'technique_deck_storage.dart';
 import 'technique_deck_validation.dart';
@@ -320,6 +321,35 @@ class _TechniqueDeckBuilderScreenState
           result.success ? '暫定デッキを生成しました（${wrestler.name}用）。' : '生成しましたが検証エラーが残っています。',
         ),
       ),
+    );
+  }
+
+  // ============================================================
+  // モデルデッキ読込（Technique Deck Rules Phase 7A）
+  // ============================================================
+
+  /// 選択中レスラーにPhase 7Aモデルデッキが存在するか。
+  bool get _hasModelDeckForSelectedWrestler {
+    final wrestler = selectedWrestler;
+    if (wrestler == null) return false;
+    return techniquePhase7AModelDeckBuilders.containsKey(wrestler.id);
+  }
+
+  /// 選択中レスラーのPhase 7Aモデルデッキをワンタップで読み込む
+  /// （仕様書「⑤デッキ構築画面」）。現在の編集内容は上書きされる。
+  Future<void> _loadModelDeck() async {
+    final wrestler = selectedWrestler;
+    if (wrestler == null) return;
+    final modelDeck = findTechniquePhase7AModelDeck(wrestler.id);
+    if (modelDeck == null) return;
+    final ok = await _confirmIfDirty(
+      'モデルデッキを読み込むと、現在のデッキ内容は上書きされます。続行しますか？',
+    );
+    if (!ok) return;
+    _applyDeckDefinition(modelDeck);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${wrestler.name}のモデルデッキを読み込みました。')),
     );
   }
 
@@ -820,6 +850,13 @@ class _TechniqueDeckBuilderScreenState
                   onPressed: selectedWrestler == null ? null : _runAutoGenerate,
                   icon: const Icon(Icons.auto_awesome),
                   label: const Text('自動生成'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: _hasModelDeckForSelectedWrestler
+                      ? _loadModelDeck
+                      : null,
+                  icon: const Icon(Icons.playlist_add_check),
+                  label: const Text('モデルデッキ読込'),
                 ),
                 OutlinedButton.icon(
                   onPressed: _openJsonDialog,

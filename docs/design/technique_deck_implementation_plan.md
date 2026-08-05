@@ -1,21 +1,17 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 7.5（モデルデッキ最適化・フィニッシャー条件分散・
-  検証Bot改善）完了時点**（「Technique Match」画面で技の応酬（ラリー）・
-  フォール／ギブアップの回避判定に加え、フィニッシャー（発動条件判定→
-  発動前キャンセル→成立→専用脱出→即決着）が動作するようになった
-  （Phase 7）。発動条件はカード側データ（`finisherRequirements`）で持ち、
-  エンジンには個別ハードコードしない設計。通常の返技エネルギーでは
-  フィニッシャーを止められず、発動前キャンセルはエスケープ／リバーサル
-  カード、成立後の脱出は専用の特殊キックアウトカードのみが有効。Phase 7の
-  1000試合検証でフィニッシャー宣言率76.5%・決着率47.2%等、目標レンジからの
-  逸脱が判明したため、Phase 7.5でモデルデッキ内訳の見直し（通常技6→8枚）・
-  フィニッシャー発動条件の分散・検証Botの温存判断（加点式スコアリング）を
-  実施して再検証したが、**宣言率は88.9%へさらに悪化**し、目標レンジは
-  依然未達成のまま（詳細は[open questions O・P番]
-  (technique_deck_open_questions.md)参照）。ユーザー判断により検証Botの
-  これ以上のスコア調整は行わず、Phase 7.5はここで終了。バランス調整は
-  Phase 8の正式CPU実装後に持ち越す。Phase 8のCPU設計書
+- ステータス: **Phase 7A（レスラーカード・技カード・モデルデッキ実装）
+  完了時点**（Phase 7.5終了後、ユーザー指示により「ゲームバランス調整では
+  なく4人分の正式な基準データを実装する」専用ラウンドを実施。
+  `TechniqueDeckWrestlerProfile`へレスラーカードの各種フィールドを追加、
+  技カード48枚（4人×12枚）を正式名称で追加、エスケープ・リバーサルを
+  含まない30枚構成のPhase 7Aモデルデッキを4人分追加、Technique Deck
+  Builderへのモデルデッキ一括読込ボタン、Technique Matchのデッキ解決
+  優先度を「保存済み→モデルデッキ→AutoGenerator」へ変更。
+  `TechniqueMatchEngine`・ダメージ計算等の実戦ロジックは無改修
+  （詳細はPhase 7Aの章を参照）。Phase 7.5時点で判明していた「検証Botの
+  構造的限界（“今使う価値＝温存判断”を評価できない）」への対応は、
+  引き続きPhase 8の正式CPU実装に委ねる。Phase 8のCPU設計書
   （[`technique_deck_cpu_design.md`](technique_deck_cpu_design.md)）は
   完成済みだが、実装（Phase 8.0以降）は未着手）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
@@ -706,6 +702,71 @@ Botが“必殺技を温存する”という発想を持たないことが真�
 （スコアの重み・HEAT閾値・威力）は本ラウンドでは調整していない。
 
 **依存関係**: Phase 7。
+
+---
+
+## Phase 7A：レスラーカード・技カード・モデルデッキ実装（正式データ）
+
+**ステータス: 完了。**
+
+ユーザー指示により、Phase 8（CPU実装）の前に「ゲームバランス調整ではなく、
+4人分の正式な基準データをゲームへ実装する」専用ラウンドを挟んだ。
+`TechniqueMatchEngine`・ダメージ計算・ラリー・フォール・ギブアップ・
+フィニッシャー処理・CPU・シミュレーションには一切手を加えない、**データ
+追加のみ**のフェーズ。
+
+成果物:
+
+- **立ち絵**: ユーザー添付のレスラー4人分リファレンス画像（チェッカー
+  ボード背景、一部キャラクターは衣装の色がチェッカーボードと近く単純な
+  閾値処理では誤消去される問題があった）から、グリッド認識＋メディアン
+  フィルタによる背景除去スクリプトで4人分を切り出し、
+  `assets/images/wrestlers/{akari,misaki,reina,jack}.png`として収録
+  （新規イラスト生成はしていない）。
+  `lib/src/technique_deck/technique_wrestler_portraits.dart`の
+  `techniqueWrestlerPortraits`マップを4人分に更新（Ver.2まではアカリ・
+  ミサキの2人分のみだった）。
+- **①レスラーカード**: `TechniqueDeckWrestlerProfile`
+  （`technique_deck_models.dart`）へ`name`・`hp`・`initialHeat`・
+  `attributeBonus`（打撃/投げ/関節/飛び/ラフの補正値、既存の
+  `_costMapFromJson`/`_costMapToJson`を流用）・`passiveAbility`・
+  `description`・`imagePath`・`themeColor`を追加（既存の`wrestlerId`・
+  `recoveryPower`・`allowedSignatureCardIds`・`allowedFinisherCardIds`は
+  維持）。`hp`・`themeColor`は既存の`WrestlerDefinition`
+  （classic/energyモード、`wrestler_editor/defaults.dart`）の値を踏襲。
+  4人分のデータを`technique_deck_wrestler_catalog.dart`の
+  `buildTechniqueDeckWrestlerCatalog()`として新規追加。実戦エンジンへは
+  未接続（データ保持のみ。試合開始時HP/HEATは引き続き既存の
+  `WrestlerDefinition.maxHp`／HEAT初期値0を使用）。
+- **②技カードのimagePath**: `TechniqueDeckTechniqueCard`へ`imagePath`
+  （nullable）を追加。技専用イラストは無いため全カードnull（構造のみ
+  用意、画面側はアイコンへフォールバック）。
+- **③48枚の技カード**: `technique_deck_defaults.dart`へ
+  `td_p7a_{akari,misaki,reina,jack}_{normal,sig,fin}_*`として、ユーザー
+  指定の技名（各12枚＝通常技8・固有技2・フィニッシャー2）を追加。
+  フィニッシャーの発動条件はPhase 7.5で判明した「全員HEATのみで揃えると
+  宣言率が偏る」問題を踏まえ、レスラーごとに異なる条件軸（アカリ:HEAT、
+  ミサキ:相手HP、レイナ:HEAT、ジャック:自分HP）を採用し、2枚目は
+  `targetState`による状態限定のみとした。
+- **④4人分のPhase 7Aモデルデッキ**: `technique_deck_model_decks.dart`へ
+  `build{Akari,Misaki,Reina,Jack}Phase7AModelDeck`
+  （各30枚: 技エネルギー13・通常技8・固有技4・フィニッシャー2・通常
+  キックアウト1・ロープブレイク1・特殊キックアウト1。**エスケープ・
+  リバーサルを含まない**、ユーザー指定の内訳）を追加。固有技4枚は
+  バリデータの同名上限（固有技は同名1枚まで）があるため、新規2種
+  （各1枚）に加え既存Phase 6固有技から2種を1枚ずつ採用して満たした。
+  4デッキとも検証エラー・警告ともに0件。`wrestlerId`→デッキ構築関数の
+  一覧として`techniquePhase7AModelDeckBuilders`
+  （`findTechniquePhase7AModelDeck`）も追加。
+- **⑤デッキ構築画面**: `TechniqueDeckBuilderScreen`へ「モデルデッキ読込」
+  ボタンを追加。選択中レスラーにPhase 7Aモデルデッキが存在すれば有効化され、
+  ワンタップで現在の編集内容をそのモデルデッキで上書きする。
+- **⑥Technique Matchのデッキ解決優先度変更**:
+  `TechniqueMatchScreen._resolveDeck()`を「保存済みデッキ→モデルデッキ→
+  AutoGenerator」の優先順に変更（従来は保存済みデッキ→AutoGeneratorの
+  2段階）。`TechniqueMatchEngine`自体は無改修。
+
+**依存関係**: Phase 2（デッキ検証・自動生成）、Phase 7（フィニッシャー）。
 
 ---
 
