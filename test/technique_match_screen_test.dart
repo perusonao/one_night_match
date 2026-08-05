@@ -181,8 +181,8 @@ void main() {
       await tester.pumpAndSettle();
 
       // 休息した側（元のアクティブプレイヤー）はダウン状態のまま残るため、
-      // ダウンバッジが引き続き表示される。
-      expect(find.text('ダウン'), findsWidgets);
+      // DOWNバッジが引き続き表示される（Ver.3で状態バッジは英語ラベル化）。
+      expect(find.text('DOWN'), findsWidgets);
 
       await expandLog(tester);
       expect(find.textContaining('休息してHPを'), findsOneWidget);
@@ -201,12 +201,18 @@ void main() {
       expect(find.textContaining('ターンを終了した'), findsOneWidget);
     });
 
-    testWidgets('新しい試合ボタンでセットアップ画面へ戻る', (tester) async {
+    testWidgets('新しい試合ボタンは確認ダイアログを経てセットアップ画面へ戻る', (tester) async {
+      // Ver.3⑧: デッキリセット相当の取り消せない操作のため確認ダイアログを
+      // 追加した。
       await pumpScreen(tester);
       await tester.tap(find.text('試合開始'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byIcon(Icons.refresh));
+      await tester.pumpAndSettle();
+
+      expect(find.text('新しい試合を始めますか？'), findsOneWidget);
+      await tester.tap(find.text('新しい試合を始める'));
       await tester.pumpAndSettle();
 
       expect(find.text('試合開始'), findsOneWidget);
