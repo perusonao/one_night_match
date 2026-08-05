@@ -15,8 +15,9 @@ import 'technique_match_state.dart';
 /// スタンド／ダウン／疲労・休息・ターン進行・HP／HEAT表示・手札／山札・
 /// エネルギーセット・技の応酬（攻撃宣言→返技判定→成功なら攻守交代して連続
 /// 攻撃）・フォール／ギブアップの回避判定（キックアウト／ロープブレイク
-/// カード・返技エネルギー・HP消費・諦めによる決着）を扱う。フィニッシャーの
-/// 決着処理・特殊キックアウト・エスケープカード・CPUは実装しない
+/// カード・HP消費・諦めによる決着。返技エネルギーはラリー中の返技専用の
+/// リソースで、決着回避には使えない）を扱う。フィニッシャーの決着処理・
+/// 特殊キックアウト・エスケープカード・CPUは実装しない
 /// （Phase 7以降）。エネルギーセットはラリー中・決着判定待ちの間は行えない。
 /// 現行のclassic／energyモード・Deck Simulator・レスラーエディタ・
 /// Technique Deck Builderの挙動には一切影響しない。
@@ -250,16 +251,6 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     setState(() => matchState = result.state);
   }
 
-  void _escapeWithEnergy() {
-    final state = matchState;
-    if (state == null) return;
-    final result = TechniqueMatchEngine.escapeWithReversalEnergy(
-      state,
-      catalog,
-    );
-    setState(() => matchState = result.state);
-  }
-
   void _escapeWithHp() {
     final state = matchState;
     if (state == null) return;
@@ -274,8 +265,10 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   }
 
   /// 技が成立しフォール／ギブアップの回避判定待ちの間、決定するまで閉じられ
-  /// ないダイアログを表示する。キックアウト／ロープブレイクカード・返技
-  /// エネルギー・HP消費のいずれかで回避するか、諦めて敗北を認めるかを選ぶ。
+  /// ないダイアログを表示する。キックアウト／ロープブレイクカード・HP消費の
+  /// いずれかで回避するか、諦めて敗北を認めるかを選ぶ（返技エネルギーは
+  /// ラリー中の返技専用のリソースであり、決着回避には使えない。ユーザー指示
+  /// によるPhase 6完了後の仕様変更）。
   Future<void> _showEscapeDecisionDialog() async {
     final state = matchState;
     final pending = state?.pendingEscape;
@@ -296,10 +289,6 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
               ).canEscape,
         )
         .toList();
-    final energyCheck = TechniqueMatchEngine.canEscapeWithReversalEnergy(
-      state,
-      catalog,
-    );
     final hpCheck = TechniqueMatchEngine.canEscapeWithHp(state, catalog);
 
     await showDialog<void>(
@@ -345,24 +334,6 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
               ),
               const SizedBox(height: 12),
             ],
-            FilledButton(
-              onPressed: energyCheck.canEscape
-                  ? () {
-                      Navigator.pop(dialogContext);
-                      _escapeWithEnergy();
-                    }
-                  : null,
-              child: const Text('返技エネルギーを消費して回避する'),
-            ),
-            if (!energyCheck.canEscape)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  energyCheck.reason ?? '',
-                  style: const TextStyle(fontSize: 11, color: _red),
-                ),
-              ),
-            const SizedBox(height: 8),
             FilledButton(
               onPressed: hpCheck.canEscape
                   ? () {
@@ -470,13 +441,13 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
               else if (technique.hasPinEffect)
                 const Text(
                   '成立するとフォール判定が発生します（キックアウトカード／'
-                  '返技エネルギー／HP消費で回避されなければ、そのまま勝敗が決まります）。',
+                  'HP消費で回避されなければ、そのまま勝敗が決まります）。',
                   style: TextStyle(color: _gold, fontSize: 12),
                 )
               else if (technique.hasSubmissionEffect)
                 const Text(
                   '成立するとギブアップ判定が発生します（ロープブレイクカード／'
-                  '返技エネルギー／HP消費で回避されなければ、そのまま勝敗が決まります）。',
+                  'HP消費で回避されなければ、そのまま勝敗が決まります）。',
                   style: TextStyle(color: _gold, fontSize: 12),
                 ),
               const SizedBox(height: 8),
