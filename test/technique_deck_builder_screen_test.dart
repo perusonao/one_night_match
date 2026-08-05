@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_builder_screen.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_deck.dart';
+import 'package:one_night_match/src/technique_deck/technique_deck_defaults.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_models.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_storage.dart';
 import 'package:one_night_match/src/wrestler_editor/models.dart'
@@ -103,6 +104,29 @@ void main() {
       await tester.tap(find.text('黒蝶ジャック').last);
       await tester.pumpAndSettle();
       expect(find.text('黒蝶ジャック'), findsWidgets);
+    });
+  });
+
+  group('TechniqueDeckBuilderScreen: モデルデッキ読込（Phase 7A）', () {
+    testWidgets('既定選択（火神アカリ）はPhase 7Aモデルデッキを持つためボタンが有効', (tester) async {
+      // ボタンの有効・無効判定は実カタログに関わらず成立するため、
+      // ここではスタブカタログのままで構わない（読込結果の反映確認は
+      // 次のテストで実カタログを使う）。
+      await pumpScreen(tester);
+      final button = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'モデルデッキ読込'),
+      );
+      expect(button.onPressed, isNotNull);
+    });
+
+    testWidgets('タップすると火神アカリのPhase 7Aモデルデッキ（30枚）が読み込まれる', (tester) async {
+      // モデルデッキが参照するtd_p7a_*系カードは実カタログにしか存在しない
+      // ため、この検証だけbuildProvisionalTechniqueDeckCatalog()を使う。
+      await pumpScreen(tester, catalog: buildProvisionalTechniqueDeckCatalog());
+      await tester.tap(find.widgetWithText(FilledButton, 'モデルデッキ読込'));
+      await tester.pumpAndSettle();
+      expect(find.text('合計枚数 30 / 30'), findsOneWidget);
+      expect(find.textContaining('エラー 0件'), findsOneWidget);
     });
   });
 

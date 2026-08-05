@@ -6,6 +6,7 @@ import '../wrestler_editor/repository.dart';
 import 'technique_deck_deck.dart';
 import 'technique_deck_defaults.dart';
 import 'technique_deck_generator.dart';
+import 'technique_deck_model_decks.dart';
 import 'technique_deck_models.dart';
 import 'technique_deck_storage.dart';
 import 'technique_match_state.dart';
@@ -134,6 +135,14 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         match.first.toDeckDefinition(),
         '保存済みデッキ「${match.first.name}」を使用',
       );
+    }
+    // Technique Deck Rules Phase 7A: 保存済みデッキが無い場合、AutoGenerator
+    // による仮デッキよりも先に正式なモデルデッキ（存在すれば）を優先する
+    // （仕様書「⑥Technique Match」: 保存済みデッキ→モデルデッキ→
+    // AutoGenerator）。TechniqueMatchEngine自体には手を加えていない。
+    final modelDeck = findTechniquePhase7AModelDeck(wrestler.id);
+    if (modelDeck != null) {
+      return (modelDeck, 'モデルデッキ「${modelDeck.name}」を使用');
     }
     final result =
         TechniqueDeckAutoGenerator(

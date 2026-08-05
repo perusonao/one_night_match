@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,7 +8,11 @@ import 'package:one_night_match/src/technique_deck/technique_deck_models.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_storage.dart';
 import 'package:one_night_match/src/technique_deck/technique_match_screen.dart';
 import 'package:one_night_match/src/technique_deck/technique_match_state.dart';
+import 'package:one_night_match/src/wrestler_editor/defaults.dart'
+    show defaultEditorWrestlers;
 import 'package:one_night_match/src/wrestler_editor/models.dart' show MoveAttribute;
+import 'package:one_night_match/src/wrestler_editor/repository.dart'
+    show LocalWrestlerRepository;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -75,6 +81,7 @@ void main() {
   Future<void> pumpScreen(
     WidgetTester tester, {
     TechniqueDeckRepository? deckRepository,
+    LocalWrestlerRepository? wrestlerRepository,
   }) async {
     await tester.binding.setSurfaceSize(const Size(800, 3000));
     await tester.pumpWidget(
@@ -82,6 +89,7 @@ void main() {
         home: TechniqueMatchScreen(
           catalog: testCatalog(),
           deckRepository: deckRepository,
+          wrestlerRepository: wrestlerRepository,
         ),
       ),
     );
@@ -120,15 +128,45 @@ void main() {
       expect(find.text('試合開始'), findsOneWidget);
     });
 
-    testWidgets('試合開始すると、保存済みデッキが無ければ自動生成した仮デッキで開始する', (tester) async {
+    testWidgets('試合開始すると、保存済みデッキが無ければPhase 7Aモデルデッキで開始する', (tester) async {
+      // Technique Deck Rules Phase 7A（仕様書「⑥Technique Match」）で
+      // デッキ解決優先度が「保存済みデッキ→モデルデッキ→AutoGenerator」に
+      // 変更された。既定のレスラー（wrestler_akari等）は全員Phase 7A
+      // モデルデッキを持つため、保存済みデッキが無い場合はモデルデッキが
+      // 使われることを検証する。
       await pumpScreen(tester);
       await tester.tap(find.text('試合開始'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('ターン1'), findsWidgets);
       await expandPlayerDetail(tester, 0);
-      expect(find.textContaining('仮デッキを自動生成'), findsWidgets);
+      expect(find.textContaining('モデルデッキ'), findsWidgets);
     });
+
+    testWidgets(
+      '試合開始すると、保存済みデッキもモデルデッキも無ければ自動生成した仮デッキで開始する',
+      (tester) async {
+        // Phase 7Aモデルデッキを持たないレスラー（新規登録直後の想定）
+        // では、従来通りAutoGeneratorへフォールバックすることを検証する。
+        final base = defaultEditorWrestlers.first;
+        final customWrestlers = [
+          base.copyWith(id: 'wrestler_test_no_model_a', name: 'Test No-Model A'),
+          base.copyWith(id: 'wrestler_test_no_model_b', name: 'Test No-Model B'),
+        ];
+        SharedPreferences.setMockInitialValues({
+          LocalWrestlerRepository.storageKey: jsonEncode(
+            customWrestlers.map((w) => w.toJson()).toList(),
+          ),
+        });
+        await pumpScreen(tester, wrestlerRepository: LocalWrestlerRepository());
+        await tester.tap(find.text('試合開始'));
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('ターン1'), findsWidgets);
+        await expandPlayerDetail(tester, 0);
+        expect(find.textContaining('仮デッキを自動生成'), findsWidgets);
+      },
+    );
   });
 
   group('TechniqueMatchScreen: 試合進行', () {
