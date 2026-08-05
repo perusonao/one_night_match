@@ -15,11 +15,12 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  // UI改修（全面リデザイン）により、手札カードは使用可能なら即実行される
-  // ようになった（従来の「カードをタップ→詳細ダイアログ→使用する」の
-  // 2段階操作は、使用「できない」カードをタップした場合のみ発生する）。
-  // また進行ログ・プレイヤーカードの詳細情報は折りたたみ式になったため、
-  // それらの内容を検証するテストでは事前に展開操作を行う。
+  // UI Ver.2改修により、手札カードは「タップ→選択→確認ボタン」の2段階
+  // 操作に戻った（誤操作防止のため、Ver.1のタップ即実行から巻き戻した）。
+  // カードをタップすると選択され、下に現れる確認バーのボタン（従来と同じ
+  // 「セットする」「使用する」「宣言する」）で実行する。長押しは常に詳細
+  // ダイアログを開く。また進行ログ・プレイヤーカードの詳細情報は折りたたみ
+  // 式のため、それらの内容を検証するテストでは事前に展開操作を行う。
 
   Future<void> expandLog(WidgetTester tester) async {
     await tester.tap(find.byKey(const ValueKey('logToggle')));
@@ -28,6 +29,19 @@ void main() {
 
   Future<void> expandPlayerDetail(WidgetTester tester, int playerIndex) async {
     await tester.tap(find.byKey(ValueKey('playerDetailToggle$playerIndex')));
+    await tester.pumpAndSettle();
+  }
+
+  /// 手札カードを選択→確認バーのボタンをタップして実行する（Ver.2の
+  /// 標準操作）。
+  Future<void> selectAndConfirm(
+    WidgetTester tester,
+    String cardName,
+    String confirmLabel,
+  ) async {
+    await tester.tap(find.text(cardName).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(confirmLabel));
     await tester.pumpAndSettle();
   }
 
@@ -229,14 +243,14 @@ void main() {
       ]);
       await expandLog(tester);
 
-      // エネルギーカードは使用可能ならタップで即セットされる（ダイアログ
-      // を経由しない）。
-      await tester.tap(find.text('打エネルギー').first);
-      await tester.pumpAndSettle();
+      // カードをタップ→選択→確認バーの「セットする」で実行する。
+      await selectAndConfirm(tester, '打エネルギー', 'セットする');
       expect(find.textContaining('エネルギーとしてセットした'), findsOneWidget);
 
-      // 技カードも使用可能ならタップで即宣言される。
+      // 技カードも同様にタップ→選択→「使用する」で宣言する。
       await tester.tap(find.text('通常技A').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('使用する'));
       await tester.pumpAndSettle();
 
       // 技を宣言すると防御側の返技判定ダイアログが自動で開く。
@@ -250,7 +264,7 @@ void main() {
       expect(find.textContaining('ダメージ'), findsOneWidget);
     });
 
-    testWidgets('エネルギー不足の技をタップすると使用不可の理由がダイアログに表示され、使用するボタンが無効になる', (
+    testWidgets('エネルギー不足の技を選択すると使用不可の理由が確認バーに表示され、使用するボタンが無効になる', (
       tester,
     ) async {
       final repo = LocalTechniqueDeckRepository();
@@ -262,8 +276,8 @@ void main() {
         ),
       ]);
 
-      // このカードは個別に使用不可（エネルギー不足）なため、タップしても
-      // 即実行されず、理由を示す詳細ダイアログが開く。
+      // このカードは個別に使用不可（エネルギー不足）。選択すると確認バーに
+      // 理由が表示され、実行ボタンは無効になる。
       await tester.tap(find.text('通常技A').first);
       await tester.pumpAndSettle();
 
@@ -294,8 +308,7 @@ void main() {
       ]);
       await expandLog(tester);
 
-      await tester.tap(find.text('打エネルギー').first);
-      await tester.pumpAndSettle();
+      await selectAndConfirm(tester, '打エネルギー', 'セットする');
 
       // Bに返技エネルギーを直接注入する（実プレイではBの手番に自分で
       // セットする。ここではUIの配線確認が目的のため直接注入する）。
@@ -308,6 +321,8 @@ void main() {
       );
 
       await tester.tap(find.text('通常技A').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('使用する'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('[Chain 1]'), findsWidgets);
@@ -413,8 +428,7 @@ void main() {
       await tester.pumpAndSettle();
       await expandLog(tester);
 
-      await tester.tap(find.text('打エネルギー').first);
-      await tester.pumpAndSettle();
+      await selectAndConfirm(tester, '打エネルギー', 'セットする');
 
       // Bの手札をキックアウトカード1枚だけに差し替える（実プレイではBの
       // デッキに含まれる。ここではUIの配線確認が目的のため直接注入する。
@@ -435,6 +449,8 @@ void main() {
       );
 
       await tester.tap(find.text('フォール技').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('使用する'));
       await tester.pumpAndSettle();
 
       // 返技せず成立させる。
@@ -483,10 +499,11 @@ void main() {
       await tester.tap(find.text('試合開始'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('打エネルギー').first);
-      await tester.pumpAndSettle();
+      await selectAndConfirm(tester, '打エネルギー', 'セットする');
 
       await tester.tap(find.text('フォール技').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('使用する'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('返技しない'));
@@ -597,13 +614,13 @@ void main() {
       await tester.tap(find.text('試合開始'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('打エネルギー').first);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('打エネルギー').first);
-      await tester.pumpAndSettle();
+      await selectAndConfirm(tester, '打エネルギー', 'セットする');
+      await selectAndConfirm(tester, '打エネルギー', 'セットする');
 
-      // フィニッシャーも条件を満たしていればタップで即宣言される。
+      // フィニッシャーもタップ→選択→「宣言する」で宣言する。
       await tester.tap(find.text('テストフィニッシャー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('宣言する'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('発動キャンセル判定'), findsOneWidget);
@@ -674,12 +691,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('打エネルギー').first);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('打エネルギー').first);
-      await tester.pumpAndSettle();
+      await selectAndConfirm(tester, '打エネルギー', 'セットする');
+      await selectAndConfirm(tester, '打エネルギー', 'セットする');
 
       await tester.tap(find.text('テストフィニッシャー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('宣言する'));
       await tester.pumpAndSettle();
 
       final escapeButton = find.widgetWithText(OutlinedButton, 'エスケープ');
