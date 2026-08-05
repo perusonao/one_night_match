@@ -285,6 +285,7 @@ class TechniqueMatchState {
     this.winReason,
     this.isDraw = false,
     this.log = const [],
+    this.energySetThisTurn = false,
   });
 
   final TechniqueMatchPlayerState playerA;
@@ -327,6 +328,13 @@ class TechniqueMatchState {
 
   final List<String> log;
 
+  /// このターン、アクティブプレイヤーが既に技エネルギーカードをセット
+  /// 済みかどうか（UI改善+CPU実装ラウンドで確定した仕様: 技エネルギーは
+  /// 1ターンに1枚のみセット可能。[TechniqueMatchEngine.setEnergy]が
+  /// エンジンレベルで強制する。[TechniqueMatchEngine.endTurn]で毎ターン
+  /// falseへリセットされる）。
+  final bool energySetThisTurn;
+
   TechniqueMatchPlayerState get active =>
       activePlayerIndex == 0 ? playerA : playerB;
   TechniqueMatchPlayerState get inactive =>
@@ -359,6 +367,7 @@ class TechniqueMatchState {
     Object? winReason = _unset,
     bool? isDraw,
     List<String>? log,
+    bool? energySetThisTurn,
   }) => TechniqueMatchState(
     playerA: playerA ?? this.playerA,
     playerB: playerB ?? this.playerB,
@@ -386,6 +395,7 @@ class TechniqueMatchState {
         : winReason as String?,
     isDraw: isDraw ?? this.isDraw,
     log: log ?? this.log,
+    energySetThisTurn: energySetThisTurn ?? this.energySetThisTurn,
   );
 
   /// アクティブプレイヤー側を更新した新しい状態を返す。
@@ -637,6 +647,8 @@ class TechniqueMatchEngine {
       turnNumber: nextTurnNumber,
       phase: TechniqueMatchPhase.energySet,
       log: log,
+      // 新しい手番になったので、技エネルギーの1ターン1枚制限をリセットする。
+      energySetThisTurn: false,
     );
   }
 
@@ -661,6 +673,15 @@ class TechniqueMatchEngine {
         state: state,
         success: false,
         failureReason: 'ラリー中・決着判定待ちの間はエネルギーをセットできません。',
+      );
+    }
+    // UI改善+CPU実装ラウンドで確定した仕様: 技エネルギーは1ターンに1枚のみ
+    // セット可能（エンジンレベルで強制する）。
+    if (state.energySetThisTurn) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: 'このターンは既に技エネルギーをセットしています（1ターンに1枚まで）。',
       );
     }
     final active = state.active;
@@ -690,6 +711,7 @@ class TechniqueMatchEngine {
           '${active.wrestlerName}が「${card.name}」をエネルギーとしてセットした'
               '（${moveAttributeLabel(card.attribute)} ${pool[card.attribute]}枚）',
         ],
+        energySetThisTurn: true,
       ),
       success: true,
     );
