@@ -52,11 +52,16 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 6,
       heatDelta: 4,
-      targetState: TechniqueTargetState.down,
+      // Phase 6完了後のプレイテストで判明した「ダウン限定だと使う機会が
+      // 無く一度も選ばれない」問題への対応（ユーザー指摘）。スタンドでも
+      // 使用可能にしつつ、ダウン中に極めるとdownBonusPower分の追加威力
+      // （関節技らしい「決まれば効く」性質）を持たせた。
+      targetState: TechniqueTargetState.any,
       hasSubmissionEffect: true,
       giveUpThreshold: 20,
       giveUpHpCost: 10,
-      description: 'ダウン中の相手に極める関節技。',
+      downBonusPower: 6,
+      description: '関節技。ダウン中の相手に極めると威力が上がる。',
     ),
     const TechniqueDeckTechniqueCard(
       id: 'td_normal_rough_1',
