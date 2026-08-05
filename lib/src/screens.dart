@@ -12,6 +12,7 @@ import 'level_match/deck_balance_screen.dart';
 import 'level_match/level_match_simulator_screen.dart';
 import 'technique_deck/technique_deck_builder_screen.dart';
 import 'technique_deck/technique_match_screen.dart';
+import 'technique_deck/technique_match_setup_screen.dart';
 
 const _pink = Color(0xffff477e);
 const _gold = Color(0xffffc857);
@@ -91,6 +92,23 @@ class TitleScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(height: 10),
+                // 【ゲームサイクル整理ラウンド 優先度10】これまでTechnique
+                // Matchは「Debug分析」経由でしか開始できなかったため、一般
+                // プレイヤー向けの正式な開始導線をトップページへ追加した。
+                FilledButton.tonalIcon(
+                  icon: const Icon(Icons.sports_kabaddi),
+                  label: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                    child: Text('試合を始める（Technique Match）'),
+                  ),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const TechniqueMatchSetupScreen(),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 8),
                 Wrap(
                   alignment: WrapAlignment.center,
@@ -102,6 +120,16 @@ class TitleScreen extends StatelessWidget {
                         context,
                         MaterialPageRoute(
                           builder: (_) => const WrestlerEditorListScreen(),
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      icon: const Icon(Icons.dashboard_customize_outlined),
+                      label: const Text('デッキを作る'),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const TechniqueDeckBuilderScreen(),
                         ),
                       ),
                     ),

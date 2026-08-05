@@ -193,12 +193,18 @@ void main() {
       expect(find.textContaining('の手番'), findsWidgets);
     });
 
-    testWidgets('ターン終了を押すと手番が入れ替わる', (tester) async {
+    testWidgets('独立した「ターン終了」ボタンは存在しない（休息のみで終了する）', (tester) async {
+      // 【ゲームサイクル整理ラウンド 優先度1】「技を使う」か「休息する」の
+      // どちらかで必ずターンが終わる仕様に統一したため、以前存在した独立の
+      // 「ターン終了」ボタンは廃止された。
       await pumpScreen(tester);
       await tester.tap(find.text('試合開始'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('ターン終了'));
+      expect(find.text('ターン終了'), findsNothing);
+      expect(find.text('休息'), findsOneWidget);
+
+      await tester.tap(find.text('休息'));
       await tester.pumpAndSettle();
 
       await expandLog(tester);
@@ -303,9 +309,9 @@ void main() {
 
       // 技を宣言すると防御側の返技判定ダイアログが自動で開く。
       expect(find.textContaining('宣言した'), findsOneWidget);
-      expect(find.text('返技しない'), findsOneWidget);
+      expect(find.text('技を受ける'), findsOneWidget);
 
-      await tester.tap(find.text('返技しない'));
+      await tester.tap(find.text('技を受ける'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('が成立した'), findsOneWidget);
@@ -358,13 +364,22 @@ void main() {
 
       await selectAndConfirm(tester, '打エネルギー', 'セットする');
 
-      // Bに返技エネルギーを直接注入する（実プレイではBの手番に自分で
-      // セットする。ここではUIの配線確認が目的のため直接注入する）。
+      // 【ゲームサイクル整理ラウンド 優先度2】返技には手札の返技候補カードが
+      // 必要になった。Bに返技エネルギーと返技候補カード（通常技A自身。
+      // reversalEnergyCost: counter1）を直接注入する（実プレイではBの手番に
+      // 自分でセットする。ここではUIの配線確認が目的のため直接注入する）。
       final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
       final TechniqueMatchState current = screenState.matchState;
       screenState.matchState = current.copyWith(
         playerB: current.playerB.copyWith(
           energyPool: const {MoveAttribute.counter: 1},
+          hand: const [
+            TechniqueDeckEntry(
+              instanceId: 'b_counter_1',
+              cardId: 'normal_1',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+          ],
         ),
       );
 
@@ -374,9 +389,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('[Chain 1]'), findsWidgets);
-      expect(find.text('返技する'), findsOneWidget);
+      expect(find.text('使用できる返技'), findsOneWidget);
+      final counterButton = find.widgetWithText(OutlinedButton, '通常技A　返×1');
+      expect(counterButton, findsOneWidget);
 
-      await tester.tap(find.text('返技する'));
+      await tester.tap(counterButton);
       await tester.pumpAndSettle();
 
       expect(find.textContaining('攻守交代'), findsOneWidget);
@@ -384,12 +401,13 @@ void main() {
       expect(find.textContaining('攻撃側'), findsWidgets);
       expect(find.text('ラリーを終了する'), findsOneWidget);
 
-      // 攻守交代後、追撃せずラリーを終了できる。
+      // 攻守交代後、追撃せずラリーを終了できる。優先度1により、追撃せず
+      // ラリーを終了した時点で自動的にターンも終了する。
       await tester.tap(find.text('ラリーを終了する'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('ラリーを終了した'), findsOneWidget);
-      expect(find.text('ターン終了'), findsOneWidget); // 通常の行動選択に戻る
+      expect(find.text('休息'), findsOneWidget); // 次の手番（Bとの入れ替え後）の通常の行動選択
     });
   });
 
@@ -502,7 +520,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // 返技せず成立させる。
-      await tester.tap(find.text('返技しない'));
+      await tester.tap(find.text('技を受ける'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('フォールの危機'), findsWidgets);
@@ -513,7 +531,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('を回避した'), findsOneWidget);
-      expect(find.text('ターン終了'), findsOneWidget); // 通常の行動選択に戻る
+      // 【優先度1】回避が成立した時点で自動的にターンが終了し、次の手番の
+      // 通常の行動選択（休息ボタン）に戻る。
+      expect(find.text('休息'), findsOneWidget);
     });
 
     testWidgets('回避せず諦めると勝敗が決まり、勝利バナーが表示される', (tester) async {
@@ -554,7 +574,7 @@ void main() {
       await tester.tap(find.text('使用する'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('返技しない'));
+      await tester.tap(find.text('技を受ける'));
       await tester.pumpAndSettle();
 
       expect(find.text('諦める（敗北を認める）'), findsOneWidget);
@@ -564,7 +584,7 @@ void main() {
       expect(find.textContaining('の勝利！'), findsOneWidget);
       expect(find.textContaining('フォール勝利'), findsWidgets);
       // 試合終了後は通常の行動ボタンが表示されない。
-      expect(find.text('ターン終了'), findsNothing);
+      expect(find.text('休息'), findsNothing);
     });
   });
 
@@ -684,7 +704,7 @@ void main() {
 
       expect(find.textContaining('の勝利！'), findsOneWidget);
       expect(find.textContaining('フィニッシャー勝利'), findsWidgets);
-      expect(find.text('ターン終了'), findsNothing);
+      expect(find.text('休息'), findsNothing);
     });
 
     testWidgets('エスケープカードで発動をキャンセルできる（ダメージなし）', (tester) async {
@@ -754,8 +774,79 @@ void main() {
 
       await expandLog(tester);
       expect(find.textContaining('キャンセルした'), findsOneWidget);
-      // ダメージが発生していないこと（勝敗もついていない）。
-      expect(find.text('ターン終了'), findsOneWidget);
+      // ダメージが発生していないこと（勝敗もついていない）。優先度1により
+      // キャンセル成立（エスケープ）でそのターンも自動終了し、次の手番の
+      // 通常の行動選択（休息ボタン）に戻る。
+      expect(find.text('休息'), findsOneWidget);
+    });
+  });
+
+  group('TechniqueMatchScreen: CPU対戦統合（優先度7）', () {
+    Future<void> pumpCpuScreen(WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 3000));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TechniqueMatchScreen(catalog: testCatalog(), vsCpu: true),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('vsCpu:trueで試合を開始できる（Aの手番はいつも通り操作できる）', (tester) async {
+      await pumpCpuScreen(tester);
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      // 最初はAの手番（人間）なので、通常の操作UI（休息ボタン）が見える。
+      expect(find.text('休息'), findsOneWidget);
+      expect(find.textContaining('CPU）思考中'), findsNothing);
+    });
+
+    testWidgets('Aが休息してBの手番になると、CPUが手札を公開せず自動的に思考・行動する', (tester) async {
+      await pumpCpuScreen(tester);
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('休息'));
+      await tester.pump();
+
+      // Bの手番になった直後は「CPU思考中」表示のみで、休息ボタンや手札は
+      // 表示されない（CPUの手札は人間に見せない）。
+      expect(find.textContaining('CPU）思考中'), findsOneWidget);
+      expect(find.text('休息'), findsNothing);
+
+      // CPUの思考ディレイ（500ms）経過後、CPUが自動的に行動しログが増える。
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+
+      await expandLog(tester);
+      expect(find.textContaining('の手番'), findsWidgets);
+    });
+  });
+
+  group('TechniqueMatchScreen: 1ターン30秒タイマー（優先度5）', () {
+    testWidgets('人間の番ではTIMEバッジが表示され、1秒ごとに減っていく', (tester) async {
+      await pumpScreen(tester);
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('TIME 30'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.textContaining('TIME 29'), findsOneWidget);
+    });
+
+    testWidgets('30秒経過すると時間切れとなり、通常ターンは自動的に休息する', (tester) async {
+      await pumpScreen(tester);
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pumpAndSettle();
+
+      await expandLog(tester);
+      expect(find.textContaining('TIME OVER'), findsOneWidget);
+      expect(find.textContaining('休息してHPを'), findsOneWidget);
     });
   });
 }

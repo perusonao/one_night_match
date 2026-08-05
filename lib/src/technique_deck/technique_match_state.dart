@@ -905,6 +905,29 @@ class TechniqueMatchEngine {
   /// 到達した場合はラリーを強制終了する（Chain Limit）。
   static const int maxRallyChain = 20;
 
+  /// 【ゲームサイクル整理ラウンド 優先度1】プレイヤーの1ターンは「技を使う」
+  /// か「休息する」のいずれかで必ず終了する仕様に統一する。以前存在した
+  /// 独立の「ターン終了」ボタン（何もせずにターンを終える操作）は廃止した。
+  ///
+  /// 実装方針: [endTurn] は元々「ラリー中・返技判定待ち・決着判定待ち・
+  /// フィニッシャー判定待ち・試合終了後」のいずれでもない場合にのみ進行する
+  /// ガードを持っていた（[TechniqueMatchState.isRallyActive] は
+  /// [TechniquePendingAttack] が立っている間も真になるため、返技判定待ちも
+  /// 実質的に含まれる）。つまり[endTurn]は元々「この状態でターンを終えて
+  /// 良いか」を判定する冪等な関数として使えた。
+  ///
+  /// この性質を利用し、UI・CPU側は「技の使用（ラリー・返技・決着判定を
+  /// 含む一連の流れ）が完全に完結した直後」「ラリーを（追撃せず）終了した
+  /// 直後」「フォール／ギブアップ／フィニッシャーの回避判定が解決した直後」
+  /// に、常にこの関数を呼び出す。まだ何か判定待ちが残っていれば何も起きず
+  /// （＝ガードにより自動的にno-op）、本当に手番の一連の行動が終わっていれば
+  /// ターンが進む。エネルギーセット直後や技宣言直後（返技判定待ち中）には
+  /// 絶対に呼び出してはならない（意図せずターンが進んでしまう）。
+  static TechniqueMatchState autoAdvanceTurnIfSettled(
+    TechniqueMatchState state, {
+    Random? random,
+  }) => endTurn(state, random: random);
+
   /// 現在攻撃側になり得るプレイヤー（ラリー中ならその攻撃側、ラリー外なら
   /// `activePlayerIndex`）が、手札の中に使用可能な技を1枚でも持っているか。
   /// UIが「使用可能技がない」による自動終了を判定するのに使う。
@@ -940,11 +963,69 @@ class TechniqueMatchEngine {
     );
   }
 
-  /// 現在保留中の攻撃に対して、防御側が返技可能かどうかを判定する
-  /// （UIのボタン有効/無効判定用。実際に返技エネルギーを消費するには
-  /// [counterAttack] を呼ぶ）。
+  /// 【ゲームサイクル整理ラウンド 優先度2】返技を「防御側のエネルギーだけ」で
+  /// 判定する旧仕様を廃止し、「防御側の手札に、実際に返技として使用できる
+  /// 技カードがあるか」を必須条件へ加える。
+  ///
+  /// カードごとに「攻撃技Xに対して返技Yが対応する」という1対1の対応
+  /// データはカタログに存在しない（Phase 7Aまでの48技カードにその設計は
+  /// 無い）ため、汎用ルールとして次のように再定義する: 手札にある
+  /// フィニッシャー以外の技カードは、そのカード自身の`reversalEnergyCost`
+  /// （元々「このカードを打たれた側が返技するのに必要なエネルギー」として
+  /// 定義されていた値）を支払うことで、任意の保留中攻撃への「返技」として
+  /// 使用できる（＝カードを1枚消費し、そのカード固有の返技コストを払う）。
+  /// 値そのもの（威力・エネルギー数値等）は一切変更していない。
+  static List<TechniqueDeckEntry> counterCandidates(
+    TechniqueMatchState state,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final pending = state.pendingAttack;
+    if (pending == null) return const [];
+    final defenderIndex = 1 - pending.attackerIndex;
+    final defender = state.playerAt(defenderIndex);
+    return defender.hand.where((entry) {
+      final card = catalog.findTechniqueById(entry.cardId);
+      if (card == null || card.hasFinisherEffect) return false;
+      if (card.reversalEnergyCost.values.every((v) => v <= 0)) return false;
+      final isRestricted =
+          card.category == TechniqueCardCategory.signature ||
+          card.category == TechniqueCardCategory.finisher;
+      if (isRestricted && !card.allowedWrestlerIds.contains(defender.wrestlerId)) {
+        return false;
+      }
+      if (card.minimumLevel > defender.level) return false;
+      for (final costEntry in card.reversalEnergyCost.entries) {
+        if (costEntry.value <= 0) continue;
+        if (defender.availableEnergyFor(costEntry.key) < costEntry.value) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+  }
+
+  /// 現在保留中の攻撃に対して、防御側が（いずれかのカードで）返技可能かどうか
+  /// を判定する（UIのボタン有効/無効判定用。実際に返技エネルギーを消費するには
+  /// 使用する具体的なカードを指定して [counterAttack] を呼ぶ）。
   static ({bool canCounter, String? reason}) checkCounterEligibility(
     TechniqueMatchState state,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    if (state.pendingAttack == null) {
+      return (canCounter: false, reason: '返技可能な攻撃がありません。');
+    }
+    final candidates = counterCandidates(state, catalog);
+    if (candidates.isEmpty) {
+      return (canCounter: false, reason: '使用できる返技カードがありません。');
+    }
+    return (canCounter: true, reason: null);
+  }
+
+  /// [entry] を返技として使用できるかどうかを判定する（UIの候補カード単位の
+  /// 有効/無効判定用）。
+  static ({bool canCounter, String? reason}) canCounterWithEntry(
+    TechniqueMatchState state,
+    TechniqueDeckEntry entry,
     TechniqueDeckCardCatalog catalog,
   ) {
     final pending = state.pendingAttack;
@@ -953,9 +1034,27 @@ class TechniqueMatchEngine {
     }
     final defenderIndex = 1 - pending.attackerIndex;
     final defender = state.playerAt(defenderIndex);
-    final card = catalog.findTechniqueById(pending.cardId);
-    if (card == null) {
-      return (canCounter: false, reason: 'カードが見つかりません。');
+    if (!defender.hand.contains(entry)) {
+      return (canCounter: false, reason: 'このカードは手札にありません。');
+    }
+    final card = catalog.findTechniqueById(entry.cardId);
+    if (card == null || card.hasFinisherEffect) {
+      return (canCounter: false, reason: 'このカードは返技として使用できません。');
+    }
+    if (card.reversalEnergyCost.values.every((v) => v <= 0)) {
+      return (canCounter: false, reason: 'このカードは返技コストが設定されていません。');
+    }
+    final isRestricted =
+        card.category == TechniqueCardCategory.signature ||
+        card.category == TechniqueCardCategory.finisher;
+    if (isRestricted && !card.allowedWrestlerIds.contains(defender.wrestlerId)) {
+      return (canCounter: false, reason: '${defender.wrestlerName}は使用できません。');
+    }
+    if (card.minimumLevel > defender.level) {
+      return (
+        canCounter: false,
+        reason: '必要レベルLv.${card.minimumLevel}に達していません（現在Lv.${defender.level}）。',
+      );
     }
     for (final costEntry in card.reversalEnergyCost.entries) {
       if (costEntry.value <= 0) continue;
@@ -1072,15 +1171,20 @@ class TechniqueMatchEngine {
     );
   }
 
-  /// 防御側が返技する。返技エネルギー（`reversalEnergyCost`）が足りない
-  /// 場合は失敗する（プレイヤーは返技するかどうかを任意に選べる。エネルギーが
-  /// 足りていても返技しない、という選択が読み合いの核になる。その場合は
-  /// [resolveHit] を呼ぶ）。
+  /// 防御側が [entry]（手札にある返技として使用可能な技カード。
+  /// [counterCandidates] で列挙される候補のいずれか）を使って返技する。
+  /// カードが返技候補として無効、または`reversalEnergyCost`が足りない場合は
+  /// 失敗する（プレイヤーは返技するかどうかを任意に選べる。候補があっても
+  /// 返技しない、という選択が読み合いの核になる。その場合は [resolveHit] を
+  /// 呼ぶ）。
   ///
-  /// 成功時: ダメージ無効・HEAT加算なし・ダウンなし。攻守が即座に交代し、
-  /// 新しい攻撃側（元の防御側）が次の技を宣言できる状態になる。
+  /// 成功時: [entry] は手札から捨て札へ送られ、そのカード自身の
+  /// `reversalEnergyCost`を消費する。攻撃側の技によるダメージ無効・HEAT
+  /// 加算なし・ダウンなし。攻守が即座に交代し、新しい攻撃側（元の防御側）が
+  /// 次の技を宣言できる状態になる。
   static TechniqueMoveResult counterAttack(
     TechniqueMatchState state,
+    TechniqueDeckEntry entry,
     TechniqueDeckCardCatalog catalog,
   ) {
     final pending = state.pendingAttack;
@@ -1091,34 +1195,36 @@ class TechniqueMatchEngine {
         failureReason: '返技可能な攻撃がありません。',
       );
     }
+    final check = canCounterWithEntry(state, entry, catalog);
+    if (!check.canCounter) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: check.reason,
+      );
+    }
     final defenderIndex = 1 - pending.attackerIndex;
     final defender = state.playerAt(defenderIndex);
-    final card = catalog.findTechniqueById(pending.cardId)!;
-
-    for (final costEntry in card.reversalEnergyCost.entries) {
-      if (costEntry.value <= 0) continue;
-      if (defender.availableEnergyFor(costEntry.key) < costEntry.value) {
-        return TechniqueMoveResult(
-          state: state,
-          success: false,
-          failureReason:
-              '${moveAttributeLabel(costEntry.key)}の返技エネルギーが不足しています'
-              '（必要${costEntry.value}、使用可能${defender.availableEnergyFor(costEntry.key)}）。',
-        );
-      }
-    }
+    final attackCard = catalog.findTechniqueById(pending.cardId)!;
+    final counterCard = catalog.findTechniqueById(entry.cardId)!;
 
     final spent = Map<MoveAttribute, int>.from(defender.spentEnergy);
-    for (final costEntry in card.reversalEnergyCost.entries) {
+    for (final costEntry in counterCard.reversalEnergyCost.entries) {
       if (costEntry.value <= 0) continue;
       spent[costEntry.key] = (spent[costEntry.key] ?? 0) + costEntry.value;
     }
-    final updatedDefender = defender.copyWith(spentEnergy: spent);
+    final newHand = List<TechniqueDeckEntry>.from(defender.hand)..remove(entry);
+    final updatedDefender = defender.copyWith(
+      spentEnergy: spent,
+      hand: newHand,
+      discardPile: [...defender.discardPile, entry],
+    );
 
     final log = [
       ...state.log,
       '[Chain ${pending.chain}] ${updatedDefender.wrestlerName}が'
-          '「${card.name}」を返技した（ダメージ無効・攻守交代）',
+          '「${counterCard.name}」で${attackCard.name}を返した'
+          '（ダメージ無効・攻守交代）',
     ];
 
     return TechniqueMoveResult(

@@ -1,14 +1,23 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+
+import '../level_match/report_export.dart';
 import '../wrestler_editor/models.dart'
     show MoveAttribute, WrestlerDefinition, moveAttributeLabel;
 import '../wrestler_editor/repository.dart';
+import 'technique_cpu_decision_trace.dart';
 import 'technique_deck_deck.dart';
 import 'technique_deck_defaults.dart';
 import 'technique_deck_generator.dart';
 import 'technique_deck_model_decks.dart';
 import 'technique_deck_models.dart';
 import 'technique_deck_storage.dart';
+import 'technique_match_cpu.dart';
+import 'technique_match_json_log.dart';
 import 'technique_match_state.dart';
 import 'technique_wrestler_portraits.dart';
 
@@ -67,11 +76,30 @@ class TechniqueMatchScreen extends StatefulWidget {
     this.wrestlerRepository,
     this.deckRepository,
     this.catalog,
+    this.vsCpu = false,
+    this.cpuLevel = TechniqueCpuLevel.normal,
+    this.initialWrestlerAId,
+    this.initialWrestlerBId,
+    this.debugMode = false,
   });
 
   final LocalWrestlerRepository? wrestlerRepository;
   final TechniqueDeckRepository? deckRepository;
   final TechniqueDeckCardCatalog? catalog;
+
+  /// 【ゲームサイクル整理ラウンド 優先度7】trueならPlayer B（レスラーB）を
+  /// Normal CPUが自動操作する。既定値はfalse（従来どおりの2人対戦
+  /// 〈ホットシート〉）— 直接この画面を開くデバッグ分析画面や既存テストの
+  /// 挙動を変えないための設計判断。トップページの「試合を始める」導線
+  /// （優先度10）では、セットアップ画面の既定選択を「CPU対戦」にすることで
+  /// 「標準はCPU対戦」という要件を満たす。
+  final bool vsCpu;
+  final TechniqueCpuLevel cpuLevel;
+  final String? initialWrestlerAId;
+  final String? initialWrestlerBId;
+
+  /// trueの場合、ログ展開時にCPUの意思決定理由（Decision Trace）を表示する。
+  final bool debugMode;
 
   @override
   State<TechniqueMatchScreen> createState() => _TechniqueMatchScreenState();
@@ -106,7 +134,8 @@ Color _attributeColor(MoveAttribute attribute) => switch (attribute) {
 /// 11番）。ルール上の意味は持たない、UIのバー表示のためだけの定数。
 const _heatVisualMax = 100;
 
-class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
+class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
+    with WidgetsBindingObserver {
   late final LocalWrestlerRepository wrestlerRepository =
       widget.wrestlerRepository ?? LocalWrestlerRepository();
   late final TechniqueDeckRepository deckRepository =
@@ -121,23 +150,77 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   bool starting = false;
   String? deckSourceNoteA;
   String? deckSourceNoteB;
+  TechniqueDeckDefinition? _deckA;
+  TechniqueDeckDefinition? _deckB;
 
   bool _detailExpandedA = false;
   bool _detailExpandedB = false;
   bool _logExpanded = false;
   TechniqueDeckEntry? _selectedEntry;
 
+  // ============================================================
+  // 【ゲームサイクル整理ラウンド 優先度5・7・9】CPU対戦・1ターン30秒
+  // タイマー・JSON試合ログの状態。
+  // ============================================================
+  late bool vsCpu = widget.vsCpu;
+  final TechniqueCpuLevel cpuLevel = TechniqueCpuLevel.normal;
+  late bool debugMode = widget.debugMode;
+  static const Duration _cpuThinkDelay = Duration(milliseconds: 500);
+  static const int _turnSeconds = 30;
+  Timer? _cpuTimer;
+  Timer? _turnTimer;
+  int? _remainingSeconds;
+  int? _timerOwnerIndex;
+  final Random _cpuRandom = Random();
+  final List<TechniqueCpuDecisionTrace> _cpuTraces = [];
+  final List<TechniqueMatchTurnEntry> _turnEntries = [];
+  int _timeOverCount = 0;
+  DateTime? _matchStartedAt;
+  DateTime? _matchFinishedAt;
+  String _gameId = '';
+
+  bool _isCpu(int playerIndex) => vsCpu && playerIndex == 1;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     wrestlerRepository.loadAll().then((items) {
       if (!mounted) return;
       setState(() {
         wrestlers = items;
-        if (items.isNotEmpty) wrestlerA = items.first;
-        if (items.length > 1) wrestlerB = items[1];
+        WrestlerDefinition? findById(String? id) =>
+            id == null ? null : items.where((w) => w.id == id).firstOrNull;
+        wrestlerA = findById(widget.initialWrestlerAId) ??
+            (items.isNotEmpty ? items.first : null);
+        wrestlerB = findById(widget.initialWrestlerBId) ??
+            (items.length > 1 ? items[1] : null);
       });
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _cpuTimer?.cancel();
+    _turnTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 【優先度5】アプリがバックグラウンドへ回った場合、実時間差で減算せず
+  /// タイマーを一時停止する（明示的な設計判断。カジュアルなカードゲームで
+  /// 電話着信等により離席した際、復帰直後にいきなり時間切れになる体験を
+  /// 避けるため）。フォアグラウンド復帰時は残り秒数からカウントを再開する。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _turnTimer?.cancel();
+      _turnTimer = null;
+    } else if (state == AppLifecycleState.resumed) {
+      if (_remainingSeconds != null && matchState != null && !matchState!.isOver) {
+        _resumeTurnTimerTicking();
+      }
+    }
   }
 
   Future<(TechniqueDeckDefinition, String)> _resolveDeck(
@@ -182,9 +265,17 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final (deckA, noteA) = await _resolveDeck(a);
     final (deckB, noteB) = await _resolveDeck(b);
     if (!mounted) return;
+    _turnEntries.clear();
+    _cpuTraces.clear();
+    _timeOverCount = 0;
+    _matchStartedAt = DateTime.now();
+    _matchFinishedAt = null;
+    _gameId = '${a.id}_vs_${b.id}_${_matchStartedAt!.millisecondsSinceEpoch}';
     setState(() {
       deckSourceNoteA = noteA;
       deckSourceNoteB = noteB;
+      _deckA = deckA;
+      _deckB = deckB;
       matchState = TechniqueMatchEngine.start(
         wrestlerAId: a.id,
         wrestlerAName: a.name,
@@ -197,57 +288,422 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       );
       starting = false;
     });
+    _scheduleNextStep();
+  }
+
+  // ============================================================
+  // 【ゲームサイクル整理ラウンド 優先度5・7・9】アクション共通ディスパッチ。
+  // ============================================================
+  //
+  // 全アクションはここを経由させることで、①JSON用の構造化ログ記録
+  // ②「次に行動すべきなのは人間かCPUか」の判定・CPUの自動進行スケジューリング
+  // ③人間の番なら該当ダイアログを表示 ④1ターン30秒タイマーの起動、を一箇所に
+  // 集約する。エネルギーセット（[_setEnergy]）だけは例外的にこれを経由せず
+  // 手動でハンドリングする（エネルギーセット直後にターンやタイマーを進めては
+  // ならないため）。
+  void _applyResult(
+    TechniqueMatchState newState, {
+    required String action,
+    String? cardId,
+    String? cardName,
+  }) {
+    final before = matchState;
+    setState(() {
+      matchState = newState;
+      _selectedEntry = null;
+    });
+    if (before != null) {
+      _recordTurnEntry(
+        before: before,
+        after: newState,
+        action: action,
+        cardId: cardId,
+        cardName: cardName,
+      );
+    }
+    _scheduleNextStep();
+  }
+
+  void _recordTurnEntry({
+    required TechniqueMatchState before,
+    required TechniqueMatchState after,
+    required String action,
+    String? cardId,
+    String? cardName,
+  }) {
+    final actorIndex = TechniqueMatchCpu.actingPlayerIndex(before);
+    final actorBefore = before.playerAt(actorIndex);
+    final actorAfter = after.playerAt(actorIndex);
+    final newLines = after.log.length > before.log.length
+        ? after.log.sublist(before.log.length)
+        : const <String>[];
+    _turnEntries.add(
+      TechniqueMatchTurnEntry(
+        turn: after.turnNumber,
+        chain: after.rallyChain,
+        timestamp: DateTime.now(),
+        remainingTurnSeconds: _remainingSeconds,
+        actorId: actorBefore.wrestlerId,
+        phase: after.phase.name,
+        action: action,
+        cardId: cardId,
+        cardName: cardName,
+        energyBeforeActor: actorBefore.energyPool.values.fold(0, (a, b) => a + b),
+        energyAfterActor: actorAfter.energyPool.values.fold(0, (a, b) => a + b),
+        hpBefore: actorBefore.hp,
+        hpAfter: actorAfter.hp,
+        heatBefore: actorBefore.heat,
+        heatAfter: actorAfter.heat,
+        targetPostureBefore: actorBefore.posture.name,
+        targetPostureAfter: actorAfter.posture.name,
+        message: newLines.join(' / '),
+      ),
+    );
+    if (after.isOver && _matchFinishedAt == null) {
+      _matchFinishedAt = DateTime.now();
+    }
+  }
+
+  /// 現在の状態を見て、次に何をすべきかを決める。
+  /// - 試合が終了していれば何もしない。
+  /// - 次に行動すべきがCPUなら、[_cpuThinkDelay]後にCPUの手番を自動実行する
+  ///   （人間の残り時間は減らさない。優先度5「CPU思考中はプレイヤーの時間を
+  ///   減らさない」に対応）。
+  /// - 次に行動すべきが人間なら、保留中の判定（返技・回避・フィニッシャー）が
+  ///   あれば対応するダイアログを表示する。1ターン30秒タイマーは「行動すべき
+  ///   人間が変わった時」だけリセットする（例: エネルギーセット→技選択は
+  ///   同じ手番の中の連続した行動なのでタイマーは継続する。攻撃側の手番から
+  ///   防御側の返技判定へ移るなど、判断の主体が変わった時は新しい30秒になる）。
+  void _scheduleNextStep() {
+    _cpuTimer?.cancel();
+    _cpuTimer = null;
+    final state = matchState;
+    if (state == null || state.isOver) {
+      _stopTurnTimer();
+      _timerOwnerIndex = null;
+      return;
+    }
+    final actingIndex = TechniqueMatchCpu.actingPlayerIndex(state);
+    if (_isCpu(actingIndex)) {
+      _stopTurnTimer();
+      _timerOwnerIndex = null;
+      _cpuTimer = Timer(_cpuThinkDelay, _runCpuStep);
+      return;
+    }
+    if (_timerOwnerIndex != actingIndex || _remainingSeconds == null) {
+      _timerOwnerIndex = actingIndex;
+      _startTurnTimer();
+    }
+    _maybeShowPendingDialog(state);
+  }
+
+  void _maybeShowPendingDialog(TechniqueMatchState state) {
+    final pendingFinisher = state.pendingFinisher;
+    if (pendingFinisher != null) {
+      if (pendingFinisher.stage == TechniqueFinisherStage.responsePending) {
+        _showFinisherResponseDialog();
+      } else {
+        _showFinisherEscapeDialog();
+      }
+      return;
+    }
+    if (state.pendingEscape != null) {
+      _showEscapeDecisionDialog();
+      return;
+    }
+    if (state.pendingAttack != null) {
+      _showDefenseDecisionDialog();
+    }
+  }
+
+  Future<void> _runCpuStep() async {
+    if (!mounted) return;
+    final before = matchState;
+    if (before == null || before.isOver) return;
+    final result = TechniqueMatchCpu.step(
+      before,
+      catalog,
+      level: cpuLevel,
+      random: _cpuRandom,
+    );
+    if (result.trace != null) {
+      _cpuTraces.add(result.trace!);
+      if (_cpuTraces.length > 300) _cpuTraces.removeAt(0);
+    }
+    setState(() => matchState = result.state);
+    _recordTurnEntry(
+      before: before,
+      after: result.state,
+      action: result.trace?.chosen.action ?? 'cpuStep',
+      cardId: result.trace?.chosen.cardId,
+      cardName: result.trace?.chosen.cardName,
+    );
+    _scheduleNextStep();
+  }
+
+  // ============================================================
+  // 【優先度5】1ターン30秒タイマー。
+  // ============================================================
+
+  void _startTurnTimer() {
+    _remainingSeconds = _turnSeconds;
+    _resumeTurnTimerTicking();
+  }
+
+  void _resumeTurnTimerTicking() {
+    _turnTimer?.cancel();
+    _turnTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final remaining = _remainingSeconds;
+      if (remaining == null) return;
+      if (remaining <= 1) {
+        _turnTimer?.cancel();
+        _turnTimer = null;
+        setState(() => _remainingSeconds = 0);
+        _handleTimeOver();
+        return;
+      }
+      setState(() => _remainingSeconds = remaining - 1);
+    });
+  }
+
+  void _stopTurnTimer() {
+    _turnTimer?.cancel();
+    _turnTimer = null;
+    _remainingSeconds = null;
+  }
+
+  /// 時間切れになった局面に応じて自動処理する（優先度5）。すべての自動処理は
+  /// 試合ログへ「TIME OVER」として記録してから実行する。
+  void _handleTimeOver() {
+    final state = matchState;
+    if (state == null || state.isOver) return;
+    _timeOverCount++;
+    final label = _timeOverContextLabel(state);
+    setState(() {
+      matchState = state.copyWith(
+        log: [...state.log, 'TIME OVER（$label）：自動処理を行った'],
+      );
+    });
+
+    final pendingFinisher = matchState!.pendingFinisher;
+    if (pendingFinisher != null) {
+      if (pendingFinisher.stage == TechniqueFinisherStage.responsePending) {
+        // 発動前: キャンセルしない。
+        _resolveFinisher();
+      } else {
+        // 成立後: 特殊キックアウトがあれば自動使用、無ければ敗北。
+        final defender = matchState!.playerAt(pendingFinisher.defenderIndex);
+        final entry = defender.hand.where(
+          (e) => TechniqueMatchEngine.canEscapeFinisher(matchState!, e, catalog).canEscape,
+        ).firstOrNull;
+        if (entry != null) {
+          _escapeFinisherWithCard(entry);
+        } else {
+          _concedeFinisher();
+        }
+      }
+      return;
+    }
+    if (matchState!.pendingEscape != null) {
+      // 優先順位: ①対応する防御カード ②HP消費 ③回避不能なら敗北。
+      final pending = matchState!.pendingEscape!;
+      final defender = matchState!.playerAt(pending.defenderIndex);
+      final defenseEntry = defender.hand.where(
+        (e) => TechniqueMatchEngine.canEscapeWithDefenseCard(matchState!, e, catalog).canEscape,
+      ).firstOrNull;
+      if (defenseEntry != null) {
+        _escapeWithDefenseCard(defenseEntry);
+      } else if (TechniqueMatchEngine.canEscapeWithHp(matchState!, catalog).canEscape) {
+        _escapeWithHp();
+      } else {
+        _concede();
+      }
+      return;
+    }
+    if (matchState!.pendingAttack != null) {
+      // 返技しない→技を受ける。
+      _resolveHit();
+      return;
+    }
+    // 通常ターン（エネルギーセット／技選択の段階）: 自動休息。
+    _handleRest();
+  }
+
+  String _timeOverContextLabel(TechniqueMatchState state) {
+    final pendingFinisher = state.pendingFinisher;
+    if (pendingFinisher != null) {
+      return pendingFinisher.stage == TechniqueFinisherStage.responsePending
+          ? 'フィニッシャー発動判定'
+          : 'フィニッシャー脱出判定';
+    }
+    if (state.pendingEscape != null) {
+      return state.pendingEscape!.kind == TechniqueEscapeKind.fall ? 'フォール回避判定' : 'サブミッション回避判定';
+    }
+    if (state.pendingAttack != null) return '返技判定';
+    return '通常ターン';
+  }
+
+  // ============================================================
+  // 【優先度9】試合ログのJSON出力。
+  // ============================================================
+
+  List<TechniqueMatchPlayerSummary> _buildPlayerSummaries(TechniqueMatchState state) {
+    TechniqueMatchPlayerSummary summarize(int index) {
+      final player = state.playerAt(index);
+      final entries = _turnEntries.where((e) => e.actorId == player.wrestlerId);
+      int count(bool Function(TechniqueMatchTurnEntry) test) => entries.where(test).length;
+      bool techniqueHas(TechniqueMatchTurnEntry e, bool Function(TechniqueDeckTechniqueCard) test) {
+        final id = e.cardId;
+        if (id == null) return false;
+        final card = catalog.findTechniqueById(id);
+        return card != null && test(card);
+      }
+
+      bool defenseTypeIs(TechniqueMatchTurnEntry e, TechniqueDeckCardType type) {
+        final id = e.cardId;
+        if (id == null) return false;
+        return catalog.findDefenseCardById(id)?.type == type;
+      }
+
+      return TechniqueMatchPlayerSummary(
+        playerId: index == 0 ? 'A' : 'B',
+        wrestlerId: player.wrestlerId,
+        wrestlerName: player.wrestlerName,
+        maxHp: player.maxHp,
+        finalHp: player.hp,
+        recoveryPower: player.recoveryPower,
+        finalHeat: player.heat,
+        posture: player.posture.name,
+        isCpu: _isCpu(index),
+        movesUsed: count((e) => e.action == 'declareAttack' || e.action == 'declareFinisher'),
+        countersUsed: count((e) => e.action == 'counterAttack'),
+        restsUsed: count((e) => e.action == 'rest'),
+        pinAttempts: count(
+          (e) => e.action == 'declareAttack' && techniqueHas(e, (c) => c.hasPinEffect),
+        ),
+        submissionAttempts: count(
+          (e) => e.action == 'declareAttack' && techniqueHas(e, (c) => c.hasSubmissionEffect),
+        ),
+        finisherDeclarations: count((e) => e.action == 'declareFinisher'),
+        kickOuts: count(
+          (e) =>
+              (e.action == 'escapeWithCard' || e.action == 'escapeFinisherWithCard') &&
+              defenseTypeIs(e, TechniqueDeckCardType.kickOut),
+        ),
+        ropeBreaks: count(
+          (e) => e.action == 'escapeWithCard' && defenseTypeIs(e, TechniqueDeckCardType.ropeBreak),
+        ),
+      );
+    }
+
+    return [summarize(0), summarize(1)];
+  }
+
+  /// JSONを組み立ててWebダウンロードを試み、未対応環境ではクリップボードへ
+  /// コピーする（優先度9「コピーだけでなく、ファイルとしてダウンロード
+  /// できるようにしてください」に対応。ダウンロード非対応環境向けの
+  /// フォールバックとしてクリップボードコピーも残す）。
+  Future<void> _exportJsonLog() async {
+    final state = matchState;
+    if (state == null) return;
+    final decks = [?_deckA, ?_deckB];
+    final startedAt = _matchStartedAt ?? DateTime.now();
+    final finishedAt = _matchFinishedAt ?? DateTime.now();
+    final json = TechniqueMatchJsonLog.build(
+      gameId: _gameId.isEmpty ? 'unknown' : _gameId,
+      schemaVersion: '1.0.0',
+      gameVersion: 'phase8.2',
+      rulesVersion: 'technique-deck-rules',
+      opponentType: vsCpu ? 'cpu' : 'human',
+      cpuDifficulty: vsCpu ? cpuLevel.name : null,
+      startedAt: startedAt,
+      finishedAt: finishedAt,
+      state: state,
+      elapsedSeconds: finishedAt.difference(startedAt).inSeconds,
+      timeOverCount: _timeOverCount,
+      players: _buildPlayerSummaries(state),
+      decks: decks,
+      turns: _turnEntries,
+    );
+    final content = const JsonEncoder.withIndent('  ').convert(json);
+    final now = DateTime.now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final stamp =
+        '${now.year}${two(now.month)}${two(now.day)}-${two(now.hour)}${two(now.minute)}${two(now.second)}';
+    final filename = 'one-night-match-technique-${_gameId.isEmpty ? 'unknown' : _gameId}-$stamp.json';
+    final ok = await downloadTextFile(filename, content);
+    if (!mounted) return;
+    if (!ok) {
+      await Clipboard.setData(ClipboardData(text: content));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ダウンロード非対応のため、JSONをクリップボードにコピーしました')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('試合ログを $filename としてダウンロードしました')),
+      );
+    }
   }
 
   void _setEnergy(TechniqueDeckEntry entry) {
     final state = matchState;
     if (state == null) return;
     final result = TechniqueMatchEngine.setEnergy(state, entry, catalog);
-    setState(() {
-      matchState = result.state;
-      _selectedEntry = null;
-    });
+    if (!result.success) return;
+    final energy = catalog.findEnergyById(entry.cardId);
+    _applyResult(result.state, action: 'setEnergy', cardId: entry.cardId, cardName: energy?.name);
   }
 
-  Future<void> _declareAttack(TechniqueDeckEntry entry) async {
+  void _declareAttack(TechniqueDeckEntry entry) {
     final state = matchState;
     if (state == null) return;
     final result = TechniqueMatchEngine.declareAttack(state, entry, catalog);
-    setState(() {
-      matchState = result.state;
-      _selectedEntry = null;
-    });
-    if (result.success) {
-      await _showDefenseDecisionDialog();
-    }
+    if (!result.success) return;
+    final card = catalog.findTechniqueById(entry.cardId);
+    _applyResult(result.state, action: 'declareAttack', cardId: entry.cardId, cardName: card?.name);
   }
 
-  void _counterAttack() {
+  /// 【ゲームサイクル整理ラウンド 優先度2】返技には手札の返技候補カード
+  /// [entry] の指定が必須になった。
+  void _counterAttack(TechniqueDeckEntry entry) {
     final state = matchState;
     if (state == null) return;
-    final result = TechniqueMatchEngine.counterAttack(state, catalog);
-    setState(() => matchState = result.state);
+    final result = TechniqueMatchEngine.counterAttack(state, entry, catalog);
+    if (!result.success) return;
+    final card = catalog.findTechniqueById(entry.cardId);
+    _applyResult(result.state, action: 'counterAttack', cardId: entry.cardId, cardName: card?.name);
   }
 
-  Future<void> _resolveHit() async {
+  /// 【ゲームサイクル整理ラウンド 優先度1】技の使用（ラリー・返技・決着判定）
+  /// が完全に完結した直後は必ず[TechniqueMatchEngine.autoAdvanceTurnIfSettled]
+  /// を経由させ、自動的にターンを終える。まだ判定待ちが残っている場合は
+  /// 内部でno-opになる。
+  void _resolveHit() {
     final state = matchState;
     if (state == null) return;
-    final resolved = TechniqueMatchEngine.resolveHit(state, catalog);
-    setState(() => matchState = resolved);
-    if (resolved.pendingEscape != null) {
-      await _showEscapeDecisionDialog();
-    }
+    final resolved = TechniqueMatchEngine.autoAdvanceTurnIfSettled(
+      TechniqueMatchEngine.resolveHit(state, catalog),
+    );
+    _applyResult(resolved, action: 'acceptHit');
   }
 
   void _endRally() {
     final state = matchState;
     if (state == null) return;
-    setState(() => matchState = TechniqueMatchEngine.endRally(state));
+    final resolved = TechniqueMatchEngine.autoAdvanceTurnIfSettled(
+      TechniqueMatchEngine.endRally(state),
+    );
+    _applyResult(resolved, action: 'endRally');
   }
 
   /// 攻撃が宣言され防御側の返技判定を待っている間、決定するまで閉じられない
-  /// ダイアログを表示する（読み合いの核: 返技エネルギーが足りていても
-  /// 「返技しない」選択が常にできる）。
+  /// ダイアログを表示する（読み合いの核: 返技可能なカードがあっても
+  /// 「技を受ける」選択が常にできる）。
+  ///
+  /// 【ゲームサイクル整理ラウンド 優先度2】返技は「防御側の手札にある、
+  /// 実際に使用できる技カードを選ぶ」方式に変更した。候補が無ければ
+  /// その旨を表示し、返技の選択肢自体を出さない。
   Future<void> _showDefenseDecisionDialog() async {
     final state = matchState;
     final pending = state?.pendingAttack;
@@ -256,70 +712,63 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     if (card == null) return;
     final attacker = state.playerAt(pending.attackerIndex);
     final defender = state.playerAt(1 - pending.attackerIndex);
-    final check = TechniqueMatchEngine.checkCounterEligibility(state, catalog);
+    final candidates = TechniqueMatchEngine.counterCandidates(state, catalog);
 
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
         title: Text('[Chain ${pending.chain}] ${defender.wrestlerName}の返技判定'),
-        // Ver.3.1（UI/UX改善+CPU実装ラウンド優先度5）: 説明文を削り、
-        // 「技名／必要エネルギー／所持」の3行だけに絞った簡潔な表示にした。
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              card.name,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+              '${card.name}を受けています',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
             ),
             Text(
               '${attacker.wrestlerName}が使用 ・ 威力${card.power}',
               style: const TextStyle(fontSize: 11, color: Colors.white54),
             ),
             const SizedBox(height: 10),
-            if (card.reversalEnergyCost.values.any((v) => v > 0)) ...[
-              const Text('必要エネルギー', style: TextStyle(fontSize: 11, color: Colors.white54)),
-              for (final e in card.reversalEnergyCost.entries.where((e) => e.value > 0))
-                Text(
-                  '${moveAttributeLabel(e.key)} ×${e.value}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+            if (candidates.isNotEmpty) ...[
+              const Text('使用できる返技', style: TextStyle(fontSize: 11, color: Colors.white54)),
+              const SizedBox(height: 4),
+              for (final entry in candidates)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pop(dialogContext);
+                      _counterAttack(entry);
+                    },
+                    child: Builder(
+                      builder: (_) {
+                        final counterCard = catalog.findTechniqueById(entry.cardId)!;
+                        final costText = counterCard.reversalEnergyCost.entries
+                            .where((e) => e.value > 0)
+                            .map((e) => '${moveAttributeLabel(e.key)}×${e.value}')
+                            .join('・');
+                        return Text('${counterCard.name}　$costText');
+                      },
+                    ),
+                  ),
                 ),
-              const SizedBox(height: 8),
-              const Text('所持', style: TextStyle(fontSize: 11, color: Colors.white54)),
-              for (final e in card.reversalEnergyCost.entries.where((e) => e.value > 0))
-                Text('${moveAttributeLabel(e.key)} ×${defender.availableEnergyFor(e.key)}'),
             ] else
               const Text(
-                '返技不可（返技エネルギー設定なし）',
+                '使用できる返技カードがありません',
                 style: TextStyle(fontSize: 12, color: Colors.white54),
-              ),
-            if (!check.canCounter)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  check.reason ?? '返技できません。',
-                  style: const TextStyle(color: _red, fontSize: 12),
-                ),
               ),
           ],
         ),
         actions: [
-          TextButton(
+          FilledButton(
             onPressed: () {
               Navigator.pop(dialogContext);
               _resolveHit();
             },
-            child: const Text('返技しない'),
-          ),
-          FilledButton(
-            onPressed: check.canCounter
-                ? () {
-                    _counterAttack();
-                    Navigator.pop(dialogContext);
-                  }
-                : null,
-            child: const Text('返技する'),
+            child: const Text('技を受ける'),
           ),
         ],
       ),
@@ -329,68 +778,87 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   void _escapeWithDefenseCard(TechniqueDeckEntry entry) {
     final state = matchState;
     if (state == null) return;
-    final result = TechniqueMatchEngine.escapeWithDefenseCard(
-      state,
-      entry,
-      catalog,
+    final result = TechniqueMatchEngine.escapeWithDefenseCard(state, entry, catalog);
+    if (!result.success) return;
+    final card = catalog.findDefenseCardById(entry.cardId);
+    _applyResult(
+      TechniqueMatchEngine.autoAdvanceTurnIfSettled(result.state),
+      action: 'escapeWithCard',
+      cardId: entry.cardId,
+      cardName: card?.name,
     );
-    setState(() => matchState = result.state);
   }
 
   void _escapeWithHp() {
     final state = matchState;
     if (state == null) return;
     final result = TechniqueMatchEngine.escapeWithHp(state, catalog);
-    setState(() => matchState = result.state);
+    if (!result.success) return;
+    _applyResult(
+      TechniqueMatchEngine.autoAdvanceTurnIfSettled(result.state),
+      action: 'escapeWithHp',
+    );
   }
 
   void _concede() {
     final state = matchState;
     if (state == null) return;
-    setState(() => matchState = TechniqueMatchEngine.concede(state));
+    _applyResult(TechniqueMatchEngine.concede(state), action: 'concede');
   }
 
-  Future<void> _declareFinisher(TechniqueDeckEntry entry) async {
+  void _declareFinisher(TechniqueDeckEntry entry) {
     final state = matchState;
     if (state == null) return;
     final result = TechniqueMatchEngine.declareFinisher(state, entry, catalog);
-    setState(() {
-      matchState = result.state;
-      _selectedEntry = null;
-    });
-    if (result.success) {
-      await _showFinisherResponseDialog();
-    }
+    if (!result.success) return;
+    final card = catalog.findTechniqueById(entry.cardId);
+    _applyResult(
+      result.state,
+      action: 'declareFinisher',
+      cardId: entry.cardId,
+      cardName: card?.name,
+    );
   }
 
   void _cancelFinisher(TechniqueDeckEntry entry) {
     final state = matchState;
     if (state == null) return;
     final result = TechniqueMatchEngine.cancelFinisher(state, entry, catalog);
-    setState(() => matchState = result.state);
+    if (!result.success) return;
+    final card = catalog.findDefenseCardById(entry.cardId);
+    _applyResult(
+      TechniqueMatchEngine.autoAdvanceTurnIfSettled(result.state),
+      action: 'cancelFinisher',
+      cardId: entry.cardId,
+      cardName: card?.name,
+    );
   }
 
-  Future<void> _resolveFinisher() async {
+  void _resolveFinisher() {
     final state = matchState;
     if (state == null) return;
     final resolved = TechniqueMatchEngine.resolveFinisher(state, catalog);
-    setState(() => matchState = resolved);
-    if (resolved.pendingFinisher?.stage == TechniqueFinisherStage.escapePending) {
-      await _showFinisherEscapeDialog();
-    }
+    _applyResult(resolved, action: 'acceptFinisher');
   }
 
   void _escapeFinisherWithCard(TechniqueDeckEntry entry) {
     final state = matchState;
     if (state == null) return;
     final result = TechniqueMatchEngine.escapeFinisher(state, entry, catalog);
-    setState(() => matchState = result.state);
+    if (!result.success) return;
+    final card = catalog.findDefenseCardById(entry.cardId);
+    _applyResult(
+      TechniqueMatchEngine.autoAdvanceTurnIfSettled(result.state),
+      action: 'escapeFinisherWithCard',
+      cardId: entry.cardId,
+      cardName: card?.name,
+    );
   }
 
   void _concedeFinisher() {
     final state = matchState;
     if (state == null) return;
-    setState(() => matchState = TechniqueMatchEngine.concedeFinisher(state));
+    _applyResult(TechniqueMatchEngine.concedeFinisher(state), action: 'concedeFinisher');
   }
 
   /// フィニッシャーが宣言され、防御側の発動キャンセル判定を待っている間、
@@ -564,7 +1032,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     if (card == null) return;
     final attacker = state.playerAt(pending.attackerIndex);
     final defender = state.playerAt(pending.defenderIndex);
-    final kindLabel = pending.kind == TechniqueEscapeKind.fall ? 'フォール' : 'ギブアップ';
+    // 【ゲームサイクル整理ラウンド 優先度8】用語整理: 「ギブアップ」は技効果・
+    // 判定開始・回避成功・回避失敗・試合結果のいずれにも使われ紛らわしいため、
+    // 表示文言のみ「サブミッション」系へ整理する（エンジンのenum名
+    // `TechniqueEscapeKind.giveUp`・ログ文言・JSON互換性は変更しない）。
+    final kindLabel = pending.kind == TechniqueEscapeKind.fall ? 'フォール' : 'サブミッション';
 
     final defenseEntries = defender.hand
         .where(
@@ -644,7 +1116,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                 Navigator.pop(dialogContext);
                 _concede();
               },
-              child: const Text('諦める（敗北を認める）'),
+              child: Text(
+                pending.kind == TechniqueEscapeKind.giveUp
+                    ? 'タップアウト！（敗北を認める）'
+                    : '諦める（敗北を認める）',
+              ),
             ),
           ],
         ),
@@ -835,7 +1311,14 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   /// ③ 技使用のワンタップ化 ＋ ⑥「ダウンする」廃止に伴う統合休息。
   ///
   /// スタンド中に休息を選んだ場合、`goDown`→`rest`を連続で呼ぶ（エンジンの
-  /// 2メソッドはどちらも無変更。呼び出し方をUI側でまとめただけ）。
+  /// 2メソッドはどちらも無変更。呼び出し方をUI側でまとめただけ）。`rest`は
+  /// 内部で常にターンを終了させる。
+  ///
+  /// 【ゲームサイクル整理ラウンド 優先度1】プレイヤーの1ターンは「技を使う」
+  /// か「休息する」のいずれかで必ず終了する。以前あった独立の「ターン終了」
+  /// ボタンは廃止した。安全弁: 現行エンジンの構造上、`rest`が失敗する
+  /// （状態が変化しない）ことは通常発生しないが、万一発生した場合はログに
+  /// 理由を残して強制的にターンを終了する。
   void _handleRest() {
     final state = matchState;
     if (state == null) return;
@@ -844,13 +1327,18 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       next = TechniqueMatchEngine.goDown(next);
     }
     final rested = TechniqueMatchEngine.rest(next);
-    setState(() => matchState = rested);
-  }
-
-  void _endTurn() {
-    final state = matchState;
-    if (state == null) return;
-    setState(() => matchState = TechniqueMatchEngine.endTurn(state));
+    if (identical(rested, next) && identical(next, state)) {
+      final forced = state.copyWith(
+        log: [
+          ...state.log,
+          '${state.active.wrestlerName}は技も休息も実行できない異常状態のため、'
+              '安全弁によりターンを自動終了した',
+        ],
+      );
+      _applyResult(TechniqueMatchEngine.endTurn(forced), action: 'endTurn');
+      return;
+    }
+    _applyResult(rested, action: 'rest');
   }
 
   void _resetMatch() {
@@ -900,6 +1388,19 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       appBar: AppBar(
         title: const Text('Technique Match'),
         actions: [
+          if (matchState != null)
+            IconButton(
+              tooltip: 'デバッグ表示（CPUの判断理由）'
+                  '${debugMode ? " ON" : " OFF"}',
+              icon: Icon(debugMode ? Icons.bug_report : Icons.bug_report_outlined),
+              onPressed: () => setState(() => debugMode = !debugMode),
+            ),
+          if (matchState != null)
+            IconButton(
+              tooltip: '試合ログをJSONで保存',
+              icon: const Icon(Icons.file_download_outlined),
+              onPressed: _exportJsonLog,
+            ),
           if (matchState != null)
             IconButton(
               tooltip: '新しい試合',
@@ -1028,10 +1529,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
           : 'フィニッシャー成立！脱出判定です';
     }
     if (state.pendingEscape != null) {
-      final kind = state.pendingEscape!.kind == TechniqueEscapeKind.fall
-          ? 'フォール'
-          : 'ギブアップ';
-      return '$kind判定です';
+      // 【優先度8】判定開始の表示は「SUBMISSION！ギブアップの危機」の
+      // 形式に統一する（フォールは従来どおり）。
+      return state.pendingEscape!.kind == TechniqueEscapeKind.fall
+          ? 'フォール判定です'
+          : 'SUBMISSION！ギブアップの危機';
     }
     if (state.pendingAttack != null) {
       final defender = state.playerAt(1 - state.pendingAttack!.attackerIndex);
@@ -1066,6 +1568,35 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
 
   /// Ver.3: 「STEP N」の番号バッジ＋1文の指示のみを表示する（5アイコンの
   /// ステッパー行は情報過多のため廃止）。
+  /// 【優先度5】「TIME N」バッジ。残り10秒以下でオレンジ、5秒以下で赤へ
+  /// 強調する。
+  Widget _timeBadge(int seconds) {
+    final Color color;
+    if (seconds <= 5) {
+      color = _red;
+    } else if (seconds <= 10) {
+      color = _orange;
+    } else {
+      color = Colors.white70;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: color.withValues(alpha: 0.7)),
+      ),
+      child: Text(
+        'TIME $seconds',
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.bold,
+          fontSize: seconds <= 5 ? 13 : 12,
+        ),
+      ),
+    );
+  }
+
   Widget _actionHeader(TechniqueMatchState state) {
     final stepNumber = _currentStageIndex(state) + 1;
     final hint = _currentStepHint(state);
@@ -1093,6 +1624,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                 ),
               ),
             ),
+            const SizedBox(width: 6),
+            if (_remainingSeconds != null) _timeBadge(_remainingSeconds!),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -1138,8 +1671,15 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     (RegExp('「(.+?)」を宣言した'), (m) => '${m.group(1)}！', Colors.white),
     (RegExp('がダウンした'), (m) => 'ダウン！！', _orange),
     (RegExp('はフォールの危機'), (m) => 'フォール！！', _red),
-    (RegExp('はギブアップの危機'), (m) => 'ギブアップ！！', _red),
-    (RegExp('を使用し、(フォール|ギブアップ)を回避した'), (m) => '${m.group(1)}回避！', _green),
+    // 【優先度8】用語整理: 表示は「SUBMISSION！」に統一する（エンジンの
+    // ログ文言自体は「ギブアップの危機」のまま。マッチ対象はログの生文字列
+    // のため正規表現は変更しない）。
+    (RegExp('はギブアップの危機'), (m) => 'SUBMISSION！', _red),
+    (
+      RegExp('を使用し、(フォール|ギブアップ)を回避した'),
+      (m) => m.group(1) == 'ギブアップ' ? 'ロープブレイク！サブミッションから脱出' : 'フォール回避！',
+      _green,
+    ),
     (RegExp('の発動をキャンセルした'), (m) => 'キャンセル！', _green),
     (RegExp('に主導権が移った'), (m) => '主導権交代！', _gold),
     (RegExp('から脱出した'), (m) => '脱出成功！', _green),
@@ -1316,6 +1856,10 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         state.pendingEscape == null &&
         state.pendingFinisher == null &&
         !state.isOver;
+    // 【優先度7】CPU対戦時、次に行動すべきがCPUであれば手札・操作ボタンは
+    // 表示せず、「CPU思考中…」インジケーターに差し替える（CPUの手札は
+    // 人間に見せない）。
+    final actingIsCpu = !state.isOver && _isCpu(TechniqueMatchCpu.actingPlayerIndex(state));
 
     // 優先度1（縦1画面化）: 相手→リング→自分→STEP→手札→操作ボタンの
     // コア部分をスクロールなしで収めることを目標に、各要素の余白・
@@ -1337,15 +1881,51 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         _ringPanel(state),
         _compactPlayerCard(state, 1),
         _actionHeader(state),
-        if (canDeclare && actingPlayer.hand.isNotEmpty) _handScroller(state, actingPlayer),
-        if (_selectedEntry != null) _selectionBar(state),
-        const SizedBox(height: 6),
-        _actionButtons(state),
+        if (actingIsCpu) _cpuThinkingIndicator(state) else ...[
+          if (canDeclare && actingPlayer.hand.isNotEmpty) _handScroller(state, actingPlayer),
+          if (_selectedEntry != null) _selectionBar(state),
+          const SizedBox(height: 6),
+          _actionButtons(state),
+        ],
         const SizedBox(height: 8),
         _logSection(state),
       ],
     );
   }
+
+  /// 【優先度7】CPUが自動進行している間、人間には操作UIの代わりに簡潔な
+  /// 「CPU思考中…」表示のみを見せる（CPUの手札は表示しない）。
+  Widget _cpuThinkingIndicator(TechniqueMatchState state) {
+    final actingIndex = TechniqueMatchCpu.actingPlayerIndex(state);
+    final cpuPlayer = state.playerAt(actingIndex);
+    return Card(
+      color: _panelBg,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              '${cpuPlayer.wrestlerName}（CPU）思考中…',
+              style: const TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 【優先度8】試合結果の表示文言のみ整理する（`TechniqueMatchState.
+  /// winReason`自体は`'ギブアップ勝利'`のまま。既存テスト・保存データとの
+  /// 互換性を保つため、UI表示の変換のみここで行う）。
+  String _displayWinReason(String reason) =>
+      reason == 'ギブアップ勝利' ? 'SUBMISSION WIN' : reason;
 
   Widget _winBanner(TechniqueMatchState state) {
     final winner = state.playerAt(state.winnerIndex!);
@@ -1359,7 +1939,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                '${winner.wrestlerName}の勝利！（${state.winReason ?? "決着"}）',
+                '${winner.wrestlerName}の勝利！'
+                '（${_displayWinReason(state.winReason ?? "決着")}）',
                 style: const TextStyle(fontWeight: FontWeight.bold, color: _gold),
               ),
             ),
@@ -1720,6 +2301,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         state.pendingEscape == null &&
         state.pendingFinisher == null &&
         !state.isOver;
+    final sortedHand = _sortedHandForDisplay(state, actingPlayer);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -1734,11 +2316,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
           height: 176,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: actingPlayer.hand.length,
+            itemCount: sortedHand.length,
             separatorBuilder: (_, _) => const SizedBox(width: 8),
             itemBuilder: (context, index) => _handCardTile(
               state,
-              actingPlayer.hand[index],
+              sortedHand[index],
               playerLevelTappable: canDeclare,
               isRallyActive: state.isRallyActive,
             ),
@@ -1746,6 +2328,67 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         ),
       ],
     );
+  }
+
+  /// 【ゲームサイクル整理ラウンド 優先度6】手札の表示順を「今使えるカードが
+  /// 左」になるよう並び替える（表示専用のソート。[TechniqueMatchPlayerState.
+  /// hand] そのものの並び順・ゲーム状態は一切変更しない）。
+  ///
+  /// 優先順位: ①今使えるカード ②現在のSTEPで使えるカード種だが個別条件
+  /// （主にエネルギー不足）で使えない ③防御カード（現在の手番では選べない）
+  /// ④その他の使用不能カード（対象状態・レスラー制限等）。①の中では
+  /// フィニッシャー＞フォール／ギブアップ効果＞ダウン付与＞その他の順。
+  ///
+  /// この関数は`state`が変化した（＝setStateが呼ばれた）ときにしか再評価
+  /// されないため、フェーズが切り替わったタイミングでのみ並びが変わる
+  /// （タップのたびに無関係な再ソートが起きることはない）。
+  List<TechniqueDeckEntry> _sortedHandForDisplay(
+    TechniqueMatchState state,
+    TechniqueMatchPlayerState player,
+  ) {
+    int bucketOf(TechniqueDeckEntry entry) {
+      final technique = catalog.findTechniqueById(entry.cardId);
+      final energy = catalog.findEnergyById(entry.cardId);
+      final defense = catalog.findDefenseCardById(entry.cardId);
+      if (technique != null) {
+        final bool eligible;
+        String? reason;
+        if (technique.hasFinisherEffect) {
+          final check = TechniqueMatchEngine.canDeclareFinisher(state, entry, catalog);
+          eligible = check.canDeclare;
+          reason = check.reason;
+        } else {
+          final check = TechniqueMatchEngine.canDeclareAttack(state, entry, catalog);
+          eligible = check.canUse;
+          reason = check.reason;
+        }
+        if (eligible) return 0;
+        if (reason != null && reason.contains('エネルギーが不足')) return 1;
+        return 4;
+      }
+      if (energy != null) return state.energySetThisTurn ? 4 : 0;
+      if (defense != null) return 3;
+      return 4;
+    }
+
+    int subOrderOf(TechniqueDeckEntry entry) {
+      final technique = catalog.findTechniqueById(entry.cardId);
+      if (technique == null) return 5;
+      if (technique.hasFinisherEffect) return 0;
+      if (technique.hasPinEffect || technique.hasSubmissionEffect) return 1;
+      if (technique.causesDown) return 2;
+      return 3;
+    }
+
+    final indexed = player.hand.asMap().entries.toList();
+    indexed.sort((a, b) {
+      final bucketCompare = bucketOf(a.value).compareTo(bucketOf(b.value));
+      if (bucketCompare != 0) return bucketCompare;
+      final subCompare = subOrderOf(a.value).compareTo(subOrderOf(b.value));
+      if (subCompare != 0) return subCompare;
+      return a.key.compareTo(b.key); // 同順位は元の並びを維持する安定ソート。
+    });
+    return indexed.map((e) => e.value).toList();
   }
 
   /// ③ 手札カードの種別ラベル（技／ENERGY／DEFENSE／FINISHER）。
@@ -2039,7 +2682,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   );
 
   // ============================================================
-  // ⑥ 行動ボタン（「ダウンする」廃止、休息＋ターン終了のみ）
+  // 【ゲームサイクル整理ラウンド 優先度1】行動ボタン。「技を使う」（手札の
+  // カードをタップ）か「休息する」のいずれかで必ずターンが終わる仕様に
+  // 統一したため、独立した「ターン終了」ボタンは廃止した。
   // ============================================================
 
   Widget _actionButtons(TechniqueMatchState state) {
@@ -2057,38 +2702,19 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         ),
       );
     }
-    // ⑥ ボタン内へ補足サブテキストを追加（「休息」「ターン終了」自体は
-    // 既存テストが検証する厳密な文字列のため、別のTextとして維持する）。
-    return Row(
-      children: [
-        Expanded(
-          child: FilledButton.tonalIcon(
-            onPressed: _handleRest,
-            icon: const Icon(Icons.self_improvement),
-            label: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Text('休息', style: TextStyle(fontWeight: FontWeight.bold)),
-                Text('HP回復・ダウンして終了', style: TextStyle(fontSize: 9)),
-              ],
-            ),
-          ),
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.tonalIcon(
+        onPressed: _handleRest,
+        icon: const Icon(Icons.self_improvement),
+        label: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('休息', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text('ダウンしてHP回復・ターン終了', style: TextStyle(fontSize: 9)),
+          ],
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: _endTurn,
-            icon: const Icon(Icons.skip_next),
-            label: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Text('ターン終了', style: TextStyle(fontWeight: FontWeight.bold)),
-                Text('何もしない', style: TextStyle(fontSize: 9)),
-              ],
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -2189,6 +2815,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
               const SizedBox(height: 6),
               _matchStatsRow(state),
             ],
+            if (_logExpanded && debugMode) _cpuDecisionTraceSection(),
             for (final line in shown)
               Padding(
                 padding: const EdgeInsets.only(bottom: 3),
@@ -2220,6 +2847,44 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                       ),
                     ),
                   ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 【優先度7】デバッグON時のみ、CPUの直近の意思決定理由
+  /// （Decision Trace）を表示する（例:「CPU/Power Score +18/Down Bonus
+  /// +12/Heat Bonus +6/Total 36/→パワースラム採用」に相当する内容）。
+  Widget _cpuDecisionTraceSection() {
+    if (_cpuTraces.isEmpty) return const SizedBox.shrink();
+    final recent = _cpuTraces.reversed.take(5).toList();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.black26,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _purple.withValues(alpha: 0.5)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'CPU Decision Trace（デバッグ）',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: _purple),
+            ),
+            const SizedBox(height: 4),
+            for (final trace in recent)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  trace.toString(),
+                  style: const TextStyle(fontSize: 10, color: Colors.white60),
                 ),
               ),
           ],
