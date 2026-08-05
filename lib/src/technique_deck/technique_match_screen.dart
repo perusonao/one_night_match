@@ -222,17 +222,25 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     }
   }
 
-  void _counterAttack() {
+  /// 【ゲームサイクル整理ラウンド 優先度2】返技には手札の返技候補カード
+  /// [entry] の指定が必須になった。
+  void _counterAttack(TechniqueDeckEntry entry) {
     final state = matchState;
     if (state == null) return;
-    final result = TechniqueMatchEngine.counterAttack(state, catalog);
+    final result = TechniqueMatchEngine.counterAttack(state, entry, catalog);
     setState(() => matchState = result.state);
   }
 
+  /// 【ゲームサイクル整理ラウンド 優先度1】技の使用（ラリー・返技・決着判定）
+  /// が完全に完結した直後は必ず[TechniqueMatchEngine.autoAdvanceTurnIfSettled]
+  /// を経由させ、自動的にターンを終える。まだ判定待ちが残っている場合は
+  /// 内部でno-opになる。
   Future<void> _resolveHit() async {
     final state = matchState;
     if (state == null) return;
-    final resolved = TechniqueMatchEngine.resolveHit(state, catalog);
+    final resolved = TechniqueMatchEngine.autoAdvanceTurnIfSettled(
+      TechniqueMatchEngine.resolveHit(state, catalog),
+    );
     setState(() => matchState = resolved);
     if (resolved.pendingEscape != null) {
       await _showEscapeDecisionDialog();
@@ -242,12 +250,20 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   void _endRally() {
     final state = matchState;
     if (state == null) return;
-    setState(() => matchState = TechniqueMatchEngine.endRally(state));
+    setState(
+      () => matchState = TechniqueMatchEngine.autoAdvanceTurnIfSettled(
+        TechniqueMatchEngine.endRally(state),
+      ),
+    );
   }
 
   /// 攻撃が宣言され防御側の返技判定を待っている間、決定するまで閉じられない
-  /// ダイアログを表示する（読み合いの核: 返技エネルギーが足りていても
-  /// 「返技しない」選択が常にできる）。
+  /// ダイアログを表示する（読み合いの核: 返技可能なカードがあっても
+  /// 「技を受ける」選択が常にできる）。
+  ///
+  /// 【ゲームサイクル整理ラウンド 優先度2】返技は「防御側の手札にある、
+  /// 実際に使用できる技カードを選ぶ」方式に変更した。候補が無ければ
+  /// その旨を表示し、返技の選択肢自体を出さない。
   Future<void> _showDefenseDecisionDialog() async {
     final state = matchState;
     final pending = state?.pendingAttack;
@@ -256,70 +272,63 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     if (card == null) return;
     final attacker = state.playerAt(pending.attackerIndex);
     final defender = state.playerAt(1 - pending.attackerIndex);
-    final check = TechniqueMatchEngine.checkCounterEligibility(state, catalog);
+    final candidates = TechniqueMatchEngine.counterCandidates(state, catalog);
 
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
         title: Text('[Chain ${pending.chain}] ${defender.wrestlerName}の返技判定'),
-        // Ver.3.1（UI/UX改善+CPU実装ラウンド優先度5）: 説明文を削り、
-        // 「技名／必要エネルギー／所持」の3行だけに絞った簡潔な表示にした。
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              card.name,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+              '${card.name}を受けています',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
             ),
             Text(
               '${attacker.wrestlerName}が使用 ・ 威力${card.power}',
               style: const TextStyle(fontSize: 11, color: Colors.white54),
             ),
             const SizedBox(height: 10),
-            if (card.reversalEnergyCost.values.any((v) => v > 0)) ...[
-              const Text('必要エネルギー', style: TextStyle(fontSize: 11, color: Colors.white54)),
-              for (final e in card.reversalEnergyCost.entries.where((e) => e.value > 0))
-                Text(
-                  '${moveAttributeLabel(e.key)} ×${e.value}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+            if (candidates.isNotEmpty) ...[
+              const Text('使用できる返技', style: TextStyle(fontSize: 11, color: Colors.white54)),
+              const SizedBox(height: 4),
+              for (final entry in candidates)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pop(dialogContext);
+                      _counterAttack(entry);
+                    },
+                    child: Builder(
+                      builder: (_) {
+                        final counterCard = catalog.findTechniqueById(entry.cardId)!;
+                        final costText = counterCard.reversalEnergyCost.entries
+                            .where((e) => e.value > 0)
+                            .map((e) => '${moveAttributeLabel(e.key)}×${e.value}')
+                            .join('・');
+                        return Text('${counterCard.name}　$costText');
+                      },
+                    ),
+                  ),
                 ),
-              const SizedBox(height: 8),
-              const Text('所持', style: TextStyle(fontSize: 11, color: Colors.white54)),
-              for (final e in card.reversalEnergyCost.entries.where((e) => e.value > 0))
-                Text('${moveAttributeLabel(e.key)} ×${defender.availableEnergyFor(e.key)}'),
             ] else
               const Text(
-                '返技不可（返技エネルギー設定なし）',
+                '使用できる返技カードがありません',
                 style: TextStyle(fontSize: 12, color: Colors.white54),
-              ),
-            if (!check.canCounter)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  check.reason ?? '返技できません。',
-                  style: const TextStyle(color: _red, fontSize: 12),
-                ),
               ),
           ],
         ),
         actions: [
-          TextButton(
+          FilledButton(
             onPressed: () {
               Navigator.pop(dialogContext);
               _resolveHit();
             },
-            child: const Text('返技しない'),
-          ),
-          FilledButton(
-            onPressed: check.canCounter
-                ? () {
-                    _counterAttack();
-                    Navigator.pop(dialogContext);
-                  }
-                : null,
-            child: const Text('返技する'),
+            child: const Text('技を受ける'),
           ),
         ],
       ),
@@ -334,14 +343,18 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       entry,
       catalog,
     );
-    setState(() => matchState = result.state);
+    setState(
+      () => matchState = TechniqueMatchEngine.autoAdvanceTurnIfSettled(result.state),
+    );
   }
 
   void _escapeWithHp() {
     final state = matchState;
     if (state == null) return;
     final result = TechniqueMatchEngine.escapeWithHp(state, catalog);
-    setState(() => matchState = result.state);
+    setState(
+      () => matchState = TechniqueMatchEngine.autoAdvanceTurnIfSettled(result.state),
+    );
   }
 
   void _concede() {
@@ -367,7 +380,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final state = matchState;
     if (state == null) return;
     final result = TechniqueMatchEngine.cancelFinisher(state, entry, catalog);
-    setState(() => matchState = result.state);
+    setState(
+      () => matchState = TechniqueMatchEngine.autoAdvanceTurnIfSettled(result.state),
+    );
   }
 
   Future<void> _resolveFinisher() async {
@@ -384,7 +399,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final state = matchState;
     if (state == null) return;
     final result = TechniqueMatchEngine.escapeFinisher(state, entry, catalog);
-    setState(() => matchState = result.state);
+    setState(
+      () => matchState = TechniqueMatchEngine.autoAdvanceTurnIfSettled(result.state),
+    );
   }
 
   void _concedeFinisher() {
@@ -835,7 +852,14 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   /// ③ 技使用のワンタップ化 ＋ ⑥「ダウンする」廃止に伴う統合休息。
   ///
   /// スタンド中に休息を選んだ場合、`goDown`→`rest`を連続で呼ぶ（エンジンの
-  /// 2メソッドはどちらも無変更。呼び出し方をUI側でまとめただけ）。
+  /// 2メソッドはどちらも無変更。呼び出し方をUI側でまとめただけ）。`rest`は
+  /// 内部で常にターンを終了させる。
+  ///
+  /// 【ゲームサイクル整理ラウンド 優先度1】プレイヤーの1ターンは「技を使う」
+  /// か「休息する」のいずれかで必ず終了する。以前あった独立の「ターン終了」
+  /// ボタンは廃止した。安全弁: 現行エンジンの構造上、`rest`が失敗する
+  /// （状態が変化しない）ことは通常発生しないが、万一発生した場合はログに
+  /// 理由を残して強制的にターンを終了する。
   void _handleRest() {
     final state = matchState;
     if (state == null) return;
@@ -844,13 +868,18 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       next = TechniqueMatchEngine.goDown(next);
     }
     final rested = TechniqueMatchEngine.rest(next);
+    if (identical(rested, next) && identical(next, state)) {
+      final forced = state.copyWith(
+        log: [
+          ...state.log,
+          '${state.active.wrestlerName}は技も休息も実行できない異常状態のため、'
+              '安全弁によりターンを自動終了した',
+        ],
+      );
+      setState(() => matchState = TechniqueMatchEngine.endTurn(forced));
+      return;
+    }
     setState(() => matchState = rested);
-  }
-
-  void _endTurn() {
-    final state = matchState;
-    if (state == null) return;
-    setState(() => matchState = TechniqueMatchEngine.endTurn(state));
   }
 
   void _resetMatch() {
@@ -2039,7 +2068,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   );
 
   // ============================================================
-  // ⑥ 行動ボタン（「ダウンする」廃止、休息＋ターン終了のみ）
+  // 【ゲームサイクル整理ラウンド 優先度1】行動ボタン。「技を使う」（手札の
+  // カードをタップ）か「休息する」のいずれかで必ずターンが終わる仕様に
+  // 統一したため、独立した「ターン終了」ボタンは廃止した。
   // ============================================================
 
   Widget _actionButtons(TechniqueMatchState state) {
@@ -2057,38 +2088,19 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         ),
       );
     }
-    // ⑥ ボタン内へ補足サブテキストを追加（「休息」「ターン終了」自体は
-    // 既存テストが検証する厳密な文字列のため、別のTextとして維持する）。
-    return Row(
-      children: [
-        Expanded(
-          child: FilledButton.tonalIcon(
-            onPressed: _handleRest,
-            icon: const Icon(Icons.self_improvement),
-            label: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Text('休息', style: TextStyle(fontWeight: FontWeight.bold)),
-                Text('HP回復・ダウンして終了', style: TextStyle(fontSize: 9)),
-              ],
-            ),
-          ),
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.tonalIcon(
+        onPressed: _handleRest,
+        icon: const Icon(Icons.self_improvement),
+        label: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('休息', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text('ダウンしてHP回復・ターン終了', style: TextStyle(fontSize: 9)),
+          ],
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: _endTurn,
-            icon: const Icon(Icons.skip_next),
-            label: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Text('ターン終了', style: TextStyle(fontWeight: FontWeight.bold)),
-                Text('何もしない', style: TextStyle(fontSize: 9)),
-              ],
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 

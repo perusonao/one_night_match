@@ -79,25 +79,49 @@ class TechniqueMatchCpu {
 
     final pendingFinisher = state.pendingFinisher;
     if (pendingFinisher != null) {
-      return pendingFinisher.stage == TechniqueFinisherStage.responsePending
-          ? _decideCancelFinisher(state, catalog, level, rng)
-          : _decideFinisherEscape(state, catalog, level, rng);
+      return _settled(
+        pendingFinisher.stage == TechniqueFinisherStage.responsePending
+            ? _decideCancelFinisher(state, catalog, level, rng)
+            : _decideFinisherEscape(state, catalog, level, rng),
+        rng,
+      );
     }
     if (state.pendingEscape != null) {
-      return _decideEscape(state, catalog, level, rng);
+      return _settled(_decideEscape(state, catalog, level, rng), rng);
     }
     if (state.pendingAttack != null) {
-      return _decideCounter(state, catalog, level, rng);
+      return _settled(_decideCounter(state, catalog, level, rng), rng);
     }
     if (state.isRallyActive) {
+      // 【ゲームサイクル整理ラウンド 優先度1】_decideRallyAction自身が
+      // 「休息」の枝で既にendTurnまで完了させる場合があるため、二重に
+      // ターンを進めてしまわないよう、settle処理は_decideRallyAction内部で
+      // 枝ごとに個別に行う（ここではラップしない）。
       return _decideRallyAction(state, catalog, level, rng, isFreshTurn: false);
     }
     if (!state.energySetThisTurn) {
       final energyDecision = _decideEnergy(state, catalog, level, rng);
+      // 【ゲームサイクル整理ラウンド 優先度1】エネルギーセット直後は
+      // 絶対にターンを進めてはならない（技の使用はこの後に続く別ステップ）。
+      // そのためここだけは_settled()を経由させない。
       if (energyDecision != null) return energyDecision;
     }
     return _decideRallyAction(state, catalog, level, rng, isFreshTurn: true);
   }
+
+  /// 【ゲームサイクル整理ラウンド 優先度1】技の使用（ラリー・返技・決着判定を
+  /// 含む）または休息のいずれかで必ずターンが終わる、という仕様をCPUの
+  /// 意思決定にも一律で適用する。[TechniqueMatchEngine.
+  /// autoAdvanceTurnIfSettled]はラリー継続中・判定待ちの間は何もしない
+  /// （内部でガードする）ため安全に呼べるが、**既にそのものが`endTurn`／
+  /// `rest`（内部でendTurnを呼ぶ）を実行済みの結果には絶対に二重適用しては
+  /// ならない**（ターンが2回分進んでしまう）。そのため呼び出し側は、まだ
+  /// ターンを終える処理を行っていない結果に対してのみこれを呼ぶこと。
+  static TechniqueCpuStepResult _settled(TechniqueCpuStepResult result, Random rng) =>
+      TechniqueCpuStepResult(
+        state: TechniqueMatchEngine.autoAdvanceTurnIfSettled(result.state, random: rng),
+        trace: result.trace,
+      );
 
   /// 決着（[TechniqueMatchState.isOver]）まで[step]を繰り返す。
   /// CPU対CPUシミュレーション用。[defaultMaxSteps]に達した場合は打ち切り、
@@ -352,8 +376,13 @@ class TechniqueMatchCpu {
 
     // 十分なスコアの技が無い。
     if (!isFreshTurn) {
-      // ラリー中: 追撃せずラリーを終了する。
-      final newState = TechniqueMatchEngine.endRally(state);
+      // ラリー中: 追撃せずラリーを終了する。【優先度1】返技によってラリーが
+      // 終了した場合もそのターンを終了する仕様のため、endRally自体は
+      // ターンを終えないので、ここでautoAdvanceTurnIfSettledを適用する。
+      final newState = TechniqueMatchEngine.autoAdvanceTurnIfSettled(
+        TechniqueMatchEngine.endRally(state),
+        random: rng,
+      );
       final trace = TechniqueCpuDecisionTrace(
         turnNumber: state.turnNumber,
         playerIndex: attackerIndex,
@@ -368,8 +397,11 @@ class TechniqueMatchCpu {
       return TechniqueCpuStepResult(state: newState, trace: trace);
     }
 
-    // 通常ターン: HPが減っていれば休息、満タンならターン終了。
-    if (attacker.hp < attacker.maxHp && attacker.posture == WrestlerPosture.stand) {
+    // 【ゲームサイクル整理ラウンド 優先度1】「技を使う」か「休息する」の
+    // どちらかで必ずターンが終わる仕様になったため、有効な技が無い場合は
+    // HPの多寡によらず必ず休息する（「何もせずターン終了」という第3の
+    // 選択肢は廃止された）。
+    if (attacker.posture == WrestlerPosture.stand) {
       var next = TechniqueMatchEngine.goDown(state);
       next = TechniqueMatchEngine.rest(next, random: rng);
       final trace = TechniqueCpuDecisionTrace(
@@ -382,12 +414,21 @@ class TechniqueMatchCpu {
           action: 'rest',
           reason: shouldRetreat
               ? 'HPが${(hpRatio * 100).round()}%まで減っており、決定的な技も無いため休息を優先した'
-              : '有効な技が無く、HPが満タンでないため休息してHPを回復した',
+              : '有効な技が無いため休息した（「技を使う」か「休息する」のいずれかで必ずターンを終える仕様）',
         ),
       );
       return TechniqueCpuStepResult(state: next, trace: trace);
     }
-    final ended = TechniqueMatchEngine.endTurn(state, random: rng);
+    // 安全弁: 理論上到達しない想定（フレッシュターン開始時は常にスタンドへ
+    // 戻るため）だが、念のためログを残して自動的にターンを終了する。
+    final safety = state.copyWith(
+      log: [
+        ...state.log,
+        '${attacker.wrestlerName}は技も休息も実行できない異常状態のため、'
+            '安全弁によりターンを自動終了した',
+      ],
+    );
+    final ended = TechniqueMatchEngine.endTurn(safety, random: rng);
     final trace = TechniqueCpuDecisionTrace(
       turnNumber: state.turnNumber,
       playerIndex: attackerIndex,
@@ -396,7 +437,7 @@ class TechniqueMatchCpu {
       candidates: candidates,
       chosen: const TechniqueCpuChosenAction(
         action: 'endTurn',
-        reason: '有効な技が無く、HPも満タンのためターンを終了した',
+        reason: '安全弁: 技も休息も実行できない異常状態のためターンを終了した',
       ),
     );
     return TechniqueCpuStepResult(state: ended, trace: trace);
@@ -538,17 +579,40 @@ class TechniqueMatchCpu {
       if (card.causesDown) add('成立するとダウンさせられる', 10);
       if (card.hasPinEffect) add('フォール効果あり', 15);
       if (card.hasSubmissionEffect) add('ギブアップ効果あり', 15);
-      final willDeplete = card.reversalEnergyCost.entries.any(
+    }
+
+    // 【ゲームサイクル整理ラウンド 優先度2】返技には手札の返技候補カードが
+    // 必要になった。候補の中から「返技すると自分のエネルギーが枯渇しない
+    // カード」を優先して選ぶ（返技用エネルギーを残す、という既存方針の延長）。
+    final candidates = TechniqueMatchEngine.counterCandidates(state, catalog);
+    TechniqueDeckEntry? chosenEntry;
+    if (candidates.isNotEmpty) {
+      chosenEntry = candidates.reduce((a, b) {
+        final cardA = catalog.findTechniqueById(a.cardId)!;
+        final cardB = catalog.findTechniqueById(b.cardId)!;
+        final depleteA = cardA.reversalEnergyCost.entries.any(
+          (e) => e.value > 0 && defender.availableEnergyFor(e.key) - e.value <= 0,
+        );
+        final depleteB = cardB.reversalEnergyCost.entries.any(
+          (e) => e.value > 0 && defender.availableEnergyFor(e.key) - e.value <= 0,
+        );
+        if (depleteA == depleteB) return a;
+        return depleteA ? b : a;
+      });
+      final chosenCard = catalog.findTechniqueById(chosenEntry.cardId)!;
+      final willDeplete = chosenCard.reversalEnergyCost.entries.any(
         (e) => e.value > 0 && defender.availableEnergyFor(e.key) - e.value <= 0,
       );
       if (willDeplete) add('返技すると当該エネルギーが枯渇する', -8);
     }
 
     const threshold = 15;
-    final shouldCounter = check.canCounter && threat >= threshold;
+    final counterEntry = chosenEntry;
 
-    if (shouldCounter) {
-      final result = TechniqueMatchEngine.counterAttack(state, catalog);
+    if (check.canCounter && counterEntry != null && threat >= threshold) {
+      final result = TechniqueMatchEngine.counterAttack(state, counterEntry, catalog);
+      final counterCardName =
+          catalog.findTechniqueById(counterEntry.cardId)?.name ?? counterEntry.cardId;
       final trace = TechniqueCpuDecisionTrace(
         turnNumber: state.turnNumber,
         playerIndex: defenderIndex,
@@ -565,7 +629,10 @@ class TechniqueMatchCpu {
         ],
         chosen: TechniqueCpuChosenAction(
           action: 'counterAttack',
-          reason: '脅威スコア$threat点（閾値$threshold）が高いため返技した',
+          cardId: counterEntry.cardId,
+          cardName: counterCardName,
+          reason: '脅威スコア$threat点（閾値$threshold）が高いため'
+              '「$counterCardName」で返技した',
         ),
       );
       return TechniqueCpuStepResult(state: result.state, trace: trace);
@@ -593,7 +660,7 @@ class TechniqueMatchCpu {
       chosen: TechniqueCpuChosenAction(
         action: 'acceptHit',
         reason: !check.canCounter
-            ? '返技エネルギーが不足しているため受けた'
+            ? (check.reason ?? '返技できないため受けた')
             : '脅威スコア$threat点（閾値$threshold未満）のため返技せず受けた',
       ),
     );

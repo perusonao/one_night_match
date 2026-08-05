@@ -254,7 +254,10 @@ void main() {
       expect(result.state.activePlayerIndex, 1);
     });
 
-    test('有効な技が無くHPが満タンならターンを終了する', () {
+    test('有効な技が無くHPが満タンでも、「技を使う」か「休息する」しか選択肢が無いため休息する', () {
+      // 【ゲームサイクル整理ラウンド 優先度1】「何もせずターン終了」という
+      // 第3の選択肢が廃止されたため、HPが満タンでも有効な技が無ければ
+      // 必ず休息する（休息はHPが満タンでも実行できる）。
       final catalog = microCatalog();
       final deckA = deckOf('w1', ['weak_strike']);
       var state = TechniqueMatchEngine.start(
@@ -271,7 +274,7 @@ void main() {
       );
       state = state.copyWith(energySetThisTurn: true);
       final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
-      expect(result.trace!.chosen.action, 'endTurn');
+      expect(result.trace!.chosen.action, 'rest');
       expect(result.state.activePlayerIndex, 1);
     });
   });
@@ -320,8 +323,12 @@ void main() {
       );
       // pin_moveはtargetState:downだが、返技判定自体は成立宣言前提の
       // pendingAttackとして直接注入するため対象状態は問わない。
+      // 【ゲームサイクル整理ラウンド 優先度2】返技には手札の返技候補カードが
+      // 必要になった。Bの手札は自身のデッキ由来のweak_strike
+      // （reversalEnergyCost: strike1）なので、そのコストに合わせて
+      // strike属性のエネルギーを持たせる。
       state = state.copyWith(
-        playerB: state.playerB.copyWith(energyPool: {MoveAttribute.throwMove: 5}),
+        playerB: state.playerB.copyWith(energyPool: {MoveAttribute.strike: 5}),
         pendingAttack: const TechniquePendingAttack(
           attackerIndex: 0,
           cardId: 'pin_move',
