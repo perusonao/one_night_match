@@ -394,6 +394,72 @@ void main() {
       expect(result.state.active.hand, isEmpty);
     });
 
+    // UI改善+CPU実装ラウンドで確定した仕様: 技エネルギーは1ターンに1枚のみ
+    // セット可能。エンジンレベル（setEnergy）で強制する。
+    test('技エネルギーは1ターンに1枚のみセット可能（2枚目は拒否される）', () {
+      final deckA = deckWithSpecificCards(
+        'wrestler_a',
+        ['energy_strike', 'energy_strike'],
+      );
+      final state = TechniqueMatchEngine.start(
+        wrestlerAId: 'wrestler_a',
+        wrestlerAName: 'レスラーA',
+        wrestlerAMaxHp: 100,
+        deckA: deckA,
+        wrestlerBId: 'wrestler_b',
+        wrestlerBName: 'レスラーB',
+        wrestlerBMaxHp: 100,
+        deckB: deckWithCards('b', 30),
+        handSize: 2,
+        random: Random(1),
+      );
+      expect(state.energySetThisTurn, isFalse);
+
+      final firstEntry = state.active.hand.first;
+      final firstResult = TechniqueMatchEngine.setEnergy(state, firstEntry, catalog());
+      expect(firstResult.success, isTrue);
+      expect(firstResult.state.energySetThisTurn, isTrue);
+      expect(firstResult.state.active.energyPool[MoveAttribute.strike], 1);
+
+      final secondEntry = firstResult.state.active.hand.first;
+      final secondResult = TechniqueMatchEngine.setEnergy(
+        firstResult.state,
+        secondEntry,
+        catalog(),
+      );
+      expect(secondResult.success, isFalse);
+      expect(secondResult.failureReason, contains('1ターンに1枚'));
+      // 2枚目は拒否され、状態は変化していない（1枚のまま・手札にも残る）。
+      expect(secondResult.state.active.energyPool[MoveAttribute.strike], 1);
+      expect(secondResult.state.active.hand, contains(secondEntry));
+    });
+
+    test('ターンを終了すると技エネルギーの1ターン1枚制限がリセットされる', () {
+      final deckA = deckWithSpecificCards('wrestler_a', ['energy_strike']);
+      final state = TechniqueMatchEngine.start(
+        wrestlerAId: 'wrestler_a',
+        wrestlerAName: 'レスラーA',
+        wrestlerAMaxHp: 100,
+        deckA: deckA,
+        wrestlerBId: 'wrestler_b',
+        wrestlerBName: 'レスラーB',
+        wrestlerBMaxHp: 100,
+        deckB: deckWithCards('b', 30),
+        handSize: 1,
+        random: Random(1),
+      );
+      final entry = state.active.hand.first;
+      final afterSet = TechniqueMatchEngine.setEnergy(state, entry, catalog()).state;
+      expect(afterSet.energySetThisTurn, isTrue);
+
+      // Bのターンへ、そして再びAのターンへ戻る。
+      final afterB = TechniqueMatchEngine.endTurn(afterSet, random: Random(2));
+      expect(afterB.activePlayerIndex, 1);
+      final backToA = TechniqueMatchEngine.endTurn(afterB, random: Random(3));
+      expect(backToA.activePlayerIndex, 0);
+      expect(backToA.energySetThisTurn, isFalse);
+    });
+
     test('エネルギー不足の技は使用できない', () {
       final state = matchWithHand(['normal_strike']);
       final check = TechniqueMatchEngine.canUseMove(

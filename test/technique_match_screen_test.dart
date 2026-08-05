@@ -138,6 +138,9 @@ void main() {
       await tester.tap(find.text('試合開始'));
       await tester.pumpAndSettle();
 
+      // 優先度1（縦1画面化）でターン数バッジは常時表示から外れ、ログ展開時
+      // のみ見えるようになった。
+      await expandLog(tester);
       expect(find.textContaining('ターン1'), findsWidgets);
       await expandPlayerDetail(tester, 0);
       expect(find.textContaining('モデルデッキ'), findsWidgets);
@@ -162,6 +165,7 @@ void main() {
         await tester.tap(find.text('試合開始'));
         await tester.pumpAndSettle();
 
+        await expandLog(tester);
         expect(find.textContaining('ターン1'), findsWidgets);
         await expandPlayerDetail(tester, 0);
         expect(find.textContaining('仮デッキを自動生成'), findsWidgets);
@@ -578,7 +582,9 @@ void main() {
           attribute: MoveAttribute.strike,
           allowedWrestlerIds: ['wrestler_akari'],
           minimumLevel: 1,
-          attackEnergyCost: {MoveAttribute.strike: 2},
+          // 技エネルギーは1ターンに1枚のみセット可能（エンジンの制約）なため、
+          // このテストフィクスチャは1で十分な必要量にしてある。
+          attackEnergyCost: {MoveAttribute.strike: 1},
           power: 30,
           heatDelta: 10,
           hasFinisherEffect: true,
@@ -659,7 +665,6 @@ void main() {
       await tester.pumpAndSettle();
 
       await selectAndConfirm(tester, '打エネルギー', 'セットする');
-      await selectAndConfirm(tester, '打エネルギー', 'セットする');
 
       // フィニッシャーもタップ→選択→「宣言する」で宣言する。
       await tester.tap(find.text('テストフィニッシャー').first);
@@ -735,7 +740,6 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await selectAndConfirm(tester, '打エネルギー', 'セットする');
       await selectAndConfirm(tester, '打エネルギー', 'セットする');
 
       await tester.tap(find.text('テストフィニッシャー').first);
