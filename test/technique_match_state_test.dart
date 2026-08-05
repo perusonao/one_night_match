@@ -1012,12 +1012,16 @@ void main() {
       expect(resolved.pendingEscape!.kind, TechniqueEscapeKind.fall);
     });
 
-    test('hasFinisherEffectが立つ技はPhase 6の対象外（pendingEscapeはセットされない）', () {
-      final resolved = resolveToEscape('finisher_fall_move');
-      expect(resolved.pendingEscape, isNull);
-      // 通常の技として即座に成立・ダメージ反映されている。
-      expect(resolved.playerB.hp, 90);
-    });
+    test(
+      'hasFinisherEffectが立つ技は通常のdeclareAttackでは宣言できない'
+      '（Phase 7でdeclareFinisher専用になったため、pendingEscapeもセットされない）',
+      () {
+        final resolved = resolveToEscape('finisher_fall_move');
+        expect(resolved.pendingEscape, isNull);
+        // declareAttack自体が失敗するため、技は不成立でダメージも発生しない。
+        expect(resolved.playerB.hp, 100);
+      },
+    );
 
     test('キックアウトカードでフォールを回避できる（手札→除外。捨て札には入らない）', () {
       var state = resolveToEscape('fall_move');
@@ -1381,6 +1385,354 @@ void main() {
       );
       expect(result.success, isTrue);
       expect(result.state.playerB.hp, 88); // 100 - (6 + 6)
+    });
+  });
+
+  group('Phase 7: フィニッシャー', () {
+    TechniqueDeckCardCatalog catalog() => const TechniqueDeckCardCatalog(
+      techniques: [
+        TechniqueDeckTechniqueCard(
+          id: 'finisher_a',
+          name: 'テストフィニッシャー',
+          category: TechniqueCardCategory.finisher,
+          attribute: MoveAttribute.strike,
+          allowedWrestlerIds: ['wrestler_a'],
+          minimumLevel: 1,
+          attackEnergyCost: {MoveAttribute.strike: 2},
+          reversalEnergyCost: {MoveAttribute.strike: 5}, // 通常返技専用、無関係
+          power: 25,
+          heatDelta: 10,
+          hasFinisherEffect: true,
+          finisherRequirements: {'minimumHeat': 20},
+        ),
+        TechniqueDeckTechniqueCard(
+          id: 'other_finisher',
+          name: '別のフィニッシャー',
+          category: TechniqueCardCategory.finisher,
+          attribute: MoveAttribute.strike,
+          allowedWrestlerIds: ['wrestler_b'], // Aは使用不可
+          minimumLevel: 1,
+          attackEnergyCost: {MoveAttribute.strike: 1},
+          power: 20,
+          heatDelta: 10,
+          hasFinisherEffect: true,
+        ),
+      ],
+      energies: [],
+      defenseCards: [
+        TechniqueDefenseCard(
+          id: 'escape_card',
+          name: 'エスケープ',
+          type: TechniqueDeckCardType.escape,
+        ),
+        TechniqueDefenseCard(
+          id: 'reversal_card',
+          name: 'リバーサル',
+          type: TechniqueDeckCardType.reversal,
+        ),
+        TechniqueDefenseCard(
+          id: 'special_kickout_card',
+          name: '特殊キックアウト',
+          type: TechniqueDeckCardType.kickOut,
+          kickOutCategory: KickOutCardCategory.finisherEscape,
+        ),
+        TechniqueDefenseCard(
+          id: 'normal_kickout_card',
+          name: '通常キックアウト',
+          type: TechniqueDeckCardType.kickOut,
+          kickOutCategory: KickOutCardCategory.normal,
+        ),
+        TechniqueDefenseCard(
+          id: 'ropebreak_card',
+          name: 'ロープブレイク',
+          type: TechniqueDeckCardType.ropeBreak,
+        ),
+      ],
+    );
+
+    TechniqueMatchState stateWithFinisherInHand({
+      int heatA = 20,
+      int hpB = 100,
+      List<TechniqueDeckEntry> handB = const [],
+      Map<MoveAttribute, int> energyA = const {MoveAttribute.strike: 2},
+    }) {
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'wrestler_a',
+        wrestlerAName: 'レスラーA',
+        wrestlerAMaxHp: 100,
+        deckA: const TechniqueDeckDefinition(
+          id: 'a',
+          wrestlerId: 'wrestler_a',
+          entries: [
+            TechniqueDeckEntry(
+              instanceId: 'fin1',
+              cardId: 'finisher_a',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+          ],
+        ),
+        wrestlerBId: 'wrestler_b',
+        wrestlerBName: 'レスラーB',
+        wrestlerBMaxHp: 100,
+        deckB: const TechniqueDeckDefinition(
+          id: 'b',
+          wrestlerId: 'wrestler_b',
+          entries: [],
+        ),
+        handSize: 1,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        playerA: state.playerA.copyWith(energyPool: energyA, heat: heatA),
+        playerB: state.playerB.copyWith(hp: hpB, hand: handB),
+      );
+      return state;
+    }
+
+    test('発動条件（minimumHeat）を満たさないと宣言できない', () {
+      final state = stateWithFinisherInHand(heatA: 10);
+      final check = TechniqueMatchEngine.canDeclareFinisher(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      );
+      expect(check.canDeclare, isFalse);
+      expect(check.reason, contains('HEAT'));
+    });
+
+    test('使用可能レスラーでなければ宣言できない', () {
+      var state = stateWithFinisherInHand();
+      const entry = TechniqueDeckEntry(
+        instanceId: 'other1',
+        cardId: 'other_finisher',
+        cardType: TechniqueDeckCardType.technique,
+      );
+      state = state.copyWith(playerA: state.playerA.copyWith(hand: [entry]));
+      final check = TechniqueMatchEngine.canDeclareFinisher(state, entry, catalog());
+      expect(check.canDeclare, isFalse);
+      expect(check.reason, contains('使用できません'));
+    });
+
+    test('条件を満たせば宣言でき、手札から除かれるが捨て札にも山札にも入らない', () {
+      final state = stateWithFinisherInHand();
+      final entry = state.playerA.hand.first;
+      final result = TechniqueMatchEngine.declareFinisher(state, entry, catalog());
+      expect(result.success, isTrue);
+      final s = result.state;
+      expect(s.pendingFinisher, isNotNull);
+      expect(s.pendingFinisher!.stage, TechniqueFinisherStage.responsePending);
+      expect(s.pendingFinisher!.attackerIndex, 0);
+      expect(s.pendingFinisher!.defenderIndex, 1);
+      expect(s.playerA.hand, isEmpty);
+      expect(s.playerA.discardPile, isEmpty);
+      expect(s.playerA.drawPile, isEmpty);
+      // 攻撃エネルギーは消費される。
+      expect(s.playerA.availableEnergyFor(MoveAttribute.strike), 0);
+      expect(s.isRallyActive, isFalse); // 宣言時点でラリーは終了扱い
+    });
+
+    test('通常のdeclareAttackではフィニッシャーを宣言できない', () {
+      final state = stateWithFinisherInHand();
+      final entry = state.playerA.hand.first;
+      final result = TechniqueMatchEngine.declareAttack(state, entry, catalog());
+      expect(result.success, isFalse);
+    });
+
+    test('エスケープカードで発動をキャンセルできる（ダメージなし・山札へ戻る）', () {
+      const escapeEntry = TechniqueDeckEntry(
+        instanceId: 'e1',
+        cardId: 'escape_card',
+        cardType: TechniqueDeckCardType.escape,
+      );
+      final base = stateWithFinisherInHand(handB: const [escapeEntry]);
+      final declared = TechniqueMatchEngine.declareFinisher(
+        base,
+        base.playerA.hand.first,
+        catalog(),
+      ).state;
+
+      final check = TechniqueMatchEngine.canCancelFinisher(
+        declared,
+        escapeEntry,
+        catalog(),
+      );
+      expect(check.canCancel, isTrue);
+
+      final result = TechniqueMatchEngine.cancelFinisher(
+        declared,
+        escapeEntry,
+        catalog(),
+        random: Random(1),
+      );
+      expect(result.success, isTrue);
+      final s = result.state;
+      expect(s.pendingFinisher, isNull);
+      expect(s.playerB.hp, 100); // ダメージなし
+      expect(s.playerA.heat, 20); // HEAT変動なし
+      expect(s.playerB.hand, isEmpty);
+      expect(s.playerB.discardPile, [escapeEntry]); // エスケープカードは捨て札
+      // フィニッシャーカードは山札へ戻る（捨て札には入らない）。
+      expect(s.playerA.drawPile.length, 1);
+      expect(s.playerA.drawPile.first.cardId, 'finisher_a');
+      expect(s.playerA.discardPile, isEmpty);
+      expect(s.isRallyActive, isFalse);
+    });
+
+    test('リバーサルカードで発動をキャンセルすると主導権が移動する', () {
+      const reversalEntry = TechniqueDeckEntry(
+        instanceId: 'r1',
+        cardId: 'reversal_card',
+        cardType: TechniqueDeckCardType.reversal,
+      );
+      final base = stateWithFinisherInHand(handB: const [reversalEntry]);
+      final declared = TechniqueMatchEngine.declareFinisher(
+        base,
+        base.playerA.hand.first,
+        catalog(),
+      ).state;
+
+      final result = TechniqueMatchEngine.cancelFinisher(
+        declared,
+        reversalEntry,
+        catalog(),
+        random: Random(1),
+      );
+      expect(result.success, isTrue);
+      final s = result.state;
+      expect(s.pendingFinisher, isNull);
+      expect(s.playerB.hp, 100);
+      expect(s.rallyAttackerIndex, 1); // 主導権がBへ移った
+      expect(s.playerA.drawPile.length, 1); // フィニッシャーは山札へ
+    });
+
+    test('キャンセルされないと成立し、ダメージ・HEATが反映されescapePendingへ移行する', () {
+      final base = stateWithFinisherInHand();
+      final declared = TechniqueMatchEngine.declareFinisher(
+        base,
+        base.playerA.hand.first,
+        catalog(),
+      ).state;
+      final resolved = TechniqueMatchEngine.resolveFinisher(declared, catalog());
+      expect(resolved.playerB.hp, 75); // 100 - 25
+      expect(resolved.playerA.heat, 30); // 20 + 10
+      expect(resolved.pendingFinisher, isNotNull);
+      expect(resolved.pendingFinisher!.stage, TechniqueFinisherStage.escapePending);
+      // 成立したフィニッシャーカードは捨て札へ。
+      expect(resolved.playerA.discardPile.any((e) => e.cardId == 'finisher_a'), isTrue);
+      expect(resolved.winnerIndex, isNull);
+    });
+
+    test('特殊キックアウトカードで脱出できる（除外され、勝敗はつかない）', () {
+      const specialEntry = TechniqueDeckEntry(
+        instanceId: 's1',
+        cardId: 'special_kickout_card',
+        cardType: TechniqueDeckCardType.kickOut,
+      );
+      final base = stateWithFinisherInHand(handB: const [specialEntry]);
+      final declared = TechniqueMatchEngine.declareFinisher(
+        base,
+        base.playerA.hand.first,
+        catalog(),
+      ).state;
+      final resolved = TechniqueMatchEngine.resolveFinisher(declared, catalog());
+
+      final check = TechniqueMatchEngine.canEscapeFinisher(resolved, specialEntry, catalog());
+      expect(check.canEscape, isTrue);
+
+      final result = TechniqueMatchEngine.escapeFinisher(resolved, specialEntry, catalog());
+      expect(result.success, isTrue);
+      expect(result.state.pendingFinisher, isNull);
+      expect(result.state.winnerIndex, isNull);
+      expect(result.state.playerB.removedPile, [specialEntry]);
+      expect(result.state.playerB.discardPile, isEmpty);
+    });
+
+    test('通常キックアウト・ロープブレイクではフィニッシャーから脱出できない', () {
+      const normalKickout = TechniqueDeckEntry(
+        instanceId: 'nk1',
+        cardId: 'normal_kickout_card',
+        cardType: TechniqueDeckCardType.kickOut,
+      );
+      const ropebreak = TechniqueDeckEntry(
+        instanceId: 'rb1',
+        cardId: 'ropebreak_card',
+        cardType: TechniqueDeckCardType.ropeBreak,
+      );
+      final base = stateWithFinisherInHand(
+        handB: const [normalKickout, ropebreak],
+      );
+      final declared = TechniqueMatchEngine.declareFinisher(
+        base,
+        base.playerA.hand.first,
+        catalog(),
+      ).state;
+      final resolved = TechniqueMatchEngine.resolveFinisher(declared, catalog());
+
+      expect(
+        TechniqueMatchEngine.canEscapeFinisher(resolved, normalKickout, catalog()).canEscape,
+        isFalse,
+      );
+      expect(
+        TechniqueMatchEngine.canEscapeFinisher(resolved, ropebreak, catalog()).canEscape,
+        isFalse,
+      );
+    });
+
+    test('脱出できない（諦める）と残りHPに関係なく攻撃側の勝利になる', () {
+      final base = stateWithFinisherInHand(hpB: 100);
+      final declared = TechniqueMatchEngine.declareFinisher(
+        base,
+        base.playerA.hand.first,
+        catalog(),
+      ).state;
+      final resolved = TechniqueMatchEngine.resolveFinisher(declared, catalog());
+      final conceded = TechniqueMatchEngine.concedeFinisher(resolved);
+      expect(conceded.winnerIndex, 0);
+      expect(conceded.winReason, 'フィニッシャー勝利');
+      expect(conceded.pendingFinisher, isNull);
+    });
+
+    test('フィニッシャー判定待ちの間はgoDown/rest/endTurn/setEnergy/declareAttackが無効化される', () {
+      final base = stateWithFinisherInHand();
+      final declared = TechniqueMatchEngine.declareFinisher(
+        base,
+        base.playerA.hand.first,
+        catalog(),
+      ).state;
+      expect(TechniqueMatchEngine.goDown(declared), same(declared));
+      expect(TechniqueMatchEngine.rest(declared), same(declared));
+      expect(TechniqueMatchEngine.endTurn(declared), same(declared));
+
+      const dummyEntry = TechniqueDeckEntry(
+        instanceId: 'dummy',
+        cardId: 'escape_card',
+        cardType: TechniqueDeckCardType.escape,
+      );
+      final setEnergyResult = TechniqueMatchEngine.setEnergy(declared, dummyEntry, catalog());
+      expect(setEnergyResult.success, isFalse);
+
+      final declareResult = TechniqueMatchEngine.declareAttack(declared, dummyEntry, catalog());
+      expect(declareResult.success, isFalse);
+      expect(declareResult.failureReason, contains('フィニッシャー'));
+    });
+
+    test('pendingFinisherが無い状態でcancelFinisher/resolveFinisher/escapeFinisher/concedeFinisherを呼んでも何も起きない', () {
+      final state = stateWithFinisherInHand();
+      const dummyEntry = TechniqueDeckEntry(
+        instanceId: 'dummy',
+        cardId: 'escape_card',
+        cardType: TechniqueDeckCardType.escape,
+      );
+      expect(
+        TechniqueMatchEngine.cancelFinisher(state, dummyEntry, catalog()).state,
+        same(state),
+      );
+      expect(TechniqueMatchEngine.resolveFinisher(state, catalog()), same(state));
+      expect(
+        TechniqueMatchEngine.escapeFinisher(state, dummyEntry, catalog()).state,
+        same(state),
+      );
+      expect(TechniqueMatchEngine.concedeFinisher(state), same(state));
     });
   });
 }

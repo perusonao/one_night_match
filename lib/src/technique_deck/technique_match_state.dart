@@ -20,8 +20,7 @@ import 'technique_deck_models.dart';
 /// のいずれかで回避でき、いずれもできない（または選ばない）場合はそこで
 /// 試合が終わる（`TechniqueMatchState.winnerIndex`がセットされる）。優先度は
 /// 仕様書どおりフォール＞ギブアップとし、`hasFinisherEffect`が立っている技は
-/// Phase 6の対象外（Phase 7でフィニッシャー専用の決着処理を実装するまでは、
-/// 通常のフォール／ギブアップ判定も発生しない——通常の技として扱う）。
+/// Phase 6の対象外（Phase 7で専用の決着処理を実装。下記参照）。
 ///
 /// 【返技エネルギーの用途は決着回避には使わない（ユーザー指示、Phase 6完了後の
 /// 追加ルール変更）】`reversalEnergyCost`はラリー中の返技（`counterAttack`。
@@ -30,8 +29,7 @@ import 'technique_deck_models.dart';
 /// 手段を明確に分離する設計判断（旧`canEscapeWithReversalEnergy`/
 /// `escapeWithReversalEnergy`は削除済み）。
 ///
-/// 特殊キックアウト・エスケープカード・リバーサルカード・フィニッシャー決着・
-/// CPUは実装しない（Phase 7以降）。既存の `LevelMatchEngine`
+/// CPUは実装しない（Phase 8）。既存の `LevelMatchEngine`
 /// （classic/energy）とは完全に独立しており、一切の変更・依存を持たない。
 ///
 /// 【ダメージ適用方式について】open questions 1番。Phase 4に続きPhase 5でも
@@ -61,6 +59,32 @@ import 'technique_deck_models.dart';
 ///   ときに追加威力を得る技パラメータ。`targetState`を`down`限定にせずとも
 ///   「ダウン中に狙うと強い」という誘因を持たせられる（ギブアップ技が
 ///   一度も使われなかった問題への対応）。
+///
+/// 【Phase 7：フィニッシャー】`hasFinisherEffect`を持つ技は、通常の
+/// `declareAttack`／`resolveHit`／`pendingEscape`のフローには一切乗らない
+/// （`_checkEligibility`で明示的に除外し、`declareFinisher`専用の宣言でのみ
+/// 使用できる）。ユーザー指示により以下を厳格に分離した設計とした。
+/// - **通常の返技では止められない**: `reversalEnergyCost`（返技エネルギー）
+///   は通常技・固有技のラリー専用のまま。フィニッシャー宣言は
+///   `pendingAttack`を経由せず、直接`pendingFinisher`
+///   （`TechniqueFinisherStage.responsePending`）へ移行する。
+/// - **発動前キャンセル**（`responsePending`）: 防御側はエスケープ／
+///   リバーサルカードでのみキャンセルできる。成功時、ダメージ・HEAT・
+///   ダウンは一切発生せず、フィニッシャーカードは山札へ戻ってシャッフル
+///   される（捨て札にはならない）。エスケープはラリー終了、リバーサルは
+///   主導権移動（防御側が新しい攻撃側になる）。
+/// - **発動（成立）**: キャンセルされなければ即座にダメージ・HEAT・ダウンが
+///   反映され（`_resolveAttack`を再利用）、フィニッシャーカードは捨て札へ
+///   （キャンセル時のみ山札へ戻る）。状態は`escapePending`へ移行する。
+/// - **成立後の脱出**（`escapePending`）: 防御側は特殊キックアウトカード
+///   （`KickOutCardCategory.finisherEscape`）でのみ脱出できる。通常
+///   キックアウト・ロープブレイク・HP消費・返技エネルギーはいずれも使えない。
+///   脱出できなければ、残りHPに関係なく攻撃側の即勝利（`winnerIndex`に
+///   `'フィニッシャー勝利'`がセットされる）。
+/// - フィニッシャー発動条件（`finisherRequirements`）はカード側のデータで
+///   持ち、エンジンには個別ハードコードしない（`minimumHeat` /
+///   `maximumOpponentHp` / `maximumOwnHp` / `requiredOpponentState`
+///   キーを解釈する汎用チェッカー`_checkFinisherRequirements`のみ実装）。
 
 /// ターンの進行段階。
 enum TechniqueMatchPhase { start, draw, energySet, end }
@@ -108,6 +132,41 @@ class TechniquePendingEscape {
   final int defenderIndex;
   final String cardId;
   final TechniqueEscapeKind kind;
+}
+
+/// フィニッシャー宣言後の進行段階（Phase 7）。
+enum TechniqueFinisherStage {
+  /// 宣言直後。防御側のエスケープ／リバーサルカードによる発動キャンセルを
+  /// 待っている状態。
+  responsePending,
+
+  /// キャンセルされずフィニッシャーが成立した後。防御側の特殊キックアウト
+  /// カードによる脱出を待っている状態。
+  escapePending,
+}
+
+/// フィニッシャーが宣言されてから決着するまでの保留状態（Phase 7）。
+/// 通常の`TechniquePendingAttack`／`TechniquePendingEscape`とは別系統
+/// （返技エネルギー・通常キックアウト・ロープブレイク・HP消費は一切
+/// 使えないため）。
+class TechniquePendingFinisher {
+  const TechniquePendingFinisher({
+    required this.attackerIndex,
+    required this.defenderIndex,
+    required this.entry,
+    required this.stage,
+  });
+
+  final int attackerIndex;
+  final int defenderIndex;
+
+  /// 宣言されたフィニッシャーの物理カード（`instanceId`単位）。キャンセル
+  /// された場合はこのエントリを山札へ戻す必要があるため、cardIdだけでなく
+  /// エントリそのものを保持する。
+  final TechniqueDeckEntry entry;
+  final TechniqueFinisherStage stage;
+
+  String get cardId => entry.cardId;
 }
 
 /// 1人のプレイヤー（レスラー）の試合内状態。
@@ -221,6 +280,7 @@ class TechniqueMatchState {
     this.rallyChain = 0,
     this.pendingAttack,
     this.pendingEscape,
+    this.pendingFinisher,
     this.winnerIndex,
     this.winReason,
     this.isDraw = false,
@@ -249,6 +309,10 @@ class TechniqueMatchState {
   /// フォール／ギブアップ効果を持つ技が成立し、防御側の回避判定を待っている
   /// 状態（Phase 6）。nullなら待機中の決着判定は無い。
   final TechniquePendingEscape? pendingEscape;
+
+  /// フィニッシャーが宣言され、発動キャンセル待ち／成立後の脱出待ちの
+  /// いずれかの状態（Phase 7）。nullなら待機中のフィニッシャーは無い。
+  final TechniquePendingFinisher? pendingFinisher;
 
   /// 試合の勝者（0=A, 1=B）。nullならまだ試合は継続中。
   final int? winnerIndex;
@@ -290,6 +354,7 @@ class TechniqueMatchState {
     int? rallyChain,
     Object? pendingAttack = _unset,
     Object? pendingEscape = _unset,
+    Object? pendingFinisher = _unset,
     Object? winnerIndex = _unset,
     Object? winReason = _unset,
     bool? isDraw,
@@ -310,6 +375,9 @@ class TechniqueMatchState {
     pendingEscape: identical(pendingEscape, _unset)
         ? this.pendingEscape
         : pendingEscape as TechniquePendingEscape?,
+    pendingFinisher: identical(pendingFinisher, _unset)
+        ? this.pendingFinisher
+        : pendingFinisher as TechniquePendingFinisher?,
     winnerIndex: identical(winnerIndex, _unset)
         ? this.winnerIndex
         : winnerIndex as int?,
@@ -470,7 +538,7 @@ class TechniqueMatchEngine {
   /// Phase 3ではダウン状態の動作確認のみが目的）。ラリー中・決着判定待ち・
   /// 試合終了後は何もしない（Phase 6でガードを追加）。
   static TechniqueMatchState goDown(TechniqueMatchState state) {
-    if (state.isOver || state.isRallyActive || state.pendingEscape != null) {
+    if (state.isOver || state.isRallyActive || state.pendingEscape != null || state.pendingFinisher != null) {
       return state;
     }
     if (state.active.posture != WrestlerPosture.stand) return state;
@@ -486,7 +554,7 @@ class TechniqueMatchEngine {
   /// （仕様書12章）。ラリー中・決着判定待ち・試合終了後は何もしない
   /// （Phase 6でガードを追加）。
   static TechniqueMatchState rest(TechniqueMatchState state, {Random? random}) {
-    if (state.isOver || state.isRallyActive || state.pendingEscape != null) {
+    if (state.isOver || state.isRallyActive || state.pendingEscape != null || state.pendingFinisher != null) {
       return state;
     }
     if (state.active.posture != WrestlerPosture.down) return state;
@@ -517,7 +585,7 @@ class TechniqueMatchEngine {
   /// 引き分け（[TechniqueMatchState.isDraw]）で終了させる（Phase 6完了後の
   /// プレイテストで発覚した「山札が無限に再構築され続ける」問題への対応）。
   static TechniqueMatchState endTurn(TechniqueMatchState state, {Random? random}) {
-    if (state.isOver || state.isRallyActive || state.pendingEscape != null) {
+    if (state.isOver || state.isRallyActive || state.pendingEscape != null || state.pendingFinisher != null) {
       return state;
     }
     final rng = random ?? Random();
@@ -588,7 +656,7 @@ class TechniqueMatchEngine {
         failureReason: '試合は終了しています。',
       );
     }
-    if (state.isRallyActive || state.pendingEscape != null) {
+    if (state.isRallyActive || state.pendingEscape != null || state.pendingFinisher != null) {
       return TechniqueMoveResult(
         state: state,
         success: false,
@@ -647,6 +715,11 @@ class TechniqueMatchEngine {
     final card = catalog.findTechniqueById(entry.cardId);
     if (card == null) {
       return (canUse: false, reason: 'このカードは技カードではありません。');
+    }
+    if (card.hasFinisherEffect) {
+      // フィニッシャーは通常の宣言・返技フローに一切乗らない（Phase 7）。
+      // declareFinisher/canDeclareFinisher専用で扱う。
+      return (canUse: false, reason: 'フィニッシャーは専用の宣言で使用してください。');
     }
     final isRestricted =
         card.category == TechniqueCardCategory.signature ||
@@ -897,6 +970,13 @@ class TechniqueMatchEngine {
         state: state,
         success: false,
         failureReason: '決着の判定待ちです。',
+      );
+    }
+    if (state.pendingFinisher != null) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: 'フィニッシャーの判定待ちです。',
       );
     }
     if (state.pendingAttack != null) {
@@ -1317,6 +1397,408 @@ class TechniqueMatchEngine {
       pendingEscape: null,
       winnerIndex: pending.attackerIndex,
       winReason: winReason,
+      log: log,
+    );
+  }
+
+  // ============================================================
+  // Phase 7: フィニッシャー
+  // ============================================================
+  //
+  // hasFinisherEffectを持つ技は_checkEligibilityで除外されており、この節の
+  // 専用メソッドでのみ宣言・解決できる。通常の返技（reversalEnergyCost）・
+  // 通常キックアウト・ロープブレイク・HP消費はいずれも使えない
+  // （ユーザー指示）。発動条件（finisherRequirements）はカード側のデータ
+  // として持ち、エンジン側に個別ハードコードしない。
+
+  /// [attacker] が [requirements]（`TechniqueDeckTechniqueCard.
+  /// finisherRequirements`）を満たしているかどうかを判定する。対応キー:
+  /// `minimumHeat`（自分のHEATがこの値以上） / `maximumOpponentHp`
+  /// （相手のHPがこの値以下） / `maximumOwnHp`（自分のHPがこの値以下） /
+  /// `requiredOpponentState`（'down'または'stand'。相手の状態、downは
+  /// down/fatiguedいずれも満たす）。未知のキー・型が合わないキーは無視する
+  /// （安全側）。
+  static ({bool met, String? reason}) _checkFinisherRequirements(
+    TechniqueMatchPlayerState attacker,
+    TechniqueMatchPlayerState defender,
+    Map<String, dynamic> requirements,
+  ) {
+    final minimumHeat = requirements['minimumHeat'];
+    if (minimumHeat is num && attacker.heat < minimumHeat) {
+      return (
+        met: false,
+        reason: 'HEATが${minimumHeat.toInt()}以上必要です（現在${attacker.heat}）。',
+      );
+    }
+    final maximumOpponentHp = requirements['maximumOpponentHp'];
+    if (maximumOpponentHp is num && defender.hp > maximumOpponentHp) {
+      return (
+        met: false,
+        reason: '相手のHPが${maximumOpponentHp.toInt()}以下である必要があります'
+            '（現在${defender.hp}）。',
+      );
+    }
+    final maximumOwnHp = requirements['maximumOwnHp'];
+    if (maximumOwnHp is num && attacker.hp > maximumOwnHp) {
+      return (
+        met: false,
+        reason: '自分のHPが${maximumOwnHp.toInt()}以下である必要があります'
+            '（現在${attacker.hp}）。',
+      );
+    }
+    final requiredOpponentState = requirements['requiredOpponentState'];
+    if (requiredOpponentState is String) {
+      final downLike =
+          defender.posture == WrestlerPosture.down ||
+          defender.posture == WrestlerPosture.fatigued;
+      if (requiredOpponentState == 'down' && !downLike) {
+        return (met: false, reason: '相手がダウン状態である必要があります。');
+      }
+      if (requiredOpponentState == 'stand' && defender.posture != WrestlerPosture.stand) {
+        return (met: false, reason: '相手がスタンド状態である必要があります。');
+      }
+    }
+    return (met: true, reason: null);
+  }
+
+  /// [entry] を現在の実質的な攻撃側がフィニッシャーとして宣言できるかどうかを
+  /// 判定する（UIのボタン有効/無効判定用）。
+  static ({bool canDeclare, String? reason}) canDeclareFinisher(
+    TechniqueMatchState state,
+    TechniqueDeckEntry entry,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    if (state.isOver) {
+      return (canDeclare: false, reason: '試合は終了しています。');
+    }
+    if (state.pendingEscape != null) {
+      return (canDeclare: false, reason: '決着の判定待ちです。');
+    }
+    if (state.pendingFinisher != null) {
+      return (canDeclare: false, reason: 'フィニッシャーの判定待ちです。');
+    }
+    if (state.pendingAttack != null) {
+      return (canDeclare: false, reason: '返技の判定待ちです。');
+    }
+    final attackerIndex = state.rallyAttackerIndex ?? state.activePlayerIndex;
+    final attacker = state.playerAt(attackerIndex);
+    final defender = state.playerAt(1 - attackerIndex);
+    if (!attacker.hand.contains(entry)) {
+      return (canDeclare: false, reason: 'このカードは手札にありません。');
+    }
+    final card = catalog.findTechniqueById(entry.cardId);
+    if (card == null || !card.hasFinisherEffect) {
+      return (canDeclare: false, reason: 'このカードはフィニッシャーではありません。');
+    }
+    if (!card.allowedWrestlerIds.contains(attacker.wrestlerId)) {
+      return (canDeclare: false, reason: '${attacker.wrestlerName}は使用できません。');
+    }
+    if (card.minimumLevel > attacker.level) {
+      return (
+        canDeclare: false,
+        reason: '必要レベルLv.${card.minimumLevel}に達していません（現在Lv.${attacker.level}）。',
+      );
+    }
+    final defenderDownLike =
+        defender.posture == WrestlerPosture.down ||
+        defender.posture == WrestlerPosture.fatigued;
+    if (card.targetState == TechniqueTargetState.stand &&
+        defender.posture != WrestlerPosture.stand) {
+      return (canDeclare: false, reason: '相手がスタンド状態でないと使用できません。');
+    }
+    if (card.targetState == TechniqueTargetState.down && !defenderDownLike) {
+      return (canDeclare: false, reason: '相手がダウン状態でないと使用できません。');
+    }
+    for (final costEntry in card.attackEnergyCost.entries) {
+      if (costEntry.value <= 0) continue;
+      if (attacker.availableEnergyFor(costEntry.key) < costEntry.value) {
+        return (
+          canDeclare: false,
+          reason:
+              '${moveAttributeLabel(costEntry.key)}エネルギーが不足しています'
+              '（必要${costEntry.value}、使用可能${attacker.availableEnergyFor(costEntry.key)}）。',
+        );
+      }
+    }
+    final reqCheck = _checkFinisherRequirements(attacker, defender, card.finisherRequirements);
+    if (!reqCheck.met) {
+      return (canDeclare: false, reason: reqCheck.reason);
+    }
+    return (canDeclare: true, reason: null);
+  }
+
+  /// フィニッシャーを宣言する。攻撃エネルギーを消費し手札から除くが、
+  /// 捨て札にはしない（キャンセルされた場合に山札へ戻すため、
+  /// [TechniquePendingFinisher.entry] として保持する）。ラリーは終了し
+  /// （フィニッシャーは通常のラリー継続とは別系統）、防御側の発動キャンセル
+  /// 判定（`TechniqueFinisherStage.responsePending`）を待つ状態になる。
+  static TechniqueMoveResult declareFinisher(
+    TechniqueMatchState state,
+    TechniqueDeckEntry entry,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final check = canDeclareFinisher(state, entry, catalog);
+    if (!check.canDeclare) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: check.reason,
+      );
+    }
+    final attackerIndex = state.rallyAttackerIndex ?? state.activePlayerIndex;
+    final attacker = state.playerAt(attackerIndex);
+    final card = catalog.findTechniqueById(entry.cardId)!;
+
+    final spent = Map<MoveAttribute, int>.from(attacker.spentEnergy);
+    for (final costEntry in card.attackEnergyCost.entries) {
+      if (costEntry.value <= 0) continue;
+      spent[costEntry.key] = (spent[costEntry.key] ?? 0) + costEntry.value;
+    }
+    final newHand = List<TechniqueDeckEntry>.from(attacker.hand)..remove(entry);
+    final updatedAttacker = attacker.copyWith(spentEnergy: spent, hand: newHand);
+
+    final log = [
+      ...state.log,
+      '${updatedAttacker.wrestlerName}が「${card.name}」を宣言した（フィニッシャー）',
+    ];
+
+    final rallyEndedState = state.copyWithRallyEnded(
+      playerA: attackerIndex == 0 ? updatedAttacker : state.playerA,
+      playerB: attackerIndex == 1 ? updatedAttacker : state.playerB,
+      log: log,
+    );
+
+    return TechniqueMoveResult(
+      state: rallyEndedState.copyWith(
+        pendingFinisher: TechniquePendingFinisher(
+          attackerIndex: attackerIndex,
+          defenderIndex: 1 - attackerIndex,
+          entry: entry,
+          stage: TechniqueFinisherStage.responsePending,
+        ),
+      ),
+      success: true,
+    );
+  }
+
+  /// [pendingFinisher] を、防御側の手札にあるエスケープ／リバーサルカード
+  /// [entry] で発動キャンセルできるかどうかを判定する。
+  static ({bool canCancel, String? reason}) canCancelFinisher(
+    TechniqueMatchState state,
+    TechniqueDeckEntry entry,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final pending = state.pendingFinisher;
+    if (pending == null || pending.stage != TechniqueFinisherStage.responsePending) {
+      return (canCancel: false, reason: 'フィニッシャーの発動キャンセル判定待ちではありません。');
+    }
+    final defender = state.playerAt(pending.defenderIndex);
+    if (!defender.hand.contains(entry)) {
+      return (canCancel: false, reason: 'このカードは手札にありません。');
+    }
+    final card = catalog.findDefenseCardById(entry.cardId);
+    if (card == null ||
+        (card.type != TechniqueDeckCardType.escape &&
+            card.type != TechniqueDeckCardType.reversal)) {
+      return (canCancel: false, reason: 'エスケープ／リバーサルカードが必要です。');
+    }
+    return (canCancel: true, reason: null);
+  }
+
+  /// エスケープ／リバーサルカードでフィニッシャーの発動をキャンセルする。
+  /// 成功時はダメージ・HEAT・ダウンが一切発生せず、フィニッシャーカードは
+  /// 山札へ戻ってシャッフルされる（捨て札にはならない）。エスケープは
+  /// ラリー終了、リバーサルは主導権移動（防御側が新しい攻撃側になる）。
+  static TechniqueMoveResult cancelFinisher(
+    TechniqueMatchState state,
+    TechniqueDeckEntry entry,
+    TechniqueDeckCardCatalog catalog, {
+    Random? random,
+  }) {
+    final check = canCancelFinisher(state, entry, catalog);
+    if (!check.canCancel) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: check.reason,
+      );
+    }
+    final pending = state.pendingFinisher!;
+    final finisherCard = catalog.findTechniqueById(pending.entry.cardId)!;
+    final defender = state.playerAt(pending.defenderIndex);
+    final attacker = state.playerAt(pending.attackerIndex);
+    final usedCard = catalog.findDefenseCardById(entry.cardId)!;
+    final isReversal = usedCard.type == TechniqueDeckCardType.reversal;
+
+    final newDefenderHand = List<TechniqueDeckEntry>.from(defender.hand)..remove(entry);
+    final updatedDefender = defender.copyWith(
+      hand: newDefenderHand,
+      discardPile: [...defender.discardPile, entry],
+    );
+
+    final rng = random ?? Random();
+    final newDrawPile = List<TechniqueDeckEntry>.from(attacker.drawPile)
+      ..add(pending.entry)
+      ..shuffle(rng);
+    final updatedAttacker = attacker.copyWith(drawPile: newDrawPile);
+
+    final cardLabel = isReversal ? 'リバーサル' : 'エスケープ';
+    final log = [
+      ...state.log,
+      '${updatedDefender.wrestlerName}が「${usedCard.name}」を使用し、'
+          '${attacker.wrestlerName}の「${finisherCard.name}」の発動をキャンセルした'
+          '（$cardLabel。フィニッシャーカードは山札へ戻りシャッフルされた）',
+    ];
+
+    if (isReversal) {
+      final logWithSwap = [...log, '${updatedDefender.wrestlerName}に主導権が移った'];
+      return TechniqueMoveResult(
+        state: state.copyWith(
+          playerA: pending.attackerIndex == 0 ? updatedAttacker : updatedDefender,
+          playerB: pending.attackerIndex == 1 ? updatedAttacker : updatedDefender,
+          pendingFinisher: null,
+          rallyAttackerIndex: pending.defenderIndex,
+          rallyChain: 0,
+          pendingAttack: null,
+          log: logWithSwap,
+        ),
+        success: true,
+      );
+    }
+
+    return TechniqueMoveResult(
+      state: state
+          .copyWithRallyEnded(
+            playerA: pending.attackerIndex == 0 ? updatedAttacker : updatedDefender,
+            playerB: pending.attackerIndex == 1 ? updatedAttacker : updatedDefender,
+            log: log,
+          )
+          .copyWith(pendingFinisher: null),
+      success: true,
+    );
+  }
+
+  /// 防御側がキャンセルしない（できない、または選ばない）。フィニッシャーが
+  /// 成立し、ダメージ・HEAT・ダウンが即時反映される。フィニッシャーカードは
+  /// 捨て札へ送られる。状態は`escapePending`（成立後の脱出待ち）へ移行する。
+  static TechniqueMatchState resolveFinisher(
+    TechniqueMatchState state,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final pending = state.pendingFinisher;
+    if (pending == null || pending.stage != TechniqueFinisherStage.responsePending) {
+      return state;
+    }
+    final attacker = state.playerAt(pending.attackerIndex);
+    final defender = state.playerAt(pending.defenderIndex);
+    final card = catalog.findTechniqueById(pending.entry.cardId)!;
+
+    final resolved = _resolveAttack(attacker, defender, card);
+    final updatedAttacker = resolved.attacker.copyWith(
+      discardPile: [...resolved.attacker.discardPile, pending.entry],
+    );
+
+    final log = [
+      ...state.log,
+      '${updatedAttacker.wrestlerName}の「${card.name}」が成立した！（フィニッシャー）',
+      ...resolved.log,
+      '${resolved.defender.wrestlerName}は脱出しなければ敗北する（回避判定待ち）',
+    ];
+
+    return state.copyWith(
+      playerA: pending.attackerIndex == 0 ? updatedAttacker : resolved.defender,
+      playerB: pending.attackerIndex == 1 ? updatedAttacker : resolved.defender,
+      pendingFinisher: TechniquePendingFinisher(
+        attackerIndex: pending.attackerIndex,
+        defenderIndex: pending.defenderIndex,
+        entry: pending.entry,
+        stage: TechniqueFinisherStage.escapePending,
+      ),
+      log: log,
+    );
+  }
+
+  /// [pendingFinisher]（`escapePending`）を、防御側の手札にある特殊
+  /// キックアウトカード [entry] で脱出できるかどうかを判定する。通常
+  /// キックアウト・ロープブレイク・HP消費・返技エネルギーはいずれも使えない。
+  static ({bool canEscape, String? reason}) canEscapeFinisher(
+    TechniqueMatchState state,
+    TechniqueDeckEntry entry,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final pending = state.pendingFinisher;
+    if (pending == null || pending.stage != TechniqueFinisherStage.escapePending) {
+      return (canEscape: false, reason: 'フィニッシャーの脱出判定待ちではありません。');
+    }
+    final defender = state.playerAt(pending.defenderIndex);
+    if (!defender.hand.contains(entry)) {
+      return (canEscape: false, reason: 'このカードは手札にありません。');
+    }
+    final card = catalog.findDefenseCardById(entry.cardId);
+    if (card == null ||
+        card.type != TechniqueDeckCardType.kickOut ||
+        card.kickOutCategory != KickOutCardCategory.finisherEscape) {
+      return (canEscape: false, reason: '特殊キックアウトカードが必要です。');
+    }
+    return (canEscape: true, reason: null);
+  }
+
+  /// 特殊キックアウトカードでフィニッシャーから脱出する（成立後はゲームから
+  /// 完全に除外される。仕様書9.1章のキックアウトカードと同じ扱い）。
+  static TechniqueMoveResult escapeFinisher(
+    TechniqueMatchState state,
+    TechniqueDeckEntry entry,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final check = canEscapeFinisher(state, entry, catalog);
+    if (!check.canEscape) {
+      return TechniqueMoveResult(
+        state: state,
+        success: false,
+        failureReason: check.reason,
+      );
+    }
+    final pending = state.pendingFinisher!;
+    final defender = state.playerAt(pending.defenderIndex);
+    final card = catalog.findDefenseCardById(entry.cardId)!;
+    final newHand = List<TechniqueDeckEntry>.from(defender.hand)..remove(entry);
+    final updatedDefender = defender.copyWith(
+      hand: newHand,
+      removedPile: [...defender.removedPile, entry],
+    );
+    final log = [
+      ...state.log,
+      '${updatedDefender.wrestlerName}が「${card.name}」を使用し、フィニッシャーから脱出した',
+    ];
+    return TechniqueMoveResult(
+      state: state.copyWith(
+        playerA: pending.defenderIndex == 0 ? updatedDefender : state.playerA,
+        playerB: pending.defenderIndex == 1 ? updatedDefender : state.playerB,
+        pendingFinisher: null,
+        log: log,
+      ),
+      success: true,
+    );
+  }
+
+  /// 防御側がフィニッシャーから脱出しない（できない、または選ばない）。
+  /// 残りHPに関係なく攻撃側の勝利として試合を終了させる。
+  static TechniqueMatchState concedeFinisher(TechniqueMatchState state) {
+    final pending = state.pendingFinisher;
+    if (pending == null || pending.stage != TechniqueFinisherStage.escapePending) {
+      return state;
+    }
+    final attacker = state.playerAt(pending.attackerIndex);
+    final defender = state.playerAt(pending.defenderIndex);
+    final log = [
+      ...state.log,
+      '${defender.wrestlerName}はフィニッシャーから脱出できなかった。'
+          '${attacker.wrestlerName}のフィニッシャー勝利！',
+    ];
+    return state.copyWith(
+      pendingFinisher: null,
+      winnerIndex: pending.attackerIndex,
+      winReason: 'フィニッシャー勝利',
       log: log,
     );
   }
