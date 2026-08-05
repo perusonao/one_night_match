@@ -581,7 +581,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     if (card == null) return;
     final attacker = state.playerAt(pending.attackerIndex);
     final defender = state.playerAt(pending.defenderIndex);
-    final kindLabel = pending.kind == TechniqueEscapeKind.fall ? 'フォール' : 'ギブアップ';
+    // 【ゲームサイクル整理ラウンド 優先度8】用語整理: 「ギブアップ」は技効果・
+    // 判定開始・回避成功・回避失敗・試合結果のいずれにも使われ紛らわしいため、
+    // 表示文言のみ「サブミッション」系へ整理する（エンジンのenum名
+    // `TechniqueEscapeKind.giveUp`・ログ文言・JSON互換性は変更しない）。
+    final kindLabel = pending.kind == TechniqueEscapeKind.fall ? 'フォール' : 'サブミッション';
 
     final defenseEntries = defender.hand
         .where(
@@ -661,7 +665,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                 Navigator.pop(dialogContext);
                 _concede();
               },
-              child: const Text('諦める（敗北を認める）'),
+              child: Text(
+                pending.kind == TechniqueEscapeKind.giveUp
+                    ? 'タップアウト！（敗北を認める）'
+                    : '諦める（敗北を認める）',
+              ),
             ),
           ],
         ),
@@ -1057,10 +1065,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
           : 'フィニッシャー成立！脱出判定です';
     }
     if (state.pendingEscape != null) {
-      final kind = state.pendingEscape!.kind == TechniqueEscapeKind.fall
-          ? 'フォール'
-          : 'ギブアップ';
-      return '$kind判定です';
+      // 【優先度8】判定開始の表示は「SUBMISSION！ギブアップの危機」の
+      // 形式に統一する（フォールは従来どおり）。
+      return state.pendingEscape!.kind == TechniqueEscapeKind.fall
+          ? 'フォール判定です'
+          : 'SUBMISSION！ギブアップの危機';
     }
     if (state.pendingAttack != null) {
       final defender = state.playerAt(1 - state.pendingAttack!.attackerIndex);
@@ -1167,8 +1176,15 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     (RegExp('「(.+?)」を宣言した'), (m) => '${m.group(1)}！', Colors.white),
     (RegExp('がダウンした'), (m) => 'ダウン！！', _orange),
     (RegExp('はフォールの危機'), (m) => 'フォール！！', _red),
-    (RegExp('はギブアップの危機'), (m) => 'ギブアップ！！', _red),
-    (RegExp('を使用し、(フォール|ギブアップ)を回避した'), (m) => '${m.group(1)}回避！', _green),
+    // 【優先度8】用語整理: 表示は「SUBMISSION！」に統一する（エンジンの
+    // ログ文言自体は「ギブアップの危機」のまま。マッチ対象はログの生文字列
+    // のため正規表現は変更しない）。
+    (RegExp('はギブアップの危機'), (m) => 'SUBMISSION！', _red),
+    (
+      RegExp('を使用し、(フォール|ギブアップ)を回避した'),
+      (m) => m.group(1) == 'ギブアップ' ? 'ロープブレイク！サブミッションから脱出' : 'フォール回避！',
+      _green,
+    ),
     (RegExp('の発動をキャンセルした'), (m) => 'キャンセル！', _green),
     (RegExp('に主導権が移った'), (m) => '主導権交代！', _gold),
     (RegExp('から脱出した'), (m) => '脱出成功！', _green),
@@ -1376,6 +1392,12 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     );
   }
 
+  /// 【優先度8】試合結果の表示文言のみ整理する（`TechniqueMatchState.
+  /// winReason`自体は`'ギブアップ勝利'`のまま。既存テスト・保存データとの
+  /// 互換性を保つため、UI表示の変換のみここで行う）。
+  String _displayWinReason(String reason) =>
+      reason == 'ギブアップ勝利' ? 'SUBMISSION WIN' : reason;
+
   Widget _winBanner(TechniqueMatchState state) {
     final winner = state.playerAt(state.winnerIndex!);
     return Card(
@@ -1388,7 +1410,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                '${winner.wrestlerName}の勝利！（${state.winReason ?? "決着"}）',
+                '${winner.wrestlerName}の勝利！'
+                '（${_displayWinReason(state.winReason ?? "決着")}）',
                 style: const TextStyle(fontWeight: FontWeight.bold, color: _gold),
               ),
             ),
@@ -1749,6 +1772,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         state.pendingEscape == null &&
         state.pendingFinisher == null &&
         !state.isOver;
+    final sortedHand = _sortedHandForDisplay(state, actingPlayer);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -1763,11 +1787,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
           height: 176,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: actingPlayer.hand.length,
+            itemCount: sortedHand.length,
             separatorBuilder: (_, _) => const SizedBox(width: 8),
             itemBuilder: (context, index) => _handCardTile(
               state,
-              actingPlayer.hand[index],
+              sortedHand[index],
               playerLevelTappable: canDeclare,
               isRallyActive: state.isRallyActive,
             ),
@@ -1775,6 +1799,67 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         ),
       ],
     );
+  }
+
+  /// 【ゲームサイクル整理ラウンド 優先度6】手札の表示順を「今使えるカードが
+  /// 左」になるよう並び替える（表示専用のソート。[TechniqueMatchPlayerState.
+  /// hand] そのものの並び順・ゲーム状態は一切変更しない）。
+  ///
+  /// 優先順位: ①今使えるカード ②現在のSTEPで使えるカード種だが個別条件
+  /// （主にエネルギー不足）で使えない ③防御カード（現在の手番では選べない）
+  /// ④その他の使用不能カード（対象状態・レスラー制限等）。①の中では
+  /// フィニッシャー＞フォール／ギブアップ効果＞ダウン付与＞その他の順。
+  ///
+  /// この関数は`state`が変化した（＝setStateが呼ばれた）ときにしか再評価
+  /// されないため、フェーズが切り替わったタイミングでのみ並びが変わる
+  /// （タップのたびに無関係な再ソートが起きることはない）。
+  List<TechniqueDeckEntry> _sortedHandForDisplay(
+    TechniqueMatchState state,
+    TechniqueMatchPlayerState player,
+  ) {
+    int bucketOf(TechniqueDeckEntry entry) {
+      final technique = catalog.findTechniqueById(entry.cardId);
+      final energy = catalog.findEnergyById(entry.cardId);
+      final defense = catalog.findDefenseCardById(entry.cardId);
+      if (technique != null) {
+        final bool eligible;
+        String? reason;
+        if (technique.hasFinisherEffect) {
+          final check = TechniqueMatchEngine.canDeclareFinisher(state, entry, catalog);
+          eligible = check.canDeclare;
+          reason = check.reason;
+        } else {
+          final check = TechniqueMatchEngine.canDeclareAttack(state, entry, catalog);
+          eligible = check.canUse;
+          reason = check.reason;
+        }
+        if (eligible) return 0;
+        if (reason != null && reason.contains('エネルギーが不足')) return 1;
+        return 4;
+      }
+      if (energy != null) return state.energySetThisTurn ? 4 : 0;
+      if (defense != null) return 3;
+      return 4;
+    }
+
+    int subOrderOf(TechniqueDeckEntry entry) {
+      final technique = catalog.findTechniqueById(entry.cardId);
+      if (technique == null) return 5;
+      if (technique.hasFinisherEffect) return 0;
+      if (technique.hasPinEffect || technique.hasSubmissionEffect) return 1;
+      if (technique.causesDown) return 2;
+      return 3;
+    }
+
+    final indexed = player.hand.asMap().entries.toList();
+    indexed.sort((a, b) {
+      final bucketCompare = bucketOf(a.value).compareTo(bucketOf(b.value));
+      if (bucketCompare != 0) return bucketCompare;
+      final subCompare = subOrderOf(a.value).compareTo(subOrderOf(b.value));
+      if (subCompare != 0) return subCompare;
+      return a.key.compareTo(b.key); // 同順位は元の並びを維持する安定ソート。
+    });
+    return indexed.map((e) => e.value).toList();
   }
 
   /// ③ 手札カードの種別ラベル（技／ENERGY／DEFENSE／FINISHER）。
