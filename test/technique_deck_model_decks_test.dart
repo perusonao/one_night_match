@@ -84,4 +84,82 @@ void main() {
       expect(counts['td_ropebreak_1'], 1);
     });
   });
+
+  group('buildMisakiPhase6ModelDeck', () {
+    test('30枚になる', () {
+      final deck = buildMisakiPhase6ModelDeck();
+      expect(deck.entries.length, 30);
+    });
+
+    test('wrestler_misakiのデッキとして検証を通過する', () {
+      final deck = buildMisakiPhase6ModelDeck();
+      final result = validator.validate(deck, catalog);
+      expect(
+        result.errors,
+        isEmpty,
+        reason: result.errors.map((e) => e.message).join('\n'),
+      );
+    });
+
+    test('内訳がユーザー指定の構成と一致する', () {
+      final deck = buildMisakiPhase6ModelDeck();
+      final counts = <String, int>{};
+      for (final e in deck.entries) {
+        counts[e.cardId] = (counts[e.cardId] ?? 0) + 1;
+      }
+      expect(counts['td_energy_throwMove'], 7);
+      expect(counts['td_energy_strike'], 4);
+      expect(counts['td_energy_counter'], 2);
+      expect(counts['td_normal_throw_1'], 3);
+      expect(counts['td_normal_strike_1'], 3);
+      expect(counts['td_normal_counter_1'], 3);
+      expect(counts['td_p6_misaki_sig_elbow'], 1);
+      expect(counts['td_p6_misaki_sig_bodyslam'], 1);
+      expect(counts['td_p6_misaki_sig_backdrop'], 1);
+      expect(counts['td_p6_misaki_sig_lariat'], 1);
+      expect(counts['td_p6_misaki_sig_powerbomb'], 1);
+      expect(counts['td_p6_misaki_fall_extra'], 1);
+      expect(counts['td_kickout_normal_1'], 1);
+      expect(counts['td_ropebreak_1'], 1);
+    });
+  });
+
+  group('buildJackPhase6ModelDeck', () {
+    test('30枚になる', () {
+      final deck = buildJackPhase6ModelDeck();
+      expect(deck.entries.length, 30);
+    });
+
+    test('wrestler_jackのデッキとして検証を通過する', () {
+      final deck = buildJackPhase6ModelDeck();
+      final result = validator.validate(deck, catalog);
+      expect(
+        result.errors,
+        isEmpty,
+        reason: result.errors.map((e) => e.message).join('\n'),
+      );
+    });
+
+    test('内訳がユーザー指定の構成と一致する', () {
+      final deck = buildJackPhase6ModelDeck();
+      final counts = <String, int>{};
+      for (final e in deck.entries) {
+        counts[e.cardId] = (counts[e.cardId] ?? 0) + 1;
+      }
+      expect(counts['td_energy_submission'], 7);
+      expect(counts['td_energy_rough'], 4);
+      expect(counts['td_energy_counter'], 2);
+      expect(counts['td_normal_submission_1'], 3);
+      expect(counts['td_normal_rough_1'], 3);
+      expect(counts['td_normal_counter_1'], 3);
+      expect(counts['td_p6_jack_sig_lowblow'], 1);
+      expect(counts['td_p6_jack_sig_neckbreaker'], 1);
+      expect(counts['td_p6_jack_sig_clutch'], 1);
+      expect(counts['td_p6_jack_sig_chair'], 1);
+      expect(counts['td_p6_jack_sig_deathlock'], 1);
+      expect(counts['td_p6_jack_giveup_extra'], 1);
+      expect(counts['td_kickout_normal_1'], 1);
+      expect(counts['td_ropebreak_1'], 1);
+    });
+  });
 }

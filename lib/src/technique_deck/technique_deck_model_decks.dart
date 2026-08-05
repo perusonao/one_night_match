@@ -28,6 +28,10 @@ import 'technique_deck_models.dart';
 /// （調整枠はフォール効果技）。
 /// 白銀レイナ: 関節・テクニカル型。ダウン技からギブアップ技へつなぐ
 /// （調整枠はギブアップ効果技）。
+/// 豪田ミサキ: パワー・投げ型。低HP高火力。スタンド技でダウンを奪い、
+/// パワー技のフォールへつなぐ（調整枠はフォール効果技）。
+/// 黒蝶ジャック: ラフファイト・関節型。妨害技でダウンを奪い、絞め技の
+/// ギブアップへつなぐ（調整枠はギブアップ効果技）。
 
 /// 火神アカリのPhase 6モデルデッキ（30枚）。
 /// エネルギー配分: 打撃7・投げ4・返し2。
@@ -93,6 +97,74 @@ TechniqueDeckDefinition buildReinaPhase6ModelDeck({
     .addCard('td_p6_reina_sig_crossface', TechniqueDeckCardType.technique)
     // 調整枠1枚（ギブアップ効果技）。
     .addCard('td_p6_reina_giveup_extra', TechniqueDeckCardType.technique)
+    // 通常キックアウト1枚・ロープブレイク1枚。
+    .addCard('td_kickout_normal_1', TechniqueDeckCardType.kickOut)
+    .addCard('td_ropebreak_1', TechniqueDeckCardType.ropeBreak)
+    .build();
+
+/// 豪田ミサキのPhase 6モデルデッキ（30枚）。
+/// エネルギー配分: 投げ7・打撃4・返し2（アカリと逆の比重で、パワー型の
+/// 投げ技を主力に据える）。
+TechniqueDeckDefinition buildMisakiPhase6ModelDeck({
+  String deckId = 'model_misaki_phase6',
+  String deckName = '豪田ミサキ Phase 6モデルデッキ',
+}) => TechniqueDeckBuilder(
+  wrestlerId: 'wrestler_misaki',
+  id: deckId,
+  name: deckName,
+)
+    // 技エネルギー13枚（投げ7・打撃4・返し2）。
+    .addCard('td_energy_throwMove', TechniqueDeckCardType.energy, count: 7)
+    .addCard('td_energy_strike', TechniqueDeckCardType.energy, count: 4)
+    .addCard('td_energy_counter', TechniqueDeckCardType.energy, count: 2)
+    // 通常技9枚（同名上限3枚 × 3種）。
+    .addCard('td_normal_throw_1', TechniqueDeckCardType.technique, count: 3)
+    .addCard('td_normal_strike_1', TechniqueDeckCardType.technique, count: 3)
+    .addCard('td_normal_counter_1', TechniqueDeckCardType.technique, count: 3)
+    // 固有技5枚（同名1枚ずつ）。
+    .addCard('td_p6_misaki_sig_elbow', TechniqueDeckCardType.technique)
+    .addCard('td_p6_misaki_sig_bodyslam', TechniqueDeckCardType.technique)
+    .addCard('td_p6_misaki_sig_backdrop', TechniqueDeckCardType.technique)
+    .addCard('td_p6_misaki_sig_lariat', TechniqueDeckCardType.technique)
+    .addCard('td_p6_misaki_sig_powerbomb', TechniqueDeckCardType.technique)
+    // 調整枠1枚（フォール効果技）。
+    .addCard('td_p6_misaki_fall_extra', TechniqueDeckCardType.technique)
+    // 通常キックアウト1枚・ロープブレイク1枚。
+    .addCard('td_kickout_normal_1', TechniqueDeckCardType.kickOut)
+    .addCard('td_ropebreak_1', TechniqueDeckCardType.ropeBreak)
+    .build();
+
+/// 黒蝶ジャックのPhase 6モデルデッキ（30枚）。
+/// エネルギー配分: 関節7・ラフ4・返し2（レイナと同じギブアップ寄りだが、
+/// ラフ技によるダウン奪取という別経路を持つ）。
+TechniqueDeckDefinition buildJackPhase6ModelDeck({
+  String deckId = 'model_jack_phase6',
+  String deckName = '黒蝶ジャック Phase 6モデルデッキ',
+}) => TechniqueDeckBuilder(
+  wrestlerId: 'wrestler_jack',
+  id: deckId,
+  name: deckName,
+)
+    // 技エネルギー13枚（関節7・ラフ4・返し2）。
+    .addCard('td_energy_submission', TechniqueDeckCardType.energy, count: 7)
+    .addCard('td_energy_rough', TechniqueDeckCardType.energy, count: 4)
+    .addCard('td_energy_counter', TechniqueDeckCardType.energy, count: 2)
+    // 通常技9枚（同名上限3枚 × 3種）。
+    .addCard(
+      'td_normal_submission_1',
+      TechniqueDeckCardType.technique,
+      count: 3,
+    )
+    .addCard('td_normal_rough_1', TechniqueDeckCardType.technique, count: 3)
+    .addCard('td_normal_counter_1', TechniqueDeckCardType.technique, count: 3)
+    // 固有技5枚（同名1枚ずつ）。
+    .addCard('td_p6_jack_sig_lowblow', TechniqueDeckCardType.technique)
+    .addCard('td_p6_jack_sig_neckbreaker', TechniqueDeckCardType.technique)
+    .addCard('td_p6_jack_sig_clutch', TechniqueDeckCardType.technique)
+    .addCard('td_p6_jack_sig_chair', TechniqueDeckCardType.technique)
+    .addCard('td_p6_jack_sig_deathlock', TechniqueDeckCardType.technique)
+    // 調整枠1枚（ギブアップ効果技）。
+    .addCard('td_p6_jack_giveup_extra', TechniqueDeckCardType.technique)
     // 通常キックアウト1枚・ロープブレイク1枚。
     .addCard('td_kickout_normal_1', TechniqueDeckCardType.kickOut)
     .addCard('td_ropebreak_1', TechniqueDeckCardType.ropeBreak)
