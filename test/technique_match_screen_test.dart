@@ -780,4 +780,73 @@ void main() {
       expect(find.text('休息'), findsOneWidget);
     });
   });
+
+  group('TechniqueMatchScreen: CPU対戦統合（優先度7）', () {
+    Future<void> pumpCpuScreen(WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 3000));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TechniqueMatchScreen(catalog: testCatalog(), vsCpu: true),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('vsCpu:trueで試合を開始できる（Aの手番はいつも通り操作できる）', (tester) async {
+      await pumpCpuScreen(tester);
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      // 最初はAの手番（人間）なので、通常の操作UI（休息ボタン）が見える。
+      expect(find.text('休息'), findsOneWidget);
+      expect(find.textContaining('CPU）思考中'), findsNothing);
+    });
+
+    testWidgets('Aが休息してBの手番になると、CPUが手札を公開せず自動的に思考・行動する', (tester) async {
+      await pumpCpuScreen(tester);
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('休息'));
+      await tester.pump();
+
+      // Bの手番になった直後は「CPU思考中」表示のみで、休息ボタンや手札は
+      // 表示されない（CPUの手札は人間に見せない）。
+      expect(find.textContaining('CPU）思考中'), findsOneWidget);
+      expect(find.text('休息'), findsNothing);
+
+      // CPUの思考ディレイ（500ms）経過後、CPUが自動的に行動しログが増える。
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+
+      await expandLog(tester);
+      expect(find.textContaining('の手番'), findsWidgets);
+    });
+  });
+
+  group('TechniqueMatchScreen: 1ターン30秒タイマー（優先度5）', () {
+    testWidgets('人間の番ではTIMEバッジが表示され、1秒ごとに減っていく', (tester) async {
+      await pumpScreen(tester);
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('TIME 30'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.textContaining('TIME 29'), findsOneWidget);
+    });
+
+    testWidgets('30秒経過すると時間切れとなり、通常ターンは自動的に休息する', (tester) async {
+      await pumpScreen(tester);
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pumpAndSettle();
+
+      await expandLog(tester);
+      expect(find.textContaining('TIME OVER'), findsOneWidget);
+      expect(find.textContaining('休息してHPを'), findsOneWidget);
+    });
+  });
 }

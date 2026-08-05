@@ -140,8 +140,8 @@ class TechniqueMatchCpu {
     final traces = <TechniqueCpuDecisionTrace>[];
     var steps = 0;
     while (!state.isOver && steps < maxSteps) {
-      final actingPlayerIndex = _actingPlayerIndex(state);
-      final level = actingPlayerIndex == 0 ? levelA : levelB;
+      final actingIndex = actingPlayerIndex(state);
+      final level = actingIndex == 0 ? levelA : levelB;
       final result = step(state, catalog, level: level, random: rng);
       state = result.state;
       if (result.trace != null) traces.add(result.trace!);
@@ -163,7 +163,11 @@ class TechniqueMatchCpu {
   /// 現在、行動する必要があるプレイヤーのインデックス（0=A, 1=B）。
   /// 保留中の判定がある場合はその防御側、ラリー中はラリー攻撃側、
   /// それ以外は`activePlayerIndex`。
-  static int _actingPlayerIndex(TechniqueMatchState state) {
+  ///
+  /// 【ゲームサイクル整理ラウンド 優先度7】`TechniqueMatchScreen`がCPU対戦
+  /// 統合のため、「次に行動すべきなのは人間かCPUか」を判定する目的で公開
+  /// メソッドへ変更した（元は`playFullMatch`専用の内部ヘルパーだった）。
+  static int actingPlayerIndex(TechniqueMatchState state) {
     final pendingFinisher = state.pendingFinisher;
     if (pendingFinisher != null) return pendingFinisher.defenderIndex;
     final pendingEscape = state.pendingEscape;
