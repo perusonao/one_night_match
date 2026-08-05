@@ -11,11 +11,16 @@
   フィニッシャー発動条件の分散・検証Botの温存判断（加点式スコアリング）を
   実施して再検証したが、**宣言率は88.9%へさらに悪化**し、目標レンジは
   依然未達成のまま（open questions O・P番）。ルールの数値そのもの（HEAT
-  閾値・威力等）は両ラウンドとも調整していない。CPU判断は未実装（Phase 8）**
+  閾値・威力等）は両ラウンドとも調整していない。ユーザー判断によりPhase 7.5
+  はここで終了し、これ以上の検証Botのスコア調整は行わない。バランス調整は
+  Phase 8の正式CPU実装後に持ち越す（CPU設計書
+  [`technique_deck_cpu_design.md`](../design/technique_deck_cpu_design.md)は
+  完成済み、実装は未着手。open questions Q番）**
 - 対象バージョン: ONE NIGHT MATCH Ver.1.2 設計案
 - 内部識別子案: `ResourceMode.techniqueDeck`（詳細は「20. 実装メモ（非確定）」参照）
 - 関連ドキュメント:
   - [`technique_deck_implementation_plan.md`](../design/technique_deck_implementation_plan.md)
+  - [`technique_deck_cpu_design.md`](../design/technique_deck_cpu_design.md)
   - [`technique_deck_open_questions.md`](../design/technique_deck_open_questions.md)
 
 > **本書の読み方**: 各章の記述は「暫定仕様（このドキュメント内で一旦定める値・挙動）」と
