@@ -1,19 +1,18 @@
-/// Technique Match Ver.2 UI改修（リング演出・立ち絵表示）で追加した、
 /// レスラーIDから立ち絵アセットパスを引くための最小限のマップ。
 ///
-/// 【立ち絵の出典】ユーザー添付のUIモックアップ画像（Technique Match UI
-/// 新デザインイメージ）に描かれていた火神アカリ・豪田ミサキの2人分の
-/// イラストのみを、`assets/images/wrestlers/`配下へ切り出して収録した
-/// （新規イラストは作成していない。切り出し手順はPRの説明を参照）。
-/// 白銀レイナ・黒蝶ジャックの立ち絵ソースは存在しないため、このマップには
-/// 意図的に含めていない（ユーザー承認済み）。該当エントリが無いレスラーは
-/// `technique_match_screen.dart`側でアイコンベースの代替表示にフォール
-/// バックする。
+/// 【立ち絵の出典】Technique Deck Rules Phase 7Aでユーザーが添付した
+/// レスラー4人分のリファレンス画像から、各レスラーの立ち絵のみを
+/// 切り出して`assets/images/wrestlers/`配下へ収録した（新規イラストは
+/// 作成していない。背景除去はチェッカーボード地の透過処理により実施）。
+/// Ver.2時点ではアカリ・ミサキの2人分のみだったが、Phase 7Aで白銀レイナ・
+/// 黒蝶ジャックの立ち絵ソースが揃ったため、4人分すべてを収録している。
 ///
 /// 既存の`WrestlerDefinition.imagePath`とは独立した仕組み（そちらは
-/// 現状どの画面でも実際には描画に使われていない自由入力欄のため、今回は
-/// 流用せずTechnique Match専用の静的マップとした）。
+/// 現状どの画面でも実際には描画に使われていない自由入力欄のため、今回も
+/// 流用せずTechnique Deck専用の静的マップとした）。
 const Map<String, String> techniqueWrestlerPortraits = {
   'wrestler_akari': 'assets/images/wrestlers/akari.png',
   'wrestler_misaki': 'assets/images/wrestlers/misaki.png',
+  'wrestler_reina': 'assets/images/wrestlers/reina.png',
+  'wrestler_jack': 'assets/images/wrestlers/jack.png',
 };
