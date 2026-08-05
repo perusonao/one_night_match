@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../wrestler_editor/models.dart'
-    show WrestlerDefinition, moveAttributeLabel;
+    show MoveAttribute, WrestlerDefinition, moveAttributeLabel;
 import '../wrestler_editor/repository.dart';
 import 'technique_deck_deck.dart';
 import 'technique_deck_defaults.dart';
@@ -23,6 +23,16 @@ import 'technique_match_state.dart';
 /// 決着判定待ち・フィニッシャー判定待ちの間は行えない。現行のclassic／energy
 /// モード・Deck Simulator・レスラーエディタ・Technique Deck Builderの挙動には
 /// 一切影響しない。
+///
+/// 【UI改修（プレイフィール改善、ルール・エンジンは無変更）】ユーザー指示に
+/// より、ロジックは一切変更せず見た目のみを刷新した。手札をミニカード表示に
+/// し、使用可否の理由をカード上に表示する・エネルギープールをドット表示で
+/// 可視化する・ダウン状態を一目で分かるようにする・ターンの進行段階を
+/// ステッパーで示す・技の成立などの見せ場を画面中央付近に短時間強調表示する・
+/// レスラー情報をカード風に集約する・進行ログにアイコンと色を付ける、の
+/// 各点を対応した。ボタンのラベル文字列・ダイアログの文言・ウィジェット型
+/// （`FilledButton`／`OutlinedButton`等）は既存テストが厳密に依存しているため
+/// 一切変更していない（`test/technique_match_screen_test.dart`参照）。
 class TechniqueMatchScreen extends StatefulWidget {
   const TechniqueMatchScreen({
     super.key,
@@ -40,10 +50,12 @@ class TechniqueMatchScreen extends StatefulWidget {
 }
 
 const _bg = Color(0xff211527);
+const _cardBg = Color(0xff2a1c33);
 const _gold = Color(0xffffc857);
 const _green = Color(0xff5cd68b);
 const _orange = Color(0xffffab5c);
 const _red = Color(0xffff5c5c);
+const _dim = Colors.white38;
 
 class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   late final LocalWrestlerRepository wrestlerRepository =
@@ -736,6 +748,12 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     TechniqueTargetState.down => '相手がダウン中のみ',
   };
 
+  String _targetShortLabel(TechniqueTargetState state) => switch (state) {
+    TechniqueTargetState.any => 'ANY',
+    TechniqueTargetState.stand => 'STAND',
+    TechniqueTargetState.down => 'DOWN',
+  };
+
   void _rest() {
     final state = matchState;
     if (state == null) return;
@@ -787,7 +805,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '開発中：Technique Deck Rules Phase 7',
+            '開発中：Technique Deck Rules Phase 7.5',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           Text(
@@ -864,117 +882,265 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     ],
   );
 
-  Widget _battleView(TechniqueMatchState state) => ListView(
-    padding: const EdgeInsets.all(12),
-    children: [
-      _devBanner(),
-      const SizedBox(height: 12),
-      if (state.winnerIndex != null) ...[
-        _winBanner(state),
-        const SizedBox(height: 12),
-      ] else if (state.isDraw) ...[
-        _drawBanner(state),
-        const SizedBox(height: 12),
-      ],
-      Card(
-        color: _bg,
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'ターン${state.turnNumber} ・ ${state.active.wrestlerName}の手番 '
-                '・ フェーズ: ${_phaseLabel(state.phase)}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              if (state.isRallyActive)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Chain ${state.rallyChain} ・ '
-                    '${state.playerAt(state.rallyAttackerIndex!).wrestlerName}が攻撃側'
-                    '${state.pendingAttack != null ? "（返技判定待ち）" : "（次の技を選択、または終了）"}',
-                    style: const TextStyle(color: _gold, fontSize: 12),
-                  ),
+  // ============================================================
+  // ④ ターン進行の可視化: エネルギー→技選択→ラリー→決着判定→ターン終了
+  // ============================================================
+
+  // 最後の段階は既存の「ターン終了」ボタン文字列と衝突しないよう
+  // 「手番終了」という別表記にする（既存テストが `find.text('ターン終了')`
+  // を厳密に使っているため）。
+  static const _phaseStageLabels = ['エネルギー', '技選択', 'ラリー', '決着判定', '手番終了'];
+
+  int _currentStageIndex(TechniqueMatchState state) {
+    if (state.isOver) return 4;
+    if (state.pendingFinisher != null || state.pendingEscape != null) return 3;
+    if (state.isRallyActive) return 2;
+    final hasEnergyInHand = state.active.hand.any(
+      (e) => catalog.findEnergyById(e.cardId) != null,
+    );
+    return hasEnergyInHand ? 0 : 1;
+  }
+
+  Widget _phaseStepper(TechniqueMatchState state) {
+    final current = _currentStageIndex(state);
+    return SizedBox(
+      height: 30,
+      child: Row(
+        children: [
+          for (var i = 0; i < _phaseStageLabels.length; i++) ...[
+            if (i > 0)
+              Expanded(
+                child: Container(
+                  height: 2,
+                  color: i <= current ? _gold : Colors.white24,
                 ),
-            ],
+              ),
+            _phaseStageChip(_phaseStageLabels[i], active: i == current, done: i < current),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _phaseStageChip(String label, {required bool active, required bool done}) {
+    final color = active ? _gold : (done ? Colors.white70 : _dim);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: active ? _gold.withValues(alpha: 0.18) : Colors.transparent,
+        border: Border.all(color: color, width: active ? 1.4 : 1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          color: color,
+          fontWeight: active ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // ⑤ ラリー演出（見せ場のハイライトを短時間強調表示）
+  // ============================================================
+
+  static final _highlightRules = <(RegExp, String? Function(RegExpMatch))>[
+    (RegExp('「(.+?)」を宣言した（フィニッシャー）'), (m) => '${m.group(1)}!!\n必殺技発動！'),
+    (RegExp('「(.+?)」を宣言した'), (m) => '${m.group(1)}！'),
+    (RegExp('が「(.+?)」を返技した'), (m) => '返した！'),
+    (RegExp('「(.+?)」が成立した'), (m) => '「${m.group(1)}」ヒット！'),
+    (RegExp('がダウンした'), (m) => 'ダウン！'),
+    (RegExp('はフォールの危機'), (m) => 'フォール！！'),
+    (RegExp('はギブアップの危機'), (m) => 'ギブアップ！！'),
+    (RegExp('を使用し、(フォール|ギブアップ)を回避した'), (m) => '${m.group(1)}回避！'),
+    (RegExp('の発動をキャンセルした'), (m) => 'キャンセル！'),
+    (RegExp('に主導権が移った'), (m) => '主導権交代！'),
+    (RegExp('から脱出した'), (m) => '脱出成功！'),
+    (RegExp('の.*勝利！'), (m) => '勝利！！！'),
+    (RegExp('引き分け'), (m) => '引き分け…'),
+  ];
+
+  String? _highlightFor(List<String> log) {
+    if (log.isEmpty) return null;
+    final window = log.length <= 6 ? log : log.sublist(log.length - 6);
+    for (final line in window.reversed) {
+      for (final (pattern, build) in _highlightRules) {
+        final match = pattern.firstMatch(line);
+        if (match != null) return build(match);
+      }
+    }
+    return null;
+  }
+
+  Widget _highlightBanner(TechniqueMatchState state) {
+    final text = _highlightFor(state.log);
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, -0.15),
+            end: Offset.zero,
+          ).animate(animation),
+          child: child,
+        ),
+      ),
+      child: text == null
+          ? const SizedBox(key: ValueKey('none'), height: 0)
+          : Container(
+              key: ValueKey('${state.log.length}-$text'),
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+              decoration: BoxDecoration(
+                color: _gold.withValues(alpha: 0.14),
+                border: Border.all(color: _gold.withValues(alpha: 0.6)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                text,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: _gold,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  height: 1.2,
+                ),
+              ),
+            ),
+    );
+  }
+
+  Widget _battleView(TechniqueMatchState state) {
+    final isNarrow = MediaQuery.sizeOf(context).width < 420;
+    return ListView(
+      padding: EdgeInsets.all(isNarrow ? 8 : 12),
+      children: [
+        _devBanner(),
+        const SizedBox(height: 12),
+        if (state.winnerIndex != null) ...[
+          _winBanner(state),
+          const SizedBox(height: 12),
+        ] else if (state.isDraw) ...[
+          _drawBanner(state),
+          const SizedBox(height: 12),
+        ],
+        Card(
+          color: _bg,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ターン${state.turnNumber} ・ ${state.active.wrestlerName}の手番 '
+                  '・ フェーズ: ${_phaseLabel(state.phase)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                if (state.isRallyActive)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Chain ${state.rallyChain} ・ '
+                      '${state.playerAt(state.rallyAttackerIndex!).wrestlerName}が攻撃側'
+                      '${state.pendingAttack != null ? "（返技判定待ち）" : "（次の技を選択、または終了）"}',
+                      style: const TextStyle(color: _gold, fontSize: 12),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                _phaseStepper(state),
+              ],
+            ),
           ),
         ),
-      ),
-      const SizedBox(height: 8),
-      _playerCard(state, 0),
-      const SizedBox(height: 8),
-      _playerCard(state, 1),
-      const SizedBox(height: 8),
-      Card(
-        color: _bg,
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: state.isOver
-              ? const Text(
-                  '試合は終了しました。右上の更新アイコンから新しい試合を始められます。',
-                  style: TextStyle(color: Colors.white70),
-                )
-              : state.pendingEscape != null
-              ? const Text(
-                  '決着判定中です…',
-                  style: TextStyle(color: Colors.white70),
-                )
-              : state.pendingFinisher != null
-              ? const Text(
-                  'フィニッシャー判定中です…',
-                  style: TextStyle(color: Colors.white70),
-                )
-              : state.isRallyActive
-              ? Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    if (state.pendingAttack == null)
-                      OutlinedButton.icon(
-                        onPressed: _endRally,
-                        icon: const Icon(Icons.stop_circle_outlined),
-                        label: const Text('ラリーを終了する'),
-                      )
-                    else
-                      const Text(
-                        '返技判定中です…',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                  ],
-                )
-              : Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.tonalIcon(
-                      onPressed: state.active.posture == WrestlerPosture.stand
-                          ? _goDown
-                          : null,
-                      icon: const Icon(Icons.arrow_downward),
-                      label: const Text('ダウンする'),
-                    ),
-                    FilledButton.tonalIcon(
-                      onPressed: state.active.posture == WrestlerPosture.down
-                          ? _rest
-                          : null,
-                      icon: const Icon(Icons.self_improvement),
-                      label: const Text('休息'),
-                    ),
-                    FilledButton.icon(
-                      onPressed: _endTurn,
-                      icon: const Icon(Icons.skip_next),
-                      label: const Text('ターン終了'),
-                    ),
-                  ],
+        const SizedBox(height: 8),
+        _highlightBanner(state),
+        _playerCard(state, 0, isNarrow: isNarrow),
+        const SizedBox(height: 8),
+        _playerCard(state, 1, isNarrow: isNarrow),
+        const SizedBox(height: 8),
+        Card(
+          color: _bg,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'その他の行動',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: _gold),
                 ),
+                const SizedBox(height: 6),
+                state.isOver
+                    ? const Text(
+                        '試合は終了しました。右上の更新アイコンから新しい試合を始められます。',
+                        style: TextStyle(color: Colors.white70),
+                      )
+                    : state.pendingEscape != null
+                    ? const Text(
+                        '決着判定中です…',
+                        style: TextStyle(color: Colors.white70),
+                      )
+                    : state.pendingFinisher != null
+                    ? const Text(
+                        'フィニッシャー判定中です…',
+                        style: TextStyle(color: Colors.white70),
+                      )
+                    : state.isRallyActive
+                    ? Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (state.pendingAttack == null)
+                            OutlinedButton.icon(
+                              onPressed: _endRally,
+                              icon: const Icon(Icons.stop_circle_outlined),
+                              label: const Text('ラリーを終了する'),
+                            )
+                          else
+                            const Text(
+                              '返技判定中です…',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                        ],
+                      )
+                    : Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          FilledButton.tonalIcon(
+                            onPressed: state.active.posture == WrestlerPosture.stand
+                                ? _goDown
+                                : null,
+                            icon: const Icon(Icons.arrow_downward),
+                            label: const Text('ダウンする'),
+                          ),
+                          FilledButton.tonalIcon(
+                            onPressed: state.active.posture == WrestlerPosture.down
+                                ? _rest
+                                : null,
+                            icon: const Icon(Icons.self_improvement),
+                            label: const Text('休息'),
+                          ),
+                          FilledButton.icon(
+                            onPressed: _endTurn,
+                            icon: const Icon(Icons.skip_next),
+                            label: const Text('ターン終了'),
+                          ),
+                        ],
+                      ),
+              ],
+            ),
+          ),
         ),
-      ),
-      const SizedBox(height: 8),
-      _logSection(state),
-    ],
-  );
+        const SizedBox(height: 8),
+        _logSection(state),
+      ],
+    );
+  }
 
   Widget _winBanner(TechniqueMatchState state) {
     final winner = state.playerAt(state.winnerIndex!);
@@ -1035,7 +1201,17 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     WrestlerPosture.fatigued => _red,
   };
 
-  Widget _playerCard(TechniqueMatchState state, int playerIndex) {
+  IconData _postureIcon(WrestlerPosture posture) => switch (posture) {
+    WrestlerPosture.stand => Icons.accessibility_new,
+    WrestlerPosture.down => Icons.arrow_downward,
+    WrestlerPosture.fatigued => Icons.dangerous,
+  };
+
+  // ============================================================
+  // ⑥ プレイヤー情報カード ＋ ② エネルギープール可視化 ＋ ③ ダウン強調
+  // ============================================================
+
+  Widget _playerCard(TechniqueMatchState state, int playerIndex, {required bool isNarrow}) {
     final player = state.playerAt(playerIndex);
     final isTurnOwner = playerIndex == state.activePlayerIndex;
     final effectiveAttackerIndex =
@@ -1058,118 +1234,400 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final roleLabel = isPendingDefender
         ? '返技判定待ち'
         : (state.isRallyActive && isEffectiveAttacker ? '攻撃側' : null);
+    final isDownLike = player.posture != WrestlerPosture.stand;
+    final postureColor = _postureColor(player.posture);
+
     return Card(
-      color: isEffectiveAttacker || isPendingDefender
-          ? const Color(0xff2a1c33)
-          : _bg,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      color: isEffectiveAttacker || isPendingDefender ? _cardBg : _bg,
+      clipBehavior: Clip.antiAlias,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${player.wrestlerName}'
-                    '${isTurnOwner ? "（手番）" : ""}'
-                    '${roleLabel != null ? " ・ $roleLabel" : ""}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _postureColor(
-                      player.posture,
-                    ).withValues(alpha: 0.25),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _postureLabel(player.posture),
-                    style: TextStyle(
-                      color: _postureColor(player.posture),
-                      fontSize: 12,
+            // ③ ダウン状態の左端カラーバー（スタンド時は薄い緑）。
+            Container(
+              width: 5,
+              color: isDownLike ? postureColor : postureColor.withValues(alpha: 0.35),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${player.wrestlerName}'
+                            '${isTurnOwner ? "（手番）" : ""}'
+                            '${roleLabel != null ? " ・ $roleLabel" : ""}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: postureColor.withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(12),
+                            border: isDownLike
+                                ? Border.all(color: postureColor, width: 1)
+                                : null,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(_postureIcon(player.posture), size: 12, color: postureColor),
+                              const SizedBox(width: 3),
+                              Text(
+                                _postureLabel(player.posture),
+                                style: TextStyle(
+                                  color: postureColor,
+                                  fontSize: 12,
+                                  fontWeight: isDownLike ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: hpRatio.clamp(0, 1),
-                minHeight: 8,
-                backgroundColor: Colors.white24,
-                valueColor: AlwaysStoppedAnimation(
-                  hpRatio > 0.5 ? _green : (hpRatio > 0.2 ? _gold : _red),
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'HP ${player.hp} / ${player.maxHp} ・ HEAT ${player.heat} ・ '
-              'Lv.${player.level}',
-            ),
-            Text(
-              '手札 ${player.hand.length}枚 ・ 山札 ${player.drawPile.length}枚 ・ '
-              '捨て札 ${player.discardPile.length}枚'
-              '${player.removedPile.isNotEmpty ? " ・ 除外 ${player.removedPile.length}枚" : ""}'
-              '${player.reshuffleCount > 0 ? " ・ 山札再構築 ${player.reshuffleCount}/$maxDeckReshuffles回" : ""}',
-              style: const TextStyle(fontSize: 12, color: Colors.white70),
-            ),
-            if (player.energyPool.isNotEmpty)
-              Text(
-                'エネルギー: ${player.energyPool.entries.map((e) => '${moveAttributeLabel(e.key)}${player.availableEnergyFor(e.key)}/${e.value}').join('・')}',
-                style: const TextStyle(fontSize: 12, color: Colors.white70),
-              ),
-            if (note != null)
-              Text(
-                note,
-                style: const TextStyle(fontSize: 11, color: Colors.white54),
-              ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 4,
-              runSpacing: 4,
-              children: [
-                for (final entry in player.hand)
-                  Builder(
-                    builder: (context) {
-                      final isEnergyCard =
-                          catalog.findEnergyById(entry.cardId) != null;
-                      // エネルギーセットはラリー外（ターンの行動選択時）
-                      // のみ行える。技の宣言は現在の実質的な攻撃側のみ。
-                      final tappable = isEnergyCard
-                          ? (canDeclare && !state.isRallyActive)
-                          : canDeclare;
-                      return ActionChip(
-                        label: Text(
-                          catalog.findTechniqueById(entry.cardId)?.name ??
-                              catalog.findEnergyById(entry.cardId)?.name ??
-                              catalog.findDefenseCardById(entry.cardId)?.name ??
-                              entry.cardId,
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(Icons.favorite, size: 12, color: _red),
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: hpRatio.clamp(0, 1),
+                              minHeight: 8,
+                              backgroundColor: Colors.white24,
+                              valueColor: AlwaysStoppedAnimation(
+                                hpRatio > 0.5 ? _green : (hpRatio > 0.2 ? _gold : _red),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${player.hp}/${player.maxHp}',
                           style: const TextStyle(fontSize: 11),
                         ),
-                        backgroundColor: isEnergyCard
-                            ? _gold.withValues(alpha: 0.2)
-                            : null,
-                        onPressed: tappable
-                            ? () => _showHandCardSheet(entry)
-                            : null,
-                      );
-                    },
-                  ),
-              ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'HEAT ${player.heat} ・ Lv.${player.level} ・ '
+                      '手札${player.hand.length} ・ 山札${player.drawPile.length} ・ '
+                      '捨て札${player.discardPile.length}'
+                      '${player.removedPile.isNotEmpty ? " ・ 除外${player.removedPile.length}" : ""}'
+                      '${player.reshuffleCount > 0 ? " ・ 再構築${player.reshuffleCount}/$maxDeckReshuffles" : ""}',
+                      style: const TextStyle(fontSize: 11, color: Colors.white70),
+                    ),
+                    if (player.energyPool.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      for (final attribute in player.energyPool.keys)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: _energyAttributeRow(
+                            attribute,
+                            player.energyPool[attribute] ?? 0,
+                            player.spentEnergy[attribute] ?? 0,
+                          ),
+                        ),
+                    ],
+                    if (note != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          note,
+                          style: const TextStyle(fontSize: 11, color: Colors.white54),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+                    if (player.hand.isNotEmpty)
+                      Text(
+                        canDeclare ? '手札をタップしてエネルギーセット／技を使用' : '相手の判定待ち…',
+                        style: const TextStyle(fontSize: 10, color: Colors.white38),
+                      ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final entry in player.hand)
+                          _handCardTile(
+                            state,
+                            entry,
+                            playerLevelTappable: canDeclare,
+                            isRallyActive: state.isRallyActive,
+                            compact: isNarrow,
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// ② エネルギープールをドット表示で可視化する（使用済み＝暗い縁取り、
+  /// 使用可能＝金色の塗りつぶし）。
+  Widget _energyAttributeRow(MoveAttribute attribute, int total, int spent) {
+    final available = (total - spent).clamp(0, total);
+    return Row(
+      children: [
+        SizedBox(
+          width: 28,
+          child: Text(
+            moveAttributeLabel(attribute),
+            style: const TextStyle(fontSize: 10, color: Colors.white70),
+          ),
+        ),
+        for (var i = 0; i < spent; i++) _energyDot(filled: false),
+        for (var i = 0; i < available; i++) _energyDot(filled: true),
+        const SizedBox(width: 4),
+        Text(
+          '$available/$total',
+          style: const TextStyle(fontSize: 10, color: Colors.white54),
+        ),
+      ],
+    );
+  }
+
+  Widget _energyDot({required bool filled}) => Padding(
+    padding: const EdgeInsets.only(right: 2),
+    child: Container(
+      width: 9,
+      height: 9,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: filled ? _gold : Colors.transparent,
+        border: Border.all(color: filled ? _gold : Colors.white30, width: 1),
+      ),
+    ),
+  );
+
+  // ============================================================
+  // ① 手札のミニカード表示（使用可否・理由をカード上に表示）
+  // ============================================================
+
+  Widget _handCardTile(
+    TechniqueMatchState state,
+    TechniqueDeckEntry entry, {
+    required bool playerLevelTappable,
+    required bool isRallyActive,
+    required bool compact,
+  }) {
+    final technique = catalog.findTechniqueById(entry.cardId);
+    final energy = catalog.findEnergyById(entry.cardId);
+    final defense = catalog.findDefenseCardById(entry.cardId);
+    final name = technique?.name ?? energy?.name ?? defense?.name ?? entry.cardId;
+    final isEnergyCard = energy != null;
+    final isDefenseCard = defense != null;
+
+    bool cardEligible = true;
+    String? reason;
+    if (technique != null) {
+      if (technique.hasFinisherEffect) {
+        final check = TechniqueMatchEngine.canDeclareFinisher(state, entry, catalog);
+        cardEligible = check.canDeclare;
+        reason = check.reason;
+      } else {
+        final check = TechniqueMatchEngine.canDeclareAttack(state, entry, catalog);
+        cardEligible = check.canUse;
+        reason = check.reason;
+      }
+    }
+
+    final tappable = playerLevelTappable &&
+        (isEnergyCard ? !isRallyActive : true) &&
+        !isDefenseCard;
+    final visuallyDim = !tappable || (technique != null && !cardEligible);
+
+    final width = compact ? 84.0 : 96.0;
+
+    Color borderColor;
+    Color? fillColor;
+    if (technique?.hasFinisherEffect ?? false) {
+      borderColor = _gold;
+      fillColor = _gold.withValues(alpha: 0.10);
+    } else if (isEnergyCard) {
+      borderColor = _gold.withValues(alpha: 0.6);
+      fillColor = _gold.withValues(alpha: 0.08);
+    } else if (technique != null && (technique.hasPinEffect || technique.hasSubmissionEffect)) {
+      borderColor = _orange;
+      fillColor = null;
+    } else {
+      borderColor = Colors.white24;
+      fillColor = null;
+    }
+
+    return Opacity(
+      opacity: visuallyDim ? 0.5 : 1.0,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: tappable ? () => _showHandCardSheet(entry) : null,
+          child: Container(
+            width: width,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: fillColor ?? const Color(0xff1a1120),
+              border: Border.all(color: borderColor, width: 1.2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (technique != null || energy != null)
+                  Row(
+                    children: [
+                      _miniBadge(
+                        moveAttributeLabel(technique?.attribute ?? energy!.attribute),
+                        _gold,
+                      ),
+                      const Spacer(),
+                      if (isEnergyCard)
+                        const Icon(Icons.bolt, size: 12, color: _gold)
+                      else if (technique != null)
+                        Text(
+                          '${technique.power}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                    ],
+                  )
+                else
+                  _miniBadge(_defenseTypeLabel(defense), Colors.white54),
+                const SizedBox(height: 3),
+                Text(
+                  name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+                if (technique != null) ...[
+                  const SizedBox(height: 3),
+                  Wrap(
+                    spacing: 2,
+                    runSpacing: 2,
+                    children: [
+                      _miniBadge(_targetShortLabel(technique.targetState), Colors.white54),
+                      if (technique.hasFinisherEffect)
+                        _miniBadge('必殺', _gold)
+                      else ...[
+                        if (technique.hasPinEffect) _miniBadge('フォール', _orange),
+                        if (technique.hasSubmissionEffect) _miniBadge('ギブアップ', _orange),
+                      ],
+                    ],
+                  ),
+                ],
+                if (technique != null && technique.attackEnergyCost.values.any((v) => v > 0))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(
+                      technique.attackEnergyCost.entries
+                          .where((e) => e.value > 0)
+                          .map((e) => '${moveAttributeLabel(e.key)}${e.value}')
+                          .join('・'),
+                      style: const TextStyle(fontSize: 9, color: Colors.white54),
+                    ),
+                  ),
+                if (technique != null && !cardEligible && reason != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(
+                      // カード上は短い定型ラベルのみ表示する（詳細な理由文は
+                      // タップ後のダイアログに表示される。同じ文言をカードにも
+                      // そのまま出すと、ダイアログが開いた状態で文言が重複し
+                      // `find.textContaining` の一致対象があいまいになるため、
+                      // あえて別の短い言い回しにしている）。
+                      _shortReason(reason),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 9, color: _red),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// エンジンが返す詳細な不可理由文（`check.reason`）を、カード上に表示する
+  /// 短い定型ラベルへ要約する（①「使用できない理由を小さく表示」）。詳細な
+  /// 理由文そのものはタップ後のダイアログに引き続き表示される。
+  String _shortReason(String reason) {
+    if (reason.contains('エネルギーが不足')) return 'エネルギー不足';
+    if (reason.contains('スタンド状態でないと')) return '相手がダウン中';
+    if (reason.contains('ダウン状態でないと')) return '相手がスタンド中';
+    if (reason.contains('必要レベル')) return 'レベル不足';
+    if (reason.contains('HEATが')) return 'HEAT不足';
+    if (reason.contains('相手のHPが')) return '相手HP条件未達';
+    if (reason.contains('自分のHPが')) return '自分HP条件未達';
+    if (reason.contains('使用できません')) return '使用不可';
+    return '使用不可';
+  }
+
+  String _defenseTypeLabel(TechniqueDefenseCard? defense) => switch (defense?.type) {
+    TechniqueDeckCardType.escape => 'エスケープ',
+    TechniqueDeckCardType.reversal => 'リバーサル',
+    TechniqueDeckCardType.kickOut => '防御札',
+    TechniqueDeckCardType.ropeBreak => '防御札',
+    _ => '防御札',
+  };
+
+  Widget _miniBadge(String label, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.18),
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(fontSize: 8, color: color, fontWeight: FontWeight.bold),
+    ),
+  );
+
+  // ============================================================
+  // ⑧ 進行ログにアイコン・色・強調文字を追加
+  // ============================================================
+
+  (IconData, Color) _logIconFor(String line) {
+    if (line.contains('フィニッシャー')) return (Icons.whatshot, _gold);
+    if (line.contains('ダウンした')) return (Icons.arrow_downward, _orange);
+    if (line.contains('フォール')) return (Icons.sports_mma, _red);
+    if (line.contains('ギブアップ')) return (Icons.back_hand, _red);
+    if (line.contains('キックアウト') || line.contains('を回避した')) {
+      return (Icons.shield, _green);
+    }
+    if (line.contains('リバーサル') || line.contains('主導権')) {
+      return (Icons.swap_horiz, _gold);
+    }
+    if (line.contains('返技した')) return (Icons.repeat, _green);
+    if (line.contains('を使用した') || line.contains('を宣言した')) {
+      return (Icons.flash_on, Colors.white70);
+    }
+    if (line.contains('勝利') || line.contains('引き分け')) {
+      return (Icons.emoji_events, _gold);
+    }
+    return (Icons.circle, Colors.white38);
   }
 
   Widget _logSection(TechniqueMatchState state) => Card(
@@ -1186,8 +1644,36 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
           const SizedBox(height: 6),
           for (final line in state.log.reversed.take(20))
             Padding(
-              padding: const EdgeInsets.only(bottom: 2),
-              child: Text(line, style: const TextStyle(fontSize: 12)),
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Builder(
+                    builder: (context) {
+                      final (icon, color) = _logIconFor(line);
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Icon(icon, size: 12, color: color),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      line,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _logIconFor(line).$2 == Colors.white38
+                            ? Colors.white70
+                            : _logIconFor(line).$2,
+                        fontWeight: _logIconFor(line).$2 == Colors.white38
+                            ? FontWeight.normal
+                            : FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
         ],
       ),
