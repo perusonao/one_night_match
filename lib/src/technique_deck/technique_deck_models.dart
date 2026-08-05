@@ -258,6 +258,7 @@ class TechniqueDeckTechniqueCard {
     this.kickOutHpRate,
     this.giveUpThreshold,
     this.giveUpHpCost,
+    this.downBonusPower,
     this.finisherRequirements = const {},
     this.description = '',
     this.sourceMoveId,
@@ -282,6 +283,12 @@ class TechniqueDeckTechniqueCard {
   final double? kickOutHpRate;
   final int? giveUpThreshold;
   final int? giveUpHpCost;
+
+  /// 相手がダウン系状態（`down`／`fatigued`）のときに[power]へ加算される
+  /// 追加威力（Phase 6のユーザー指摘を受けた暫定機能）。`targetState`を
+  /// `down`限定にせずとも「ダウン中に狙うと強い」という誘因を持たせたい
+  /// ギブアップ技（関節技等）向けに導入した。nullなら加算なし。
+  final int? downBonusPower;
 
   /// フィニッシャー発動条件（仕様書10章）。Phase 0時点で条件の種類が
   /// 未確定のため型を固定しない。想定キー（正式仕様ではない、例示のみ）:
@@ -319,6 +326,7 @@ class TechniqueDeckTechniqueCard {
     Object? kickOutHpRate = _unset,
     Object? giveUpThreshold = _unset,
     Object? giveUpHpCost = _unset,
+    Object? downBonusPower = _unset,
     Map<String, dynamic>? finisherRequirements,
     String? description,
     Object? sourceMoveId = _unset,
@@ -350,6 +358,9 @@ class TechniqueDeckTechniqueCard {
     giveUpHpCost: identical(giveUpHpCost, _unset)
         ? this.giveUpHpCost
         : giveUpHpCost as int?,
+    downBonusPower: identical(downBonusPower, _unset)
+        ? this.downBonusPower
+        : downBonusPower as int?,
     finisherRequirements: finisherRequirements ?? this.finisherRequirements,
     description: description ?? this.description,
     sourceMoveId: identical(sourceMoveId, _unset)
@@ -377,6 +388,7 @@ class TechniqueDeckTechniqueCard {
     if (kickOutHpRate != null) 'kickOutHpRate': kickOutHpRate,
     if (giveUpThreshold != null) 'giveUpThreshold': giveUpThreshold,
     if (giveUpHpCost != null) 'giveUpHpCost': giveUpHpCost,
+    if (downBonusPower != null) 'downBonusPower': downBonusPower,
     'finisherRequirements': finisherRequirements,
     'description': description,
     if (sourceMoveId != null) 'sourceMoveId': sourceMoveId,
@@ -422,6 +434,7 @@ class TechniqueDeckTechniqueCard {
       kickOutHpRate: _doubleOrNull(json['kickOutHpRate']),
       giveUpThreshold: _intOrNull(json['giveUpThreshold']),
       giveUpHpCost: _intOrNull(json['giveUpHpCost']),
+      downBonusPower: _intOrNull(json['downBonusPower']),
       finisherRequirements: json['finisherRequirements'] is Map
           ? Map<String, dynamic>.from(json['finisherRequirements'] as Map)
           : const {},
@@ -452,6 +465,7 @@ class TechniqueDeckTechniqueCard {
       kickOutHpRate == other.kickOutHpRate &&
       giveUpThreshold == other.giveUpThreshold &&
       giveUpHpCost == other.giveUpHpCost &&
+      downBonusPower == other.downBonusPower &&
       _mapEquals(finisherRequirements, other.finisherRequirements) &&
       description == other.description &&
       sourceMoveId == other.sourceMoveId;
@@ -478,6 +492,7 @@ class TechniqueDeckTechniqueCard {
       kickOutHpRate,
       giveUpThreshold,
       giveUpHpCost,
+      downBonusPower,
     ),
   );
 

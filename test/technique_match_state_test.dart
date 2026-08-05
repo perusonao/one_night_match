@@ -175,6 +175,63 @@ void main() {
       expect(result.playerA.discardPile, isEmpty);
       expect(result.playerA.drawPile, isEmpty); // 1枚を再シャッフルして即ドローした
       expect(result.playerA.hand.length, customA.hand.length + 1);
+      expect(result.playerA.reshuffleCount, 1);
+    });
+
+    test(
+      '山札再構築の上限（maxDeckReshuffles）に達した状態でさらに山札が尽きると'
+      '時間切れ引き分けになる',
+      () {
+        final base = freshMatch(seed: 1);
+        final customA = base.playerA.copyWith(
+          drawPile: const [],
+          discardPile: const [
+            TechniqueDeckEntry(
+              instanceId: 'discarded_1',
+              cardId: 'card_x',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+          ],
+          reshuffleCount: maxDeckReshuffles, // 既に上限まで再構築済み
+        );
+        final customState = base.copyWith(playerA: customA, activePlayerIndex: 1);
+        final result = TechniqueMatchEngine.endTurn(customState, random: Random(2));
+        expect(result.isDraw, isTrue);
+        expect(result.winnerIndex, isNull);
+        expect(result.winReason, contains('時間切れ'));
+        expect(result.isOver, isTrue);
+        // ドローは行われない（手札・山札・捨て札とも変化しない）。
+        expect(result.playerA.hand, customA.hand);
+        expect(result.playerA.discardPile, customA.discardPile);
+      },
+    );
+
+    test('上限未満の再構築ならドローが行われ、時間切れにはならない', () {
+      final base = freshMatch(seed: 1);
+      final customA = base.playerA.copyWith(
+        drawPile: const [],
+        discardPile: const [
+          TechniqueDeckEntry(
+            instanceId: 'discarded_1',
+            cardId: 'card_x',
+            cardType: TechniqueDeckCardType.technique,
+          ),
+        ],
+        reshuffleCount: maxDeckReshuffles - 1, // まだ1回余裕がある
+      );
+      final customState = base.copyWith(playerA: customA, activePlayerIndex: 1);
+      final result = TechniqueMatchEngine.endTurn(customState, random: Random(2));
+      expect(result.isDraw, isFalse);
+      expect(result.playerA.reshuffleCount, maxDeckReshuffles);
+      expect(result.playerA.hand.length, customA.hand.length + 1);
+    });
+
+    test('試合終了後（時間切れ引き分け）はgoDown/rest/endTurn/setEnergyが無効化される', () {
+      final base = freshMatch(seed: 1);
+      final draw = base.copyWith(isDraw: true, winReason: '時間切れ引き分け（テスト）');
+      expect(TechniqueMatchEngine.goDown(draw), same(draw));
+      expect(TechniqueMatchEngine.rest(draw), same(draw));
+      expect(TechniqueMatchEngine.endTurn(draw), same(draw));
     });
 
     test('山札・捨て札とも空ならドローできず手札は変化しない（無限ループにならない）', () {
@@ -962,7 +1019,7 @@ void main() {
       expect(resolved.playerB.hp, 90);
     });
 
-    test('キックアウトカードでフォールを回避できる（手札→捨て札）', () {
+    test('キックアウトカードでフォールを回避できる（手札→除外。捨て札には入らない）', () {
       var state = resolveToEscape('fall_move');
       const entry = TechniqueDeckEntry(
         instanceId: 'k1',
@@ -987,7 +1044,11 @@ void main() {
       expect(result.success, isTrue);
       expect(result.state.pendingEscape, isNull);
       expect(result.state.playerB.hand, isEmpty);
-      expect(result.state.playerB.discardPile, [entry]);
+      // 捨て札ではなく除外（removedPile）へ送られる。山札再構築で何度も
+      // 手札に戻ってこないようにするため（Phase 6完了後のプレイテストで
+      // 判明した「防御側が実質無敵化する」問題への対応）。
+      expect(result.state.playerB.discardPile, isEmpty);
+      expect(result.state.playerB.removedPile, [entry]);
       expect(result.state.winnerIndex, isNull);
     });
 
@@ -1245,6 +1306,91 @@ void main() {
       );
       expect(result.success, isFalse);
       expect(result.failureReason, contains('決着'));
+    });
+  });
+
+  group('Phase 6完了後の追加: downBonusPower・removedPile', () {
+    TechniqueDeckCardCatalog catalog() => const TechniqueDeckCardCatalog(
+      techniques: [
+        TechniqueDeckTechniqueCard(
+          id: 'submission_any',
+          name: '関節技（スタンドでも可）',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.submission,
+          attackEnergyCost: {MoveAttribute.submission: 1},
+          power: 6,
+          downBonusPower: 6,
+        ),
+      ],
+      energies: [],
+      defenseCards: [],
+    );
+
+    TechniqueDeckDefinition deckWith(String cardId) => TechniqueDeckDefinition(
+      id: 'd',
+      wrestlerId: 'wrestler_a',
+      entries: [
+        TechniqueDeckEntry(
+          instanceId: 'e1',
+          cardId: cardId,
+          cardType: TechniqueDeckCardType.technique,
+        ),
+      ],
+    );
+
+    TechniqueMatchState stateWith({required WrestlerPosture defenderPosture}) {
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'wrestler_a',
+        wrestlerAName: 'レスラーA',
+        wrestlerAMaxHp: 100,
+        deckA: deckWith('submission_any'),
+        wrestlerBId: 'wrestler_b',
+        wrestlerBName: 'レスラーB',
+        wrestlerBMaxHp: 100,
+        deckB: deckWith('submission_any'),
+        handSize: 1,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        playerA: state.playerA.copyWith(
+          energyPool: const {MoveAttribute.submission: 1},
+        ),
+        playerB: state.playerB.copyWith(posture: defenderPosture),
+      );
+      return state;
+    }
+
+    test('相手がスタンド中は基礎威力のみ（downBonusPowerは加算されない）', () {
+      final state = stateWith(defenderPosture: WrestlerPosture.stand);
+      final result = TechniqueMatchEngine.useMove(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      );
+      expect(result.success, isTrue);
+      expect(result.state.playerB.hp, 94); // 100 - 6
+    });
+
+    test('相手がダウン中はdownBonusPowerが加算される', () {
+      final state = stateWith(defenderPosture: WrestlerPosture.down);
+      final result = TechniqueMatchEngine.useMove(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      );
+      expect(result.success, isTrue);
+      expect(result.state.playerB.hp, 88); // 100 - (6 + 6)
+    });
+
+    test('相手が疲労中もdown系状態としてdownBonusPowerが加算される', () {
+      final state = stateWith(defenderPosture: WrestlerPosture.fatigued);
+      final result = TechniqueMatchEngine.useMove(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      );
+      expect(result.success, isTrue);
+      expect(result.state.playerB.hp, 88); // 100 - (6 + 6)
     });
   });
 }

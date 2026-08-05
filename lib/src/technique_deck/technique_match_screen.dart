@@ -649,6 +649,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       if (state.winnerIndex != null) ...[
         _winBanner(state),
         const SizedBox(height: 12),
+      ] else if (state.isDraw) ...[
+        _drawBanner(state),
+        const SizedBox(height: 12),
       ],
       Card(
         color: _bg,
@@ -685,7 +688,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         color: _bg,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: state.winnerIndex != null
+          child: state.isOver
               ? const Text(
                   '試合は終了しました。右上の更新アイコンから新しい試合を始められます。',
                   style: TextStyle(color: Colors.white70),
@@ -767,6 +770,28 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     );
   }
 
+  Widget _drawBanner(TechniqueMatchState state) => Card(
+    color: Colors.white24,
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        children: [
+          const Icon(Icons.hourglass_disabled, color: Colors.white70),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '引き分け（${state.winReason ?? "時間切れ"}）',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
   String _phaseLabel(TechniqueMatchPhase phase) => switch (phase) {
     TechniqueMatchPhase.start => '開始',
     TechniqueMatchPhase.draw => 'ドロー',
@@ -796,7 +821,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final canDeclare =
         state.pendingAttack == null &&
         state.pendingEscape == null &&
-        state.winnerIndex == null &&
+        !state.isOver &&
         isEffectiveAttacker;
     final isPlayerA = playerIndex == 0;
     final hpRatio = player.maxHp == 0 ? 0.0 : player.hp / player.maxHp;
@@ -863,7 +888,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
             ),
             Text(
               '手札 ${player.hand.length}枚 ・ 山札 ${player.drawPile.length}枚 ・ '
-              '捨て札 ${player.discardPile.length}枚',
+              '捨て札 ${player.discardPile.length}枚'
+              '${player.removedPile.isNotEmpty ? " ・ 除外 ${player.removedPile.length}枚" : ""}'
+              '${player.reshuffleCount > 0 ? " ・ 山札再構築 ${player.reshuffleCount}/$maxDeckReshuffles回" : ""}',
               style: const TextStyle(fontSize: 12, color: Colors.white70),
             ),
             if (player.energyPool.isNotEmpty)

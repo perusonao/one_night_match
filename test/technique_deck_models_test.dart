@@ -75,6 +75,7 @@ void main() {
       kickOutHpRate: 0.5,
       giveUpThreshold: 15,
       giveUpHpCost: 10,
+      downBonusPower: 6,
       finisherRequirements: {'minimumHeat': 40},
       description: 'テスト用固有技',
       sourceMoveId: 'akari_dropkick',
@@ -110,6 +111,7 @@ void main() {
       expect(card.kickOutHpRate, isNull);
       expect(card.giveUpThreshold, isNull);
       expect(card.giveUpHpCost, isNull);
+      expect(card.downBonusPower, isNull);
       expect(card.finisherRequirements, isEmpty);
       expect(card.description, '');
       expect(card.sourceMoveId, isNull);
@@ -137,6 +139,7 @@ void main() {
       expect(card.kickOutHpRate, isNull);
       expect(card.giveUpThreshold, isNull);
       expect(card.giveUpHpCost, isNull);
+      expect(card.downBonusPower, isNull);
       expect(card.finisherRequirements, const {});
       expect(card.description, '');
       expect(card.sourceMoveId, isNull);
@@ -194,6 +197,7 @@ void main() {
       expect(card.kickOutHpRate, isNull);
       expect(card.giveUpThreshold, isNull);
       expect(card.giveUpHpCost, isNull);
+      expect(card.downBonusPower, isNull);
       expect(card.sourceMoveId, isNull);
     });
 
