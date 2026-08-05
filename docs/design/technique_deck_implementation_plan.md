@@ -1,15 +1,16 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 6（フォール・ギブアップの回避判定、CPU判断を除く）
-  完了 + ゲームサイクル見直し完了時点**（「Technique Match」画面で技の
-  応酬＝ラリーに加え、フォール／ギブアップ効果を持つ技が成立した際の
-  防御側の回避判定（キックアウト／ロープブレイクカード・HP消費・諦め。
-  返技エネルギーは決着回避には使えない）が動作し、初めて勝敗
-  （`winnerIndex`）が決まるようになった。火神アカリ・豪田ミサキ・白銀
-  レイナ・黒蝶ジャック4人全員分の正式モデルデッキ（各30枚）による全
-  組み合わせ検証で決着率100%を達成。「技カードを使えないターン」問題の
-  原因（`targetState`ミスマッチが主因）も特定済み。フィニッシャー決着・
-  特殊キックアウト・CPU判断はPhase 7・8以降）
+- ステータス: **Phase 7（フィニッシャー、CPU判断を除く）完了時点**（「Technique
+  Match」画面で技の応酬（ラリー）・フォール／ギブアップの回避判定に加え、
+  フィニッシャー（発動条件判定→発動前キャンセル→成立→専用脱出→即決着）が
+  動作するようになった。発動条件はカード側データ（`finisherRequirements`）
+  で持ち、エンジンには個別ハードコードしない設計。通常の返技エネルギーでは
+  フィニッシャーを止められず、発動前キャンセルはエスケープ／リバーサル
+  カード、成立後の脱出は専用の特殊キックアウトカードのみが有効。4人分の
+  Phase 7モデルデッキ（各30枚、フィニッシャー3枚ずつ）を新規構築し、全10
+  組み合わせ×100試合＝1000試合のシミュレーションで検証済み（詳細は
+  [open questions O番](technique_deck_open_questions.md)参照）。CPU判断は
+  Phase 8）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 
@@ -591,20 +592,65 @@ no-opする）。
 
 ## Phase 7：フィニッシャー
 
-実装対象:
+**ステータス: 完了（カットイン演出・決着演出を除く。UIは最小限のダイアログ
+実装）**
 
-- 発動条件判定（`finisherRequirements`）
-- デッキ内最大3枚・同名禁止（Phase 2のバリデーションと連動）
-- エスケープカード
-- リバーサルカード
-- 発動キャンセル処理
-- 山札へ戻す（キャンセル成立時）
-- シャッフル
-- 特殊キックアウトカード
-- 高い返技コスト（フィニッシャー用の`reversalEnergyCost`）
-- HPに関係しない勝利
-- カットイン演出
-- 決着演出
+ユーザー指示（詳細な設計スペック）に基づき、フィニッシャーを通常の
+`declareAttack`／`pendingEscape`フローとは完全に分離した独立の状態機械
+として実装した。
+
+成果物:
+
+- `lib/src/technique_deck/technique_match_state.dart`:
+  - `TechniqueFinisherStage { responsePending, escapePending }` /
+    `TechniquePendingFinisher`（`pendingEscape`へは統合せず別系統として保持。
+    ユーザー指示）
+  - `_checkEligibility`（`canUseMove`/`canDeclareAttack`/`hasUsableMove`
+    共通）で`hasFinisherEffect`を持つ技を明示的に除外し、通常の宣言・返技
+    フローに一切乗らないようにした
+  - `_checkFinisherRequirements` — カード側`finisherRequirements`
+    （`minimumHeat` / `maximumOpponentHp` / `maximumOwnHp` /
+    `requiredOpponentState`）を解釈する汎用チェッカー。エンジンに
+    レスラー別の条件をハードコードしない
+  - `canDeclareFinisher` / `declareFinisher` — 宣言時に攻撃エネルギーを
+    消費し手札から除くが、捨て札にはしない（キャンセル時に山札へ戻すため）。
+    ラリーは終了し、返技（`reversalEnergyCost`）を経由せず直接
+    `responsePending`へ移行する
+  - `canCancelFinisher` / `cancelFinisher` — 防御側のエスケープ／リバーサル
+    カードのみで発動前キャンセル可能。成功時はダメージ・HEAT・ダウンが
+    一切発生せず、フィニッシャーカードは攻撃側の山札へ戻ってシャッフル
+    される（捨て札にはしない）。エスケープはラリー終了、リバーサルは
+    `rallyAttackerIndex`を交代させる主導権移動
+  - `resolveFinisher` — キャンセルされなければ`_resolveAttack`を再利用して
+    即座にダメージ・HEAT・ダウンを反映し、フィニッシャーカードを捨て札へ
+    送って`escapePending`へ移行する
+  - `canEscapeFinisher` / `escapeFinisher` — `KickOutCardCategory.
+    finisherEscape`の特殊キックアウトカードのみで脱出可能（通常キックアウト・
+    ロープブレイク・HP消費・返技エネルギーはすべて不可）。成功したカードは
+    `removedPile`へ（Phase 6の通常キックアウトと同じ、ゲームから完全除外）
+  - `concedeFinisher` — 脱出できなければ残りHPに関係なく攻撃側の即勝利
+    （`winReason: 'フィニッシャー勝利'`）
+- `lib/src/technique_deck/technique_match_screen.dart`: 宣言・発動キャンセル
+  判定ダイアログ・成立後脱出判定ダイアログ・手札詳細シートのフィニッシャー
+  専用分岐を追加（カットイン演出等の専用UIはPhase 9で検討）
+- `lib/src/technique_deck/technique_deck_defaults.dart`: 4人×3枚
+  （`td_p7_*_fin_*`、計12枚）のフィニッシャーカードを追加。ユーザー指定の
+  テンプレート「1枚は`targetState: any`・1枚はレスラーの得意状態・1枚は
+  条件付きの高性能技」に沿い、`finisherRequirements`もレスラーごとに変えた
+  （アカリ=HEAT重視、ミサキ=相手低HP重視、レイナ=相手ダウン重視、
+  ジャック=自分低HP重視）
+- `lib/src/technique_deck/technique_deck_model_decks.dart`:
+  `buildAkariPhase7ModelDeck` / `buildMisakiPhase7ModelDeck` /
+  `buildReinaPhase7ModelDeck` / `buildJackPhase7ModelDeck`（各30枚。
+  Phase 6モデルデッキから通常技を9→6枚に減らし、フィニッシャー3枚・
+  エスケープ1枚・リバーサル1枚・特殊キックアウト1枚を追加）
+- テスト: `test/technique_match_state_test.dart`（Phase 7エンジンテスト12件）・
+  `test/technique_match_screen_test.dart`（フィニッシャーUIテスト2件）・
+  `test/technique_deck_model_decks_test.dart`（Phase 7モデルデッキ検証12件）
+
+**検証結果（4人モデルデッキ全10組み合わせ×100試合＝1000試合の
+シミュレーション）**: [open questions O番](technique_deck_open_questions.md)
+を参照。
 
 **依存関係**: Phase 6（フォール／ギブアップの仕組みの上にフィニッシャーの
 特殊ケースとして構築する）。

@@ -489,4 +489,205 @@ void main() {
       expect(find.text('ターン終了'), findsNothing);
     });
   });
+
+  group('TechniqueMatchScreen: Phase 7 フィニッシャー', () {
+    // LocalWrestlerRepository（未上書き時）のデフォルト先頭レスラーは常に
+    // 'wrestler_akari'（lib/src/wrestler_editor/defaults.dart）。これを
+    // allowedWrestlerIdsに直接指定することで、試合開始後の非同期ロードを
+    // 待たずにフィニッシャーの使用可否を確定させる。
+    TechniqueDeckCardCatalog finisherCatalog() => const TechniqueDeckCardCatalog(
+      techniques: [
+        TechniqueDeckTechniqueCard(
+          id: 'finisher_move',
+          name: 'テストフィニッシャー',
+          category: TechniqueCardCategory.finisher,
+          attribute: MoveAttribute.strike,
+          allowedWrestlerIds: ['wrestler_akari'],
+          minimumLevel: 1,
+          attackEnergyCost: {MoveAttribute.strike: 2},
+          power: 30,
+          heatDelta: 10,
+          hasFinisherEffect: true,
+        ),
+      ],
+      energies: [
+        TechniqueEnergyCard(
+          id: 'energy_strike',
+          attribute: MoveAttribute.strike,
+          name: '打エネルギー',
+        ),
+      ],
+      defenseCards: [
+        TechniqueDefenseCard(
+          id: 'escape_card',
+          name: 'エスケープ',
+          type: TechniqueDeckCardType.escape,
+        ),
+        TechniqueDefenseCard(
+          id: 'special_kickout_card',
+          name: '特殊キックアウト',
+          type: TechniqueDeckCardType.kickOut,
+          kickOutCategory: KickOutCardCategory.finisherEscape,
+        ),
+      ],
+    );
+
+    Future<void> pumpFinisherScreen(
+      WidgetTester tester, {
+      required TechniqueDeckRepository deckRepository,
+    }) async {
+      await tester.binding.setSurfaceSize(const Size(800, 3000));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TechniqueMatchScreen(
+            catalog: finisherCatalog(),
+            deckRepository: deckRepository,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('フィニッシャーが成立し脱出できないと勝利バナーが表示される', (tester) async {
+      final repo = LocalTechniqueDeckRepository();
+      await pumpFinisherScreen(tester, deckRepository: repo);
+      final state = tester.state(find.byType(TechniqueMatchScreen));
+      // ignore: avoid_dynamic_calls
+      final wrestlerAId = (state as dynamic).wrestlerA.id as String;
+
+      await repo.save(
+        TechniqueDeckSaveRecord(
+          deckId: 'fin_deck',
+          name: 'フィニッシャーテスト用デッキ',
+          wrestlerId: wrestlerAId,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          entries: const [
+            TechniqueDeckEntry(
+              instanceId: 'e1',
+              cardId: 'finisher_move',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 'e2',
+              cardId: 'energy_strike',
+              cardType: TechniqueDeckCardType.energy,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 'e3',
+              cardId: 'energy_strike',
+              cardType: TechniqueDeckCardType.energy,
+            ),
+          ],
+        ),
+      );
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('打エネルギー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('セットする'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('打エネルギー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('セットする'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('テストフィニッシャー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('宣言する'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('発動キャンセル判定'), findsOneWidget);
+      expect(find.text('キャンセルしない'), findsOneWidget);
+      await tester.tap(find.text('キャンセルしない'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('成立した'), findsWidgets);
+      expect(find.text('諦める（敗北を認める）'), findsOneWidget);
+      await tester.tap(find.text('諦める（敗北を認める）'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('の勝利！'), findsOneWidget);
+      expect(find.textContaining('フィニッシャー勝利'), findsWidgets);
+      expect(find.text('ターン終了'), findsNothing);
+    });
+
+    testWidgets('エスケープカードで発動をキャンセルできる（ダメージなし）', (tester) async {
+      final repo = LocalTechniqueDeckRepository();
+      await pumpFinisherScreen(tester, deckRepository: repo);
+      final state = tester.state(find.byType(TechniqueMatchScreen));
+      // ignore: avoid_dynamic_calls
+      final wrestlerAId = (state as dynamic).wrestlerA.id as String;
+
+      await repo.save(
+        TechniqueDeckSaveRecord(
+          deckId: 'fin_deck2',
+          name: 'フィニッシャーテスト用デッキ2',
+          wrestlerId: wrestlerAId,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          entries: const [
+            TechniqueDeckEntry(
+              instanceId: 'e1',
+              cardId: 'finisher_move',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 'e2',
+              cardId: 'energy_strike',
+              cardType: TechniqueDeckCardType.energy,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 'e3',
+              cardId: 'energy_strike',
+              cardType: TechniqueDeckCardType.energy,
+            ),
+          ],
+        ),
+      );
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      // Bにエスケープカードを直接注入する（実プレイではBのデッキに含まれる。
+      // ここではUIの配線確認が目的のため直接注入する）。
+      final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
+      final TechniqueMatchState before = screenState.matchState;
+      screenState.matchState = before.copyWith(
+        playerB: before.playerB.copyWith(
+          hand: const [
+            TechniqueDeckEntry(
+              instanceId: 'esc1',
+              cardId: 'escape_card',
+              cardType: TechniqueDeckCardType.escape,
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('打エネルギー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('セットする'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('打エネルギー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('セットする'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('テストフィニッシャー').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('宣言する'));
+      await tester.pumpAndSettle();
+
+      final escapeButton = find.widgetWithText(OutlinedButton, 'エスケープ');
+      expect(escapeButton, findsOneWidget);
+      await tester.tap(escapeButton);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('キャンセルした'), findsOneWidget);
+      // ダメージが発生していないこと（勝敗もついていない）。
+      expect(find.text('ターン終了'), findsOneWidget);
+    });
+  });
 }
