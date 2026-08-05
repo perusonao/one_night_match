@@ -26,37 +26,41 @@ import 'technique_wrestler_portraits.dart';
 /// モード・Deck Simulator・レスラーエディタ・Technique Deck Builderの挙動には
 /// 一切影響しない。
 ///
-/// 【UI全面リデザイン Ver.2（リング演出・立ち絵、ルール・エンジンは無変更）】
-/// Ver.1（デバッグ画面→ゲーム画面への最初のリデザイン）に続き、ユーザー
-/// 提示のモックアップに基づきさらに以下を追加した。ロジックは一切
-/// 変更していない（`TechniqueMatchEngine`の呼び出しパターンは従来のまま）。
-/// - **中央リングパネルを画面の主役に**: 相手カード→リング→自分カードの
-///   3段構成とし、リングパネルを大型化。技成立・返技・ダウン・フォール等の
-///   ハイライトをより大きく表示する
-/// - **レスラー立ち絵**: ユーザー添付のUIモックアップ画像から火神アカリ・
-///   豪田ミサキの2人分のみを切り出して`assets/images/wrestlers/`へ収録し
-///   使用（`technique_wrestler_portraits.dart`参照）。新規イラストは作成
-///   していない。白銀レイナ・黒蝶ジャックは元画像が存在しないため、
-///   引き続きアイコンベースの表示にフォールバックする（ユーザー承認済み）。
-///   ダウン／疲労状態では立ち絵（またはアイコン枠）を暗く・傾けて表示する
-/// - **手番表示を青に統一**: 「今どちらの手番か」を示す強調色を金→青へ
-///   変更し、金はフィニッシャー専用の強調色として残した（色の役割の統一）
-/// - **手札カードをタップ→選択→確認ボタンへ変更**（Ver.1の「タップで即
-///   実行」から誤操作防止のため巻き戻した）。選択中のカードは手札スク
-///   ローラー下に確認バーが表示され、そこでのみ実行される。長押しは
-///   常に詳細ダイアログを開く
-/// - 手札カードの先頭に技／ENERGY／DEFENSE／FINISHERの種別ラベルを追加し、
-///   カード名のフォントを拡大
-/// - エネルギー表示を属性ごとの横一列（属性ラベル＋ドット）に整理
-/// - 「休息」「ターン終了」ボタンに補足サブテキストを追加
-/// - ステッパーをアイコン中心に簡略化し、現在の段階のみラベル表示
-/// - 進行ログの初期プレビューを4件→3件に削減
+/// 【UI全面リデザイン Ver.3（プレイフィール最優先、ルール・エンジンは無変更）】
+/// Ver.2（リング演出・立ち絵）に続き、ユーザー提示のモックアップ
+/// （「改善後の試合画面イメージ」）に基づき、①初見30秒で分かる／②毎ターン
+/// 迷わない／③操作する楽しさ、の3点を最優先に以下を追加した。ロジックは
+/// 一切変更していない（`TechniqueMatchEngine`の呼び出しパターンは従来の
+/// まま）。
+/// - **「STEP N」表示**: これまでの1文の指示に加え、常に「STEP N」の番号を
+///   明示し、今何をすべき段階かを一目で分かるようにした（5アイコンの
+///   ステッパー行は情報過多のため廃止し、STEP表示1つに集約した）
+/// - **状態バッジを大型化・英語ラベル化**: STAND/DOWN/PIN/SUBMISSION/
+///   FINISHERの5種を、状態に応じて色分けした大きなバッジで表示する
+///   （フォール危機＝PIN、ギブアップ危機＝SUBMISSION、フィニッシャー
+///   危機＝FINISHERを新設。従来はダウン状態のみの表示だった）
+/// - **HEATを炎アイコンの行で表示**（バーに加えて視覚的に直感化）
+/// - **エネルギードットを属性ごとに色分け**（打撃=赤・投げ=金・関節=青・
+///   飛び=緑・ラフ=紫。属性を色で覚えられるようにした）
+/// - **手札カードを約1.5倍に拡大**（幅112→168等）。カードを見せることを
+///   優先し、情報は技名・コスト・威力・属性・対象状態のみに絞った
+/// - **リングパネルを拡大・強調**し、両者の立ち絵をリング背景に薄く配置。
+///   ハイライト演出のフォント・アニメーションをより大きく／力強くした
+/// - **「新しい試合」に確認ダイアログを追加**（デッキリセット相当の
+///   取り消せない操作のため。フィニッシャー宣言・降参と合わせ、確認が
+///   必要な操作として明示的に残した３つのうちの１つ）
+/// - ログ見出しを「バトルログ」→「最新ログ」に変更し、直近のラリー数・
+///   ターン数を並べて表示する簡易ステータス行を追加
 ///
 /// ダイアログの文言・ボタンウィジェット型（`FilledButton`/`OutlinedButton`）
-/// は既存テストが依存しているため維持している。カード操作フローの変更に
-/// 伴い、`test/technique_match_screen_test.dart`はユーザー指示により
-/// 新しい操作フローに合わせて更新した（`technique_match_state_test.dart`
-/// 等のゲームロジックのテストは無改修）。
+/// は既存テストが依存しているため、返技判定・回避判定・フィニッシャー
+/// 判定の4種のダイアログ自体は維持している（これらは「今まさに選ぶべき
+/// こと」そのものであり、削減対象の“余分な確認”ではないと判断した）。
+/// 手札カードのタップ→選択→確認ボタンの2段階操作もVer.2から維持（誤操作
+/// 防止と、モックアップ画像でカードが選択状態＋確認ボタンの組で描かれて
+/// いることに基づく）。カード操作フローの変更に伴い、
+/// `test/technique_match_screen_test.dart`はユーザー指示により更新した
+/// （`technique_match_state_test.dart`等のゲームロジックのテストは無改修）。
 class TechniqueMatchScreen extends StatefulWidget {
   const TechniqueMatchScreen({
     super.key,
@@ -85,7 +89,18 @@ const _green = Color(0xff5cd68b);
 const _orange = Color(0xffffab5c);
 const _red = Color(0xffff5c5c);
 const _blue = Color(0xff5cb8ff);
-const _dim = Colors.white38;
+const _purple = Color(0xffb388ff);
+
+/// Ver.3: エネルギードット・カード枠を属性ごとに色分けするための対応表
+/// （打撃=赤・投げ=金・関節=青・飛び=緑・ラフ=紫・返し=無彩色）。
+Color _attributeColor(MoveAttribute attribute) => switch (attribute) {
+  MoveAttribute.strike => _red,
+  MoveAttribute.throwMove => _gold,
+  MoveAttribute.submission => _blue,
+  MoveAttribute.aerial => _green,
+  MoveAttribute.rough => _purple,
+  MoveAttribute.counter => Colors.white54,
+};
 
 /// HEATバーの表示専用の目安上限（仕様上のHEAT上限は未決定、open questions
 /// 11番）。ルール上の意味は持たない、UIのバー表示のためだけの定数。
@@ -840,6 +855,34 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     });
   }
 
+  /// Ver.3 ⑧: 「新しい試合」（進行中の試合を破棄する取り消せない操作）は
+  /// フィニッシャー宣言・降参と並ぶ「確認が必要な操作」として、確認
+  /// ダイアログを経由してから実行する。
+  Future<void> _confirmResetMatch() async {
+    if (matchState == null) {
+      _resetMatch();
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('新しい試合を始めますか？'),
+        content: const Text('進行中の試合内容は破棄されます。この操作は取り消せません。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('新しい試合を始める'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) _resetMatch();
+  }
+
   @override
   Widget build(BuildContext context) {
     final loading = wrestlers == null;
@@ -851,7 +894,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
             IconButton(
               tooltip: '新しい試合',
               icon: const Icon(Icons.refresh),
-              onPressed: _resetMatch,
+              onPressed: _confirmResetMatch,
             ),
         ],
       ),
@@ -949,10 +992,10 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   );
 
   // ============================================================
-  // ④ 現在すべき行動を1文で大きく表示 ＋ 5段階ステッパー（補助表示）
+  // Ver.3 ①②: 「今やること」をSTEP番号＋1文で常に1つだけ表示する。
+  // Ver.2の5アイコンステッパー行は情報過多と判断し廃止した（STEP番号の
+  // 明示1つに集約）。
   // ============================================================
-
-  static const _phaseStageLabels = ['エネルギー', '技選択', 'ラリー', '決着判定', '手番終了'];
 
   int _currentStageIndex(TechniqueMatchState state) {
     if (state.isOver) return 4;
@@ -996,117 +1039,76 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     return hasEnergyInHand ? 'エネルギーをセットしてください' : '技を選択してください';
   }
 
+  /// STEP見出しの下に添える短い補足ヒント（何が選べない／なぜかを一言で）。
+  String? _currentStepHint(TechniqueMatchState state) {
+    if (state.isOver) return null;
+    if (state.pendingFinisher != null || state.pendingEscape != null) {
+      return null; // ダイアログ側に詳細説明がある。
+    }
+    if (state.pendingAttack != null || state.isRallyActive) return null;
+    final hasEnergyInHand = state.active.hand.any(
+      (e) => catalog.findEnergyById(e.cardId) != null,
+    );
+    return hasEnergyInHand
+        ? 'エネルギーカードをタップして選んでください'
+        : 'エネルギーが足りない技は選択できません';
+  }
+
+  /// Ver.3: 「STEP N」の番号バッジ＋1文の指示のみを表示する（5アイコンの
+  /// ステッパー行は情報過多のため廃止）。
   Widget _actionHeader(TechniqueMatchState state) {
-    final current = _currentStageIndex(state);
+    final stepNumber = _currentStageIndex(state) + 1;
+    final hint = _currentStepHint(state);
     return Card(
       color: _panelBg,
       child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: _blue.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    'ターン${state.turnNumber}',
-                    style: const TextStyle(
-                      color: _blue,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '${state.active.wrestlerName}の手番',
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
             Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(10),
+                color: _blue.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _blue.withValues(alpha: 0.6)),
               ),
               child: Text(
-                _currentActionText(state),
-                textAlign: TextAlign.center,
+                'STEP $stepNumber',
                 style: const TextStyle(
-                  fontSize: 16,
+                  color: _blue,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  fontSize: 13,
                 ),
               ),
             ),
-            const SizedBox(height: 8),
-            _phaseStepper(current),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _currentActionText(state),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  if (hint != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        hint,
+                        style: const TextStyle(fontSize: 11, color: Colors.white54),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
-    );
-  }
-
-  // アイコン中心の簡略ステッパー（Ver.2）。現在の段階のみラベル付きで
-  // 強調し、それ以外はアイコンのみの補助表示にする。
-  static const _phaseStageIcons = [
-    Icons.bolt,
-    Icons.sports_mma,
-    Icons.swap_horiz,
-    Icons.gavel,
-    Icons.flag,
-  ];
-
-  Widget _phaseStepper(int current) => SizedBox(
-    height: 34,
-    child: Row(
-      children: [
-        for (var i = 0; i < _phaseStageLabels.length; i++) ...[
-          if (i > 0)
-            Expanded(
-              child: Container(
-                height: 1.5,
-                color: i <= current ? _blue.withValues(alpha: 0.6) : Colors.white12,
-              ),
-            ),
-          _phaseStageChip(
-            _phaseStageIcons[i],
-            _phaseStageLabels[i],
-            active: i == current,
-            done: i < current,
-          ),
-        ],
-      ],
-    ),
-  );
-
-  Widget _phaseStageChip(
-    IconData icon,
-    String label, {
-    required bool active,
-    required bool done,
-  }) {
-    final color = active ? _blue : (done ? Colors.white54 : _dim);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: active ? 16 : 13, color: color),
-        if (active)
-          Text(
-            label,
-            style: TextStyle(fontSize: 9, color: color, fontWeight: FontWeight.bold),
-          ),
-      ],
     );
   }
 
@@ -1157,17 +1159,22 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     return null;
   }
 
-  /// ⑤⑩ リングを画面の主役にする、中央の演出パネル。直近のログから
-  /// 攻防のハイライトを抽出し、大きく表示する。
+  /// Ver.3 ④: リングを画面の主役として拡大し、両者の立ち絵をリング背景に
+  /// 薄く配置する（仕様書⑫「立ち絵は試合画面の主役になるよう配置」）。
+  /// 直近のログから攻防のハイライトを抽出し、より大きく・力強いアニメー
+  /// ションで表示する。
   Widget _ringPanel(TechniqueMatchState state) {
     final highlight = _highlightFor(state.log);
     final effectiveAttackerIndex = state.rallyAttackerIndex ?? state.activePlayerIndex;
     final attackerName = state.playerAt(effectiveAttackerIndex).wrestlerName;
-    return Container(
+    final portraitA = techniqueWrestlerPortraits[state.playerA.wrestlerId];
+    final portraitB = techniqueWrestlerPortraits[state.playerB.wrestlerId];
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
       width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 150),
+      constraints: const BoxConstraints(minHeight: 190),
       margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topCenter,
@@ -1175,11 +1182,35 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
           colors: [Color(0xff17101d), Color(0xff0e0a12)],
         ),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 1.5),
+        border: Border.all(
+          color: highlight != null
+              ? highlight.color.withValues(alpha: 0.55)
+              : Colors.white.withValues(alpha: 0.14),
+          width: highlight != null ? 2.2 : 1.5,
+        ),
       ),
       child: Stack(
         alignment: Alignment.center,
         children: [
+          // リング背景にレスラー立ち絵を薄く配置（試合演出エリアの主役化）。
+          if (portraitA != null)
+            Positioned(
+              left: -6,
+              bottom: -18,
+              child: Opacity(
+                opacity: 0.16,
+                child: Image.asset(portraitA, height: 190, fit: BoxFit.cover),
+              ),
+            ),
+          if (portraitB != null)
+            Positioned(
+              right: -6,
+              bottom: -18,
+              child: Opacity(
+                opacity: 0.16,
+                child: Image.asset(portraitB, height: 190, fit: BoxFit.cover),
+              ),
+            ),
           // リングロープ風の装飾（単純な横線）。
           Positioned(
             left: 0,
@@ -1201,12 +1232,17 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                   '← $attackerNameが攻撃中',
                   style: const TextStyle(fontSize: 11, color: Colors.white38),
                 ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
+                duration: const Duration(milliseconds: 350),
+                switchInCurve: Curves.easeOutBack,
+                switchOutCurve: Curves.easeIn,
                 transitionBuilder: (child, animation) => FadeTransition(
                   opacity: animation,
-                  child: ScaleTransition(scale: animation, child: child),
+                  child: ScaleTransition(
+                    scale: Tween(begin: 0.7, end: 1.0).animate(animation),
+                    child: child,
+                  ),
                 ),
                 child: highlight == null
                     ? Text(
@@ -1215,7 +1251,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Colors.white54,
-                          fontSize: 15,
+                          fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
                       )
@@ -1229,8 +1265,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                             style: TextStyle(
                               color: highlight.color,
                               fontWeight: FontWeight.bold,
-                              fontSize: 22,
-                              height: 1.3,
+                              fontSize: 28,
+                              height: 1.25,
                             ),
                           ),
                           if (highlight.sub != null)
@@ -1242,7 +1278,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                                 style: const TextStyle(
                                   color: Colors.white70,
                                   fontWeight: FontWeight.w600,
-                                  fontSize: 13,
+                                  fontSize: 15,
                                 ),
                               ),
                             ),
@@ -1276,11 +1312,13 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
           _drawBanner(state),
           const SizedBox(height: 10),
         ],
-        _actionHeader(state),
-        // ⑩ リングを画面の主役に: 相手カード→リング→自分カードの3段構成。
+        // Ver.3 ⑫⑬: 相手カード→リング→自分カード→STEP→手札の縦構成
+        // （ユーザー提示モックアップの並び順に合わせた）。
         _compactPlayerCard(state, 0),
         _ringPanel(state),
         _compactPlayerCard(state, 1),
+        const SizedBox(height: 10),
+        _actionHeader(state),
         const SizedBox(height: 10),
         if (canDeclare && actingPlayer.hand.isNotEmpty) _handScroller(state, actingPlayer),
         if (_selectedEntry != null) _selectionBar(state),
@@ -1336,13 +1374,31 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     ),
   );
 
-  String _postureLabel(WrestlerPosture posture) => posture.displayLabel;
-
   Color _postureColor(WrestlerPosture posture) => switch (posture) {
     WrestlerPosture.stand => _green,
     WrestlerPosture.down => _orange,
     WrestlerPosture.fatigued => _red,
   };
+
+  /// Ver.3 ⑤: STAND/DOWN/PIN/SUBMISSION/FINISHERの5種の大型状態バッジ。
+  /// フォール／ギブアップ／フィニッシャーの危機に陥っている側だけ専用の
+  /// バッジへ切り替わり、それ以外はスタンド／ダウンで表示する。
+  (String, IconData, Color) _statusBadge(TechniqueMatchState state, int playerIndex) {
+    final finisher = state.pendingFinisher;
+    if (finisher != null && finisher.defenderIndex == playerIndex) {
+      return ('FINISHER', Icons.star, _gold);
+    }
+    final escape = state.pendingEscape;
+    if (escape != null && escape.defenderIndex == playerIndex) {
+      return escape.kind == TechniqueEscapeKind.fall
+          ? ('PIN', Icons.warning_amber, _red)
+          : ('SUBMISSION', Icons.link, _purple);
+    }
+    final posture = state.playerAt(playerIndex).posture;
+    return posture == WrestlerPosture.stand
+        ? ('STAND', Icons.accessibility_new, _green)
+        : ('DOWN', Icons.arrow_downward, _orange);
+  }
 
   // ============================================================
   // ① プレイヤーカードのコンパクト化（常時表示は名前・HP・HEAT・Lv・
@@ -1422,8 +1478,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final heatRatio = (player.heat / _heatVisualMax).clamp(0.0, 1.0);
     final note = isPlayerA ? deckSourceNoteA : deckSourceNoteB;
     final expanded = isPlayerA ? _detailExpandedA : _detailExpandedB;
-    final isDownLike = player.posture != WrestlerPosture.stand;
-    final postureColor = _postureColor(player.posture);
+    final (badgeLabel, badgeIcon, badgeColor) = _statusBadge(state, playerIndex);
     // ⑧ 「現在の手番」を示す強調色は青に統一（金はフィニッシャー専用）。
     final highlighted = isEffectiveAttacker || isPendingDefender;
 
@@ -1458,18 +1513,27 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: postureColor.withValues(alpha: 0.2),
+                          color: badgeColor.withValues(alpha: 0.22),
                           borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: badgeColor.withValues(alpha: 0.7)),
                         ),
-                        child: Text(
-                          _postureLabel(player.posture),
-                          style: TextStyle(
-                            color: postureColor,
-                            fontSize: 10,
-                            fontWeight: isDownLike ? FontWeight.bold : FontWeight.normal,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(badgeIcon, size: 12, color: badgeColor),
+                            const SizedBox(width: 3),
+                            Text(
+                              badgeLabel,
+                              style: TextStyle(
+                                color: badgeColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(width: 2),
@@ -1515,17 +1579,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                   Row(
                     children: [
                       const SizedBox(width: 26, child: Text('HEAT', style: TextStyle(fontSize: 10))),
-                      Expanded(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: LinearProgressIndicator(
-                            value: heatRatio,
-                            minHeight: 7,
-                            backgroundColor: Colors.white24,
-                            valueColor: const AlwaysStoppedAnimation(_gold),
-                          ),
-                        ),
-                      ),
+                      _heatFlameRow(heatRatio),
                       const SizedBox(width: 6),
                       Text('${player.heat}', style: const TextStyle(fontSize: 10)),
                     ],
@@ -1570,10 +1624,31 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     );
   }
 
+  /// Ver.3: HEATを炎アイコン6個の行で直感的に表示する（バーの数値表示に
+  /// 加えて視覚化。ルール上のHEAT上限は未決定のため、表示専用の目安）。
+  static const _heatFlameCount = 6;
+
+  Widget _heatFlameRow(double heatRatio) {
+    final filled = (heatRatio * _heatFlameCount).round().clamp(0, _heatFlameCount);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < _heatFlameCount; i++)
+          Icon(
+            Icons.local_fire_department,
+            size: 12,
+            color: i < filled ? _gold : Colors.white24,
+          ),
+      ],
+    );
+  }
+
   /// 属性ごとの横一列表示（属性ラベル＋ドット）。例: 「打 ●●○」。
-  /// 使用可能=金塗り、未セット（total中の残り）=縁取りのみ。
+  /// Ver.3: ドットの色を属性ごとに色分けした（打撃=赤・投げ=金・関節=青・
+  /// 飛び=緑・ラフ=紫）。使用可能=塗り、未セット（total中の残り）=縁取りのみ。
   Widget _energyAttributeRow(MoveAttribute attribute, int available, int total) {
     if (total <= 0) return const SizedBox.shrink();
+    final color = _attributeColor(attribute);
     return Row(
       children: [
         SizedBox(
@@ -1587,13 +1662,13 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 2),
             child: Container(
-              width: 8,
-              height: 8,
+              width: 9,
+              height: 9,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: i < available ? _green : Colors.transparent,
+                color: i < available ? color : Colors.transparent,
                 border: Border.all(
-                  color: i < available ? _green : Colors.white30,
+                  color: i < available ? color : Colors.white30,
                   width: 1,
                 ),
               ),
@@ -1622,11 +1697,12 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         ),
         const SizedBox(height: 4),
         SizedBox(
-          height: 160,
+          // Ver.3 ③: カードサイズを約1.5倍に拡大（カードを見せることを優先）。
+          height: 238,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: actingPlayer.hand.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            separatorBuilder: (_, _) => const SizedBox(width: 10),
             itemBuilder: (context, index) => _handCardTile(
               state,
               actingPlayer.hand[index],
@@ -1732,12 +1808,13 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                 }),
           onLongPress: () => _showHandCardSheet(entry),
           child: Container(
-            width: 112,
-            padding: const EdgeInsets.all(8),
+            // Ver.3 ③: カードサイズを約1.5倍に拡大（112→168）。
+            width: 168,
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: selected ? _blue.withValues(alpha: 0.14) : const Color(0xff1a1120),
-              border: Border.all(color: borderColor, width: selected ? 2.2 : 1.6),
-              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: borderColor, width: selected ? 3 : 2),
+              borderRadius: BorderRadius.circular(14),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1750,60 +1827,64 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                         isDefenseCard: isDefenseCard,
                         isFinisher: isFinisher,
                       ),
-                      isFinisher ? _gold : Colors.white54,
+                      isFinisher
+                          ? _gold
+                          : (technique != null
+                              ? _attributeColor(technique.attribute)
+                              : Colors.white54),
                     ),
                     const Spacer(),
                     if (selected)
-                      const Icon(Icons.check_circle, size: 14, color: _blue)
+                      const Icon(Icons.check_circle, size: 20, color: _blue)
                     else if (isFinisher)
-                      const Icon(Icons.star, size: 13, color: _gold)
+                      const Icon(Icons.star, size: 18, color: _gold)
                     else
-                      Icon(iconData, size: 13, color: Colors.white54),
+                      Icon(iconData, size: 18, color: Colors.white54),
                   ],
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 18),
                 Expanded(
                   child: Center(
                     child: Icon(
                       iconData,
-                      size: 32,
+                      size: 46,
                       color: isFinisher
                           ? _gold.withValues(alpha: 0.55)
                           : borderColor.withValues(alpha: 0.5),
                     ),
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Text(
                   name,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                 ),
                 if (technique != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: 2),
+                    padding: const EdgeInsets.only(top: 4),
                     child: Row(
                       children: [
                         Text(
                           '威力${technique.power}',
-                          style: const TextStyle(fontSize: 9, color: Colors.white60),
+                          style: const TextStyle(fontSize: 13, color: Colors.white60),
                         ),
                         const Spacer(),
                         Text(
                           _targetShortLabel(technique.targetState),
-                          style: const TextStyle(fontSize: 8, color: Colors.white38),
+                          style: const TextStyle(fontSize: 11, color: Colors.white38),
                         ),
                       ],
                     ),
                   ),
                 if (technique != null && !cardEligible && reason != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: 2),
+                    padding: const EdgeInsets.only(top: 4),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline, size: 10, color: _red),
-                        const SizedBox(width: 2),
+                        const Icon(Icons.error_outline, size: 13, color: _red),
+                        const SizedBox(width: 3),
                         Expanded(
                           child: Text(
                             // カード上はアイコン＋短い定型ラベルのみ（詳細な
@@ -1812,7 +1893,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                             _shortReason(reason),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 8, color: _red),
+                            style: const TextStyle(fontSize: 10, color: _red),
                           ),
                         ),
                       ],
@@ -1995,6 +2076,30 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     return (Icons.circle, Colors.white38);
   }
 
+  /// Ver.3: ログ見出し下に添えるラリー数・ターン数の簡易ステータス行。
+  /// 「残り時間」はTechnique Deck Rulesでは未実装のため「―」表示のみ
+  /// （仕様上のダミー、ロジックには接続しない）。
+  Widget _matchStatsRow(TechniqueMatchState state) {
+    Widget stat(String label, String value) => Expanded(
+      child: Column(
+        children: [
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          Text(label, style: const TextStyle(fontSize: 9, color: Colors.white54)),
+        ],
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          stat('ラリー数', '${state.rallyChain}'),
+          stat('ターン数', '${state.turnNumber}'),
+          stat('残り時間', '―'),
+        ],
+      ),
+    );
+  }
+
   Widget _logSection(TechniqueMatchState state) {
     final lines = state.log.reversed.toList();
     final preview = lines.take(3).toList();
@@ -2006,6 +2111,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _matchStatsRow(state),
             InkWell(
               key: const ValueKey('logToggle'),
               onTap: () => setState(() => _logExpanded = !_logExpanded),
@@ -2018,7 +2124,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                   ),
                   const SizedBox(width: 4),
                   const Text(
-                    'バトルログ',
+                    '最新ログ',
                     style: TextStyle(fontWeight: FontWeight.bold, color: _gold, fontSize: 12),
                   ),
                   if (!_logExpanded) ...[
