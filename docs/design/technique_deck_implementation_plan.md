@@ -1,19 +1,13 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 7A（レスラーカード・技カード・モデルデッキ実装）
-  完了時点**（Phase 7.5終了後、ユーザー指示により「ゲームバランス調整では
-  なく4人分の正式な基準データを実装する」専用ラウンドを実施。
-  `TechniqueDeckWrestlerProfile`へレスラーカードの各種フィールドを追加、
-  技カード48枚（4人×12枚）を正式名称で追加、エスケープ・リバーサルを
-  含まない30枚構成のPhase 7Aモデルデッキを4人分追加、Technique Deck
-  Builderへのモデルデッキ一括読込ボタン、Technique Matchのデッキ解決
-  優先度を「保存済み→モデルデッキ→AutoGenerator」へ変更。
-  `TechniqueMatchEngine`・ダメージ計算等の実戦ロジックは無改修
-  （詳細はPhase 7Aの章を参照）。Phase 7.5時点で判明していた「検証Botの
-  構造的限界（“今使う価値＝温存判断”を評価できない）」への対応は、
-  引き続きPhase 8の正式CPU実装に委ねる。Phase 8のCPU設計書
-  （[`technique_deck_cpu_design.md`](technique_deck_cpu_design.md)）は
-  完成済みだが、実装（Phase 8.0以降）は未着手）
+- ステータス: **UI/UX改善+CPU実装ラウンド完了時点**（Phase 7A完了後、
+  ユーザー指示により①Technique Match UIの全面改善（縦1画面化・手札
+  カード縮小・レスラーカードの立ち絵表示調整・返技ダイアログ簡潔化）と
+  ②Phase 8 CPU（`TechniqueCpuLevel.normal`、Decision Trace付き）を実装。
+  技エネルギーは1ターンに1枚のみセット可能というルールをエンジン
+  レベル（`TechniqueMatchEngine.setEnergy`）で明文化・強制した（唯一の
+  エンジン変更。ダメージ計算・フォール・ギブアップ・フィニッシャー・
+  デッキ構築ロジックは無改修）。詳細はPhase 8章を参照）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 - CPU設計: [`technique_deck_cpu_design.md`](technique_deck_cpu_design.md)
@@ -772,26 +766,45 @@ Botが“必殺技を温存する”という発想を持たないことが真�
 
 ## Phase 8：CPU・シミュレーション
 
-**ステータス: 未着手（設計書は完成済み）**
+**ステータス: Phase 8.0〜8.1相当まで完了（「UI/UX改善+CPU実装」ラウンド）**
 
 Phase 7.5完了後のユーザー指示により、CPUの実装に入る前に設計を確定させた
 （[`technique_deck_cpu_design.md`](technique_deck_cpu_design.md)）。以下の
 サブフェーズ構成で段階的に実装する（ユーザー指定の順序）。CPUの思考ログ
 （Decision Trace）を各段階から組み込む点が本設計の核。
 
+本ラウンドでは、ユーザー指示により設計書のLevel1/2/3の3段階構成ではなく、
+まず単一の「Normal CPU」（`TechniqueCpuLevel.normal`）を実装した
+（`lib/src/technique_deck/technique_match_cpu.dart`・
+`technique_cpu_decision_trace.dart`）。設計原則（`TechniqueMatchEngine`
+無改変・相手の手札を直接参照しない・全意思決定ポイントでDecision Traceを
+生成）は維持している。技評価は威力単体ではなく、ダメージ・エネルギー
+効率・ダウン付与・ダウン限定技への連携・フォール／ギブアップ／
+フィニッシャーへの寄与・技の多様性・返技用エネルギーの温存を総合したスコア
+方式（ユーザー指定の評価軸）。返技・回避・フィニッシャー応答も含む全7つの
+意思決定ポイントを実装済み。CPU対CPU108試合（4人総当たり×9回）で
+無限ループ・ハング無しを確認済み（詳細は完了報告参照）。
+
 | サブフェーズ | 内容 | ステータス |
 |---|---|---|
 | Phase 8.0 | CPU基盤: `TechniqueCpuLevel` enum・CPUコントローラのAPI骨格・
-  `TechniqueCpuDecisionTrace`データモデル（JSON変換込み） | 未着手 |
-| Phase 8.1 | CPU Level 1（初心者、Phase 7.5検証Botの正式な後継） | 未着手 |
+  `TechniqueCpuDecisionTrace`データモデル（JSON変換込み） | 完了 |
+| Phase 8.1 | CPU「Normal」実装（Level1相当の後継だが、ユーザー指定の
+  多要素スコアリングを最初から統合） | 完了 |
 | Phase 8.2 | CPU Level 2（中級：フォール率・HP・防御札の残数を自分の
   観測情報のみで評価） | 未着手 |
 | Phase 8.3 | CPU Level 3（上級：手札予測・デッキ残数・エネルギー効率・
   フィニッシャー温存） | 未着手 |
 | Phase 8.4 | 1000試合シミュレーション（CPU対CPU、Decision Traceで分析、
-  目標レンジと再比較） | 未着手 |
+  目標レンジと再比較） | 一部実施（108試合、完了報告参照。1000試合規模の
+  本格実施は今後） |
 | Phase 8.5 | 必要ならモデルデッキ・カード数値を調整（CPUの意思決定込みで
   検証して初めて着手する） | 未着手 |
+
+**Technique Match画面へのCPU対戦UI統合は本ラウンドでも非目標のまま**
+（CPUロジックはUIから独立して動作確認済みだが、人間対CPUで実際に遊べる
+モードはまだ無い。Decision Traceは`trace.chosen.reason`等としてデータ上は
+取得可能だが、ログへの表示は専用UIが無いため未実装。今後の課題）。
 
 実装対象の詳細（各サブフェーズに割り振る）:
 
