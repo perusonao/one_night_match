@@ -179,6 +179,7 @@ class TechniqueMatchPlayerState {
     this.heat = 0,
     this.posture = WrestlerPosture.stand,
     this.recoveryPower = 0,
+    this.comboSpeed = defaultComboSpeed,
     this.level = 1,
     this.energyPool = const {},
     this.spentEnergy = const {},
@@ -196,9 +197,18 @@ class TechniqueMatchPlayerState {
   final int heat;
   final WrestlerPosture posture;
 
-  /// 休息時のHP回復量（[TechniqueDeckWrestlerProfile.recoveryPower] 由来。
-  /// プロファイルが無い場合の暫定値は呼び出し側で決める）。
+  /// [TechniqueDeckWrestlerProfile.recoveryPower] 由来のデータ。**Phase 8.5A
+  /// で休息システムを廃止したため、現在このエンジンはこの値を一切参照しない
+  /// （表示専用の無効果データとして残置。JSONログのスキーマを変更しない
+  /// 方針のため）**。
   final int recoveryPower;
+
+  /// Combo Speed Rules（Phase 8.5A）: このプレイヤーの1ラリーあたりのSpeed
+  /// 初期値（[TechniqueDeckWrestlerProfile.comboSpeed]相当。現状カタログとは
+  /// 未接続で常に[defaultComboSpeed]）。攻撃側として新しいラリーを始めた
+  /// とき／攻守交代したときに[TechniqueMatchState.rallyRemainingSpeed]が
+  /// この値へリセットされる。
+  final int comboSpeed;
 
   /// レベル（`TechniqueDeckTechniqueCard.minimumLevel`の判定に使用）。
   /// Phase 4時点ではレベル変更アクションが未実装のため常に1で固定
@@ -278,6 +288,7 @@ class TechniqueMatchState {
     this.phase = TechniqueMatchPhase.energySet,
     this.rallyAttackerIndex,
     this.rallyChain = 0,
+    this.rallyRemainingSpeed,
     this.pendingAttack,
     this.pendingEscape,
     this.pendingFinisher,
@@ -302,6 +313,12 @@ class TechniqueMatchState {
 
   /// 現在のラリーの通算攻撃回数（ラリー終了時に0へ戻る）。
   final int rallyChain;
+
+  /// Combo Speed Rules（Phase 8.5A）: 現在のラリー攻撃側が持つ残りSpeed。
+  /// ラリーが進行していなければnull。新しいラリーの開始・攻守交代の
+  /// 直後は攻撃側の[TechniqueMatchPlayerState.comboSpeed]へリセットされ、
+  /// 技を宣言するたびに`TechniqueDeckTechniqueCard.speed`分が差し引かれる。
+  final int? rallyRemainingSpeed;
 
   /// 攻撃が宣言され、防御側の返技判定を待っている状態。nullなら待機中の
   /// 攻撃は無い。
@@ -360,6 +377,7 @@ class TechniqueMatchState {
     TechniqueMatchPhase? phase,
     Object? rallyAttackerIndex = _unset,
     int? rallyChain,
+    Object? rallyRemainingSpeed = _unset,
     Object? pendingAttack = _unset,
     Object? pendingEscape = _unset,
     Object? pendingFinisher = _unset,
@@ -378,6 +396,9 @@ class TechniqueMatchState {
         ? this.rallyAttackerIndex
         : rallyAttackerIndex as int?,
     rallyChain: rallyChain ?? this.rallyChain,
+    rallyRemainingSpeed: identical(rallyRemainingSpeed, _unset)
+        ? this.rallyRemainingSpeed
+        : rallyRemainingSpeed as int?,
     pendingAttack: identical(pendingAttack, _unset)
         ? this.pendingAttack
         : pendingAttack as TechniquePendingAttack?,
@@ -412,14 +433,22 @@ class TechniqueMatchState {
     playerB: playerB,
     rallyAttackerIndex: null,
     rallyChain: 0,
+    rallyRemainingSpeed: null,
     pendingAttack: null,
     log: log,
   );
 }
 
-/// 既定の休息回復力（[TechniqueDeckWrestlerProfile] が無い場合の暫定値）。
-/// 正式なバランス値ではない（docs/design/technique_deck_open_questions.md参照）。
+/// [TechniqueDeckWrestlerProfile] が無い場合の`recoveryPower`暫定値。
+/// **Phase 8.5Aで休息システムを廃止したため、現在このエンジンはこの値を
+/// 一切参照しない**（表示専用の無効果データとして残置。
+/// docs/design/technique_deck_open_questions.md参照）。
 const int defaultRecoveryPower = 15;
+
+/// 既定のComboSpeed初期値（[TechniqueDeckWrestlerProfile.comboSpeed] が
+/// 無い場合の暫定値、Phase 8.5A）。正式なバランス値ではない
+/// （docs/design/technique_deck_open_questions.md参照）。
+const int defaultComboSpeed = 10;
 
 const int _handSize = 5;
 
@@ -451,6 +480,8 @@ class TechniqueMatchEngine {
     int? startingHpB,
     int recoveryPowerA = defaultRecoveryPower,
     int recoveryPowerB = defaultRecoveryPower,
+    int comboSpeedA = defaultComboSpeed,
+    int comboSpeedB = defaultComboSpeed,
     int handSize = _handSize,
     Random? random,
   }) {
@@ -461,6 +492,7 @@ class TechniqueMatchEngine {
       maxHp: wrestlerAMaxHp,
       startingHp: startingHpA,
       recoveryPower: recoveryPowerA,
+      comboSpeed: comboSpeedA,
       deck: deckA,
       handSize: handSize,
       random: rng,
@@ -471,6 +503,7 @@ class TechniqueMatchEngine {
       maxHp: wrestlerBMaxHp,
       startingHp: startingHpB,
       recoveryPower: recoveryPowerB,
+      comboSpeed: comboSpeedB,
       deck: deckB,
       handSize: handSize,
       random: rng,
@@ -495,6 +528,7 @@ class TechniqueMatchEngine {
     required int maxHp,
     required int? startingHp,
     required int recoveryPower,
+    required int comboSpeed,
     required TechniqueDeckDefinition deck,
     required int handSize,
     required Random random,
@@ -510,6 +544,7 @@ class TechniqueMatchEngine {
       heat: 0,
       posture: WrestlerPosture.stand,
       recoveryPower: recoveryPower,
+      comboSpeed: comboSpeed,
       drawPile: drawPile,
       hand: hand,
       discardPile: const [],
@@ -542,47 +577,6 @@ class TechniqueMatchEngine {
       discardPile: discardPile,
       reshuffleCount: reshuffleCount,
     );
-  }
-
-  /// アクティブプレイヤーをスタンドからダウンさせる（技を介さない暫定操作、
-  /// Phase 3ではダウン状態の動作確認のみが目的）。ラリー中・決着判定待ち・
-  /// 試合終了後は何もしない（Phase 6でガードを追加）。
-  static TechniqueMatchState goDown(TechniqueMatchState state) {
-    if (state.isOver || state.isRallyActive || state.pendingEscape != null || state.pendingFinisher != null) {
-      return state;
-    }
-    if (state.active.posture != WrestlerPosture.stand) return state;
-    final updated = state.active.copyWith(posture: WrestlerPosture.down);
-    return state
-        .copyWithActive(updated)
-        .copyWith(
-          log: [...state.log, '${state.active.wrestlerName}がダウンした'],
-        );
-  }
-
-  /// 休息する（ダウン中のみ）。HPを回復力分回復し、ターンを終了する
-  /// （仕様書12章）。ラリー中・決着判定待ち・試合終了後は何もしない
-  /// （Phase 6でガードを追加）。
-  static TechniqueMatchState rest(TechniqueMatchState state, {Random? random}) {
-    if (state.isOver || state.isRallyActive || state.pendingEscape != null || state.pendingFinisher != null) {
-      return state;
-    }
-    if (state.active.posture != WrestlerPosture.down) return state;
-    final recovered = (state.active.hp + state.active.recoveryPower).clamp(
-      0,
-      state.active.maxHp,
-    );
-    final updated = state.active.copyWith(hp: recovered);
-    final rested = state
-        .copyWithActive(updated)
-        .copyWith(
-          log: [
-            ...state.log,
-            '${state.active.wrestlerName}が休息してHPを${recovered - state.active.hp}回復した'
-                ' (${state.active.hp} → $recovered)',
-          ],
-        );
-    return endTurn(rested, random: random);
   }
 
   /// ターンを終了し、相手プレイヤーの開始→ドロー→エネルギーセットまでを
@@ -723,14 +717,21 @@ class TechniqueMatchEngine {
     TechniqueMatchState state,
     TechniqueDeckEntry entry,
     TechniqueDeckCardCatalog catalog,
-  ) => _checkEligibility(state.active, state.inactive, entry, catalog);
+  ) => _checkEligibility(
+    state.active,
+    state.inactive,
+    entry,
+    catalog,
+    remainingSpeed: state.active.comboSpeed,
+  );
 
   static ({bool canUse, String? reason}) _checkEligibility(
     TechniqueMatchPlayerState attacker,
     TechniqueMatchPlayerState defender,
     TechniqueDeckEntry entry,
-    TechniqueDeckCardCatalog catalog,
-  ) {
+    TechniqueDeckCardCatalog catalog, {
+    required int remainingSpeed,
+  }) {
     if (!attacker.hand.contains(entry)) {
       return (canUse: false, reason: 'このカードは手札にありません。');
     }
@@ -775,6 +776,14 @@ class TechniqueMatchEngine {
               '（必要${costEntry.value}、使用可能${attacker.availableEnergyFor(costEntry.key)}）。',
         );
       }
+    }
+    // Combo Speed Rules（Phase 8.5A）: 残りSpeedが技のSpeedコストに満たない
+    // 場合は使用不可（7章「今回は変更しないもの」対象外の新規チェック）。
+    if (card.speed > remainingSpeed) {
+      return (
+        canUse: false,
+        reason: 'Speedが不足しています（必要${card.speed}、残り$remainingSpeed）。',
+      );
     }
     return (canUse: true, reason: null);
   }
@@ -905,9 +914,16 @@ class TechniqueMatchEngine {
   /// 到達した場合はラリーを強制終了する（Chain Limit）。
   static const int maxRallyChain = 20;
 
-  /// 【ゲームサイクル整理ラウンド 優先度1】プレイヤーの1ターンは「技を使う」
-  /// か「休息する」のいずれかで必ず終了する仕様に統一する。以前存在した
-  /// 独立の「ターン終了」ボタン（何もせずにターンを終える操作）は廃止した。
+  /// 【Phase 8.5A】休息システムの廃止に伴い、「技を使う」か「休息する」の
+  /// いずれかで必ずターンが終わるという旧仕様（ゲームサイクル整理ラウンド）は
+  /// 撤回した。現在は、Combo Speed Rules（下記「Phase 8.5A: Combo Speed」）
+  /// に基づき1ラリー中に複数回技を使用でき、ラリーが本当に終了した時点
+  /// （追撃せず終了を選ぶ／使用可能な技が尽きる／フォール・ギブアップ・
+  /// フィニッシャーで決着する等）で初めてターンが進む。使用可能な技が
+  /// 1枚も無いフレッシュターン（[hasUsableMove] が false）でも、UI/CPUは
+  /// 無言でこの関数を呼びターンを終える（Phase 8.2以前に存在した独立の
+  /// 「ターン終了」ボタンの復活ではなく、あくまで他に取れる行動が無い
+  /// 場合の自動処理）。
   ///
   /// 実装方針: [endTurn] は元々「ラリー中・返技判定待ち・決着判定待ち・
   /// フィニッシャー判定待ち・試合終了後」のいずれでもない場合にのみ進行する
@@ -928,6 +944,14 @@ class TechniqueMatchEngine {
     Random? random,
   }) => endTurn(state, random: random);
 
+  /// Combo Speed Rules（Phase 8.5A）: [attackerIndex] が現在使える残りSpeed。
+  /// ラリーが進行中で[attackerIndex]がその攻撃側なら
+  /// [TechniqueMatchState.rallyRemainingSpeed]、そうでなければ（ラリー未開始
+  /// ＝新しいラリーを始める場合）攻撃側の[TechniqueMatchPlayerState.comboSpeed]
+  /// をそのまま上限として使う。
+  static int _remainingSpeedFor(TechniqueMatchState state, int attackerIndex) =>
+      state.rallyRemainingSpeed ?? state.playerAt(attackerIndex).comboSpeed;
+
   /// 現在攻撃側になり得るプレイヤー（ラリー中ならその攻撃側、ラリー外なら
   /// `activePlayerIndex`）が、手札の中に使用可能な技を1枚でも持っているか。
   /// UIが「使用可能技がない」による自動終了を判定するのに使う。
@@ -938,9 +962,16 @@ class TechniqueMatchEngine {
     final attackerIndex = state.rallyAttackerIndex ?? state.activePlayerIndex;
     final attacker = state.playerAt(attackerIndex);
     final defender = state.playerAt(1 - attackerIndex);
+    final remainingSpeed = _remainingSpeedFor(state, attackerIndex);
     return attacker.hand.any(
       (entry) =>
-          _checkEligibility(attacker, defender, entry, catalog).canUse,
+          _checkEligibility(
+            attacker,
+            defender,
+            entry,
+            catalog,
+            remainingSpeed: remainingSpeed,
+          ).canUse,
     );
   }
 
@@ -960,6 +991,7 @@ class TechniqueMatchEngine {
       state.playerAt(1 - attackerIndex),
       entry,
       catalog,
+      remainingSpeed: _remainingSpeedFor(state, attackerIndex),
     );
   }
 
@@ -1122,7 +1154,14 @@ class TechniqueMatchEngine {
     final attackerIndex = state.rallyAttackerIndex ?? state.activePlayerIndex;
     final attacker = state.playerAt(attackerIndex);
     final defender = state.playerAt(1 - attackerIndex);
-    final check = _checkEligibility(attacker, defender, entry, catalog);
+    final remainingSpeed = _remainingSpeedFor(state, attackerIndex);
+    final check = _checkEligibility(
+      attacker,
+      defender,
+      entry,
+      catalog,
+      remainingSpeed: remainingSpeed,
+    );
     if (!check.canUse) {
       return TechniqueMoveResult(
         state: state,
@@ -1164,6 +1203,7 @@ class TechniqueMatchEngine {
         playerB: attackerIndex == 1 ? updatedAttacker : state.playerB,
         rallyAttackerIndex: attackerIndex,
         rallyChain: chain,
+        rallyRemainingSpeed: remainingSpeed - card.speed,
         pendingAttack: pending,
         log: log,
       ),
@@ -1232,6 +1272,9 @@ class TechniqueMatchEngine {
         playerA: defenderIndex == 0 ? updatedDefender : state.playerA,
         playerB: defenderIndex == 1 ? updatedDefender : state.playerB,
         rallyAttackerIndex: defenderIndex,
+        // Combo Speed Rules（Phase 8.5A）: 攻守交代したら新しい攻撃側の
+        // 残りSpeedを全回復する（残りSpeedは引き継がない）。
+        rallyRemainingSpeed: updatedDefender.comboSpeed,
         pendingAttack: null,
         log: log,
       ),
@@ -1240,14 +1283,21 @@ class TechniqueMatchEngine {
   }
 
   /// 防御側が返技しない（できない、または選ばない）。技が成立し、ダメージ・
-  /// HEAT・ダウンが即時反映される。ラリーはここで終了し、制御は
-  /// `activePlayerIndex`のプレイヤーへ戻る。
+  /// HEAT・ダウンが即時反映される。
   ///
-  /// Phase 6: 成立した技が`hasPinEffect`（フォール）／`hasSubmissionEffect`
-  /// （ギブアップ）を持つ場合（`hasFinisherEffect`を持つ技は対象外。
-  /// Phase 7でフィニッシャー専用の決着処理を実装するまでは通常の技として
-  /// 扱う）、防御側の回避判定待ち（[TechniqueMatchState.pendingEscape]）へ
-  /// 移行する。両方が立っている場合は仕様書どおりフォールを優先する。
+  /// 【Phase 8.5A】Combo Speed Rulesにより、成立した技が`hasPinEffect`も
+  /// `hasSubmissionEffect`も持たない通常のヒットでは、**ラリーを終了しない**。
+  /// 攻撃側は同じラリーの攻撃側のまま残り、`rallyRemainingSpeed`が足りる限り
+  /// 追撃（技の連続使用）を選べる（1ターンで複数技を使えるようにする、今回の
+  /// ゲームサイクル再設計の中心）。攻撃側が追撃しない（できない）場合は
+  /// [endRally] または [autoAdvanceTurnIfSettled] 経由でラリー・ターンが終わる。
+  ///
+  /// フォール（`hasPinEffect`）／ギブアップ（`hasSubmissionEffect`）を持つ
+  /// 技が成立した場合（`hasFinisherEffect`を持つ技は対象外。フィニッシャーは
+  /// 専用の決着処理を持つ）は、Phase 6から変更していない: ラリーは
+  /// ここで即座に終了し、防御側の回避判定待ち
+  /// （[TechniqueMatchState.pendingEscape]）へ移行する。両方が立っている
+  /// 場合は仕様書どおりフォールを優先する。
   static TechniqueMatchState resolveHit(
     TechniqueMatchState state,
     TechniqueDeckCardCatalog catalog,
@@ -1269,14 +1319,10 @@ class TechniqueMatchEngine {
       '[Chain ${pending.chain}] Hit! ${resolved.attacker.wrestlerName}の'
           '「${card.name}」が成立した',
       ...resolved.log,
-      'ラリー終了（Chain ${pending.chain}）',
     ];
 
-    final rallyEnded = state.copyWithRallyEnded(
-      playerA: attackerIndex == 0 ? resolved.attacker : resolved.defender,
-      playerB: attackerIndex == 1 ? resolved.attacker : resolved.defender,
-      log: log,
-    );
+    final updatedPlayerA = attackerIndex == 0 ? resolved.attacker : resolved.defender;
+    final updatedPlayerB = attackerIndex == 1 ? resolved.attacker : resolved.defender;
 
     if (!card.hasFinisherEffect &&
         (card.hasPinEffect || card.hasSubmissionEffect)) {
@@ -1284,6 +1330,11 @@ class TechniqueMatchEngine {
           ? TechniqueEscapeKind.fall
           : TechniqueEscapeKind.giveUp;
       final kindLabel = kind == TechniqueEscapeKind.fall ? 'フォール' : 'ギブアップ';
+      final rallyEnded = state.copyWithRallyEnded(
+        playerA: updatedPlayerA,
+        playerB: updatedPlayerB,
+        log: [...log, 'ラリー終了（Chain ${pending.chain}）'],
+      );
       return rallyEnded.copyWith(
         pendingEscape: TechniquePendingEscape(
           attackerIndex: attackerIndex,
@@ -1298,7 +1349,14 @@ class TechniqueMatchEngine {
       );
     }
 
-    return rallyEnded;
+    // 通常のヒット: ラリーは継続する。攻撃側・残りSpeedはそのまま、
+    // 保留中の攻撃（返技判定待ち）だけをクリアする。
+    return state.copyWith(
+      playerA: updatedPlayerA,
+      playerB: updatedPlayerB,
+      pendingAttack: null,
+      log: log,
+    );
   }
 
   /// ラリーを（技を成立させずに）終了する。返技で攻守を得た側が、あえて
@@ -1652,6 +1710,16 @@ class TechniqueMatchEngine {
     if (!reqCheck.met) {
       return (canDeclare: false, reason: reqCheck.reason);
     }
+    // Combo Speed Rules（Phase 8.5A）: フィニッシャーもSpeedコストを持つ
+    // （「ラリー最後のみ使用可能」。declareFinisherは宣言と同時にラリーを
+    // 終了させるため、これがそのラリーで最後に消費するSpeedになる）。
+    final remainingSpeed = _remainingSpeedFor(state, attackerIndex);
+    if (card.speed > remainingSpeed) {
+      return (
+        canDeclare: false,
+        reason: 'Speedが不足しています（必要${card.speed}、残り$remainingSpeed）。',
+      );
+    }
     return (canDeclare: true, reason: null);
   }
 
@@ -1787,6 +1855,9 @@ class TechniqueMatchEngine {
           pendingFinisher: null,
           rallyAttackerIndex: pending.defenderIndex,
           rallyChain: 0,
+          // Combo Speed Rules（Phase 8.5A）: 主導権交代＝新しいラリーとして
+          // 扱うため、新しい攻撃側のComboSpeedを全回復する。
+          rallyRemainingSpeed: updatedDefender.comboSpeed,
           pendingAttack: null,
           log: logWithSwap,
         ),

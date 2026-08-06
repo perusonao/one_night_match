@@ -26,6 +26,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 1},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '基本の打撃技。',
     ),
@@ -37,6 +39,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 12,
+
+      speed: 2,
       heatDelta: 6,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -53,6 +57,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 6,
+
+      speed: 1,
       heatDelta: 4,
       // Phase 6完了後のプレイテストで判明した「ダウン限定だと使う機会が
       // 無く一度も選ばれない」問題への対応（ユーザー指摘）。スタンドでも
@@ -73,6 +79,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.rough: 1},
       reversalEnergyCost: {MoveAttribute.rough: 1},
       power: 7,
+
+      speed: 1,
       heatDelta: 6,
       description: '荒々しい反則気味の一撃。',
     ),
@@ -84,6 +92,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.aerial: 2},
       reversalEnergyCost: {MoveAttribute.aerial: 1},
       power: 10,
+
+      speed: 2,
       heatDelta: 5,
       description: '飛び技の基本形。',
     ),
@@ -95,6 +105,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.counter: 1},
       reversalEnergyCost: {MoveAttribute.counter: 1},
       power: 6,
+
+      speed: 1,
       heatDelta: 4,
       description: '返し技を軸にした技。',
     ),
@@ -106,6 +118,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 1},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 4,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -123,6 +137,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.aerial: 2},
       reversalEnergyCost: {MoveAttribute.aerial: 2},
       power: 16,
+
+      speed: 4,
       heatDelta: 8,
       description: '火神アカリの固有技（サンプル）。',
     ),
@@ -136,6 +152,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 2},
       reversalEnergyCost: {MoveAttribute.strike: 2},
       power: 14,
+
+      speed: 3,
       heatDelta: 7,
       description: '火神アカリの固有技（サンプル）。',
     ),
@@ -149,6 +167,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 2},
       power: 15,
+
+      speed: 3,
       heatDelta: 7,
       description: '黒蝶ジャックの固有技（サンプル）。',
     ),
@@ -162,6 +182,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 2},
       power: 13,
+
+      speed: 3,
       heatDelta: 7,
       description: '黒蝶ジャックの固有技（サンプル）。',
     ),
@@ -187,6 +209,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 2},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 14,
+
+      speed: 3,
       heatDelta: 6,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -202,6 +226,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 16,
+
+      speed: 4,
       heatDelta: 6,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -217,6 +243,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 2},
       power: 15,
+
+      speed: 3,
       heatDelta: 7,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -235,6 +263,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 2},
       reversalEnergyCost: {MoveAttribute.strike: 2},
       power: 17,
+
+      speed: 4,
       heatDelta: 7,
       description: '火神アカリの固有技。純粋な高火力打撃。',
     ),
@@ -248,6 +278,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 3},
       reversalEnergyCost: {MoveAttribute.strike: 2},
       power: 18,
+
+      speed: 5,
       heatDelta: 8,
       targetState: TechniqueTargetState.down,
       hasPinEffect: true,
@@ -263,6 +295,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 12,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.down,
       hasPinEffect: true,
@@ -282,6 +316,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 14,
+
+      speed: 3,
       heatDelta: 6,
       targetState: TechniqueTargetState.any,
       hasSubmissionEffect: true,
@@ -300,6 +336,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 15,
+
+      speed: 3,
       heatDelta: 6,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -315,6 +353,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 2},
       power: 13,
+
+      speed: 3,
       heatDelta: 6,
       targetState: TechniqueTargetState.any,
       downBonusPower: 6,
@@ -330,6 +370,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 2},
       power: 15,
+
+      speed: 3,
       heatDelta: 7,
       targetState: TechniqueTargetState.down,
       hasSubmissionEffect: true,
@@ -347,6 +389,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 3},
       reversalEnergyCost: {MoveAttribute.submission: 2},
       power: 17,
+
+      speed: 4,
       heatDelta: 8,
       targetState: TechniqueTargetState.any,
       downBonusPower: 10,
@@ -360,6 +404,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 10,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.down,
       hasSubmissionEffect: true,
@@ -379,6 +425,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 2},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 16,
+
+      speed: 4,
       heatDelta: 6,
       description: '豪田ミサキの固有技。一撃の重い打撃。',
     ),
@@ -392,6 +440,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 15,
+
+      speed: 3,
       heatDelta: 6,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -407,6 +457,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 2},
       power: 17,
+
+      speed: 4,
       heatDelta: 7,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -425,6 +477,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 2},
       reversalEnergyCost: {MoveAttribute.strike: 2},
       power: 18,
+
+      speed: 5,
       heatDelta: 7,
       description: '豪田ミサキの固有技。純粋な高火力打撃。',
     ),
@@ -438,6 +492,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 3},
       reversalEnergyCost: {MoveAttribute.throwMove: 2},
       power: 19,
+
+      speed: 5,
       heatDelta: 8,
       targetState: TechniqueTargetState.down,
       hasPinEffect: true,
@@ -453,6 +509,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 13,
+
+      speed: 3,
       heatDelta: 5,
       targetState: TechniqueTargetState.down,
       hasPinEffect: true,
@@ -472,6 +530,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.rough: 2},
       reversalEnergyCost: {MoveAttribute.rough: 1},
       power: 13,
+
+      speed: 3,
       heatDelta: 6,
       description: '黒蝶ジャックの固有技。反則気味の一撃。',
     ),
@@ -485,6 +545,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.rough: 2},
       reversalEnergyCost: {MoveAttribute.rough: 1},
       power: 15,
+
+      speed: 3,
       heatDelta: 6,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -500,6 +562,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 2},
       power: 14,
+
+      speed: 3,
       heatDelta: 6,
       targetState: TechniqueTargetState.any,
       hasSubmissionEffect: true,
@@ -518,6 +582,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.rough: 3},
       reversalEnergyCost: {MoveAttribute.rough: 2},
       power: 18,
+
+      speed: 5,
       heatDelta: 8,
       description: '黒蝶ジャックの固有技。凶器を使った反則の高火力打撃。',
     ),
@@ -531,6 +597,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 2},
       power: 16,
+
+      speed: 4,
       heatDelta: 7,
       targetState: TechniqueTargetState.down,
       hasSubmissionEffect: true,
@@ -546,6 +614,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 10,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.down,
       hasSubmissionEffect: true,
@@ -565,6 +635,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 3},
       reversalEnergyCost: {MoveAttribute.throwMove: 4},
       power: 30,
+
+      speed: 8,
       heatDelta: 10,
       hasFinisherEffect: true,
       finisherRequirements: {'minimumHeat': 40},
@@ -580,6 +652,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 3},
       reversalEnergyCost: {MoveAttribute.submission: 4},
       power: 26,
+
+      speed: 7,
       heatDelta: 10,
       hasFinisherEffect: true,
       finisherRequirements: {'minimumHeat': 40},
@@ -595,6 +669,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 3},
       reversalEnergyCost: {MoveAttribute.strike: 4},
       power: 28,
+
+      speed: 8,
       heatDelta: 10,
       hasFinisherEffect: true,
       finisherRequirements: {'minimumHeat': 40},
@@ -610,6 +686,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 3},
       reversalEnergyCost: {MoveAttribute.throwMove: 4},
       power: 27,
+
+      speed: 8,
       heatDelta: 10,
       hasFinisherEffect: true,
       finisherRequirements: {'minimumHeat': 40},
@@ -649,6 +727,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.strike: 3},
       power: 20,
+
+      speed: 6,
       heatDelta: 10,
       hasFinisherEffect: true,
       finisherRequirements: {'minimumHeat': 60},
@@ -663,6 +743,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.throwMove: 3},
       power: 26,
+
+      speed: 7,
       heatDelta: 10,
       targetState: TechniqueTargetState.stand,
       hasFinisherEffect: true,
@@ -679,6 +761,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.strike: 4},
       power: 28,
+
+      speed: 8,
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
@@ -695,6 +779,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.throwMove: 3},
       power: 20,
+
+      speed: 6,
       heatDelta: 10,
       hasFinisherEffect: true,
       finisherRequirements: {'maximumOpponentHp': 50},
@@ -709,6 +795,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.throwMove: 3},
       power: 26,
+
+      speed: 7,
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
@@ -725,6 +813,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.strike: 4},
       power: 28,
+
+      speed: 8,
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
@@ -740,6 +830,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.submission: 3},
       power: 18,
+
+      speed: 6,
       heatDelta: 9,
       hasFinisherEffect: true,
       finisherRequirements: {'minimumHeat': 60},
@@ -754,6 +846,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.submission: 3},
       power: 24,
+
+      speed: 7,
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
@@ -769,6 +863,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.submission: 4},
       power: 28,
+
+      speed: 8,
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
@@ -784,6 +880,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.rough: 3},
       power: 20,
+
+      speed: 6,
       heatDelta: 9,
       hasFinisherEffect: true,
       finisherRequirements: {'maximumOwnHp': 40},
@@ -798,6 +896,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.submission: 3},
       power: 24,
+
+      speed: 7,
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
@@ -814,6 +914,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.rough: 4},
       power: 28,
+
+      speed: 8,
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
@@ -851,6 +953,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 1},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '火神アカリの基本打撃技。',
     ),
@@ -862,6 +966,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 1},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '火神アカリの基本打撃技。',
     ),
@@ -873,6 +979,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.aerial: 1},
       reversalEnergyCost: {MoveAttribute.aerial: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -886,6 +994,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 1},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 9,
+
+      speed: 2,
       heatDelta: 5,
       description: '火神アカリの打撃技。助走をつけた膝蹴り。',
     ),
@@ -897,6 +1007,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 1},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '火神アカリの投げ技。相手の腕を取って振り回す。',
     ),
@@ -908,6 +1020,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.aerial: 2},
       reversalEnergyCost: {MoveAttribute.aerial: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.down,
       hasPinEffect: true,
@@ -923,6 +1037,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 1},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -936,6 +1052,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 1},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '火神アカリの基本打撃技。前腕による強打。',
     ),
@@ -949,6 +1067,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 16,
+
+      speed: 4,
       heatDelta: 7,
       description: '火神アカリの固有技。鮮やかな腕取り投げ。',
     ),
@@ -962,6 +1082,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 2},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 17,
+
+      speed: 4,
       heatDelta: 7,
       description: '火神アカリの固有技。魂を込めた高角度キック。',
     ),
@@ -974,6 +1096,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.aerial: 3},
       power: 22,
+
+      speed: 7,
       heatDelta: 9,
       hasFinisherEffect: true,
       finisherRequirements: {'minimumHeat': 50},
@@ -988,6 +1112,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.strike: 3},
       power: 26,
+
+      speed: 7,
       heatDelta: 10,
       targetState: TechniqueTargetState.stand,
       hasFinisherEffect: true,
@@ -1004,6 +1130,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 1},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -1017,6 +1145,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 1},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '豪田ミサキの基本打撃技。体当たり。',
     ),
@@ -1028,6 +1158,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 1},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 9,
+
+      speed: 2,
       heatDelta: 5,
       description: '豪田ミサキの基本打撃技。全力の腕による薙ぎ払い。',
     ),
@@ -1039,6 +1171,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 1},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -1052,6 +1186,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.down,
       hasPinEffect: true,
@@ -1067,6 +1203,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 1},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 9,
+
+      speed: 2,
       heatDelta: 5,
       description: '豪田ミサキの投げ技。力任せに叩きつける。',
     ),
@@ -1078,6 +1216,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 1},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '豪田ミサキの基本打撃技。膝を突き上げる。',
     ),
@@ -1089,6 +1229,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 1},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -1104,6 +1246,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 16,
+
+      speed: 4,
       heatDelta: 7,
       description: '豪田ミサキの固有技。相手を担ぎ上げて叩きつけるパワー技。',
     ),
@@ -1117,6 +1261,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 17,
+
+      speed: 4,
       heatDelta: 7,
       description: '豪田ミサキの固有技。全体重を乗せた豪快な叩きつけ。',
     ),
@@ -1129,6 +1275,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.throwMove: 3},
       power: 22,
+
+      speed: 7,
       heatDelta: 9,
       hasFinisherEffect: true,
       finisherRequirements: {'maximumOpponentHp': 50},
@@ -1143,6 +1291,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.throwMove: 3},
       power: 26,
+
+      speed: 7,
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
@@ -1159,6 +1309,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 1},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '白銀レイナの基本打撃技。',
     ),
@@ -1170,6 +1322,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 1},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -1183,6 +1337,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 1},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '白銀レイナの関節技。腕を極める。',
     ),
@@ -1194,6 +1350,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 1},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '白銀レイナの関節技。頭部を固める基本ホールド。',
     ),
@@ -1205,6 +1363,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 1},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -1218,6 +1378,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.down,
       hasSubmissionEffect: true,
@@ -1233,6 +1395,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 1},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 9,
+
+      speed: 2,
       heatDelta: 5,
       downBonusPower: 4,
       description: '白銀レイナの関節技。足を絡めて固める。ダウン中の相手に特に効く。',
@@ -1245,6 +1409,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 1},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '白銀レイナの関節技。横から頭部を固める。',
     ),
@@ -1258,6 +1424,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 16,
+
+      speed: 4,
       heatDelta: 7,
       description: '白銀レイナの固有技。顔面を極める高難度の関節技。',
     ),
@@ -1271,6 +1439,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 17,
+
+      speed: 4,
       heatDelta: 7,
       description: '白銀レイナの固有技。足を絡めて極める代名詞のホールド。',
     ),
@@ -1283,6 +1453,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.submission: 3},
       power: 22,
+
+      speed: 7,
       heatDelta: 9,
       hasFinisherEffect: true,
       finisherRequirements: {'minimumHeat': 50},
@@ -1297,6 +1469,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.submission: 3},
       power: 26,
+
+      speed: 7,
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,
@@ -1313,6 +1487,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.rough: 1},
       reversalEnergyCost: {MoveAttribute.rough: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '黒蝶ジャックの反則気味の一撃。',
     ),
@@ -1324,6 +1500,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.rough: 1},
       reversalEnergyCost: {MoveAttribute.rough: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -1337,6 +1515,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 1},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.stand,
       causesDown: true,
@@ -1350,6 +1530,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 1},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '黒蝶ジャックの反則気味の絞め技。',
     ),
@@ -1361,6 +1543,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 11,
+
+      speed: 2,
       heatDelta: 5,
       targetState: TechniqueTargetState.down,
       hasSubmissionEffect: true,
@@ -1376,6 +1560,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 1},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 9,
+
+      speed: 2,
       heatDelta: 5,
       downBonusPower: 4,
       description: '黒蝶ジャックの絞め技。ダウン中の相手に特に効く。',
@@ -1388,6 +1574,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.rough: 1},
       reversalEnergyCost: {MoveAttribute.rough: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '黒蝶ジャックの反則気味の一撃。ダウン中の相手を踏みつける。',
     ),
@@ -1399,6 +1587,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.strike: 1},
       reversalEnergyCost: {MoveAttribute.strike: 1},
       power: 8,
+
+      speed: 1,
       heatDelta: 5,
       description: '黒蝶ジャックの基本打撃技。',
     ),
@@ -1412,6 +1602,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.throwMove: 2},
       reversalEnergyCost: {MoveAttribute.throwMove: 1},
       power: 16,
+
+      speed: 4,
       heatDelta: 7,
       description: '黒蝶ジャックの固有技。捻りを加えた変形DDT。',
     ),
@@ -1425,6 +1617,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       attackEnergyCost: {MoveAttribute.submission: 2},
       reversalEnergyCost: {MoveAttribute.submission: 1},
       power: 17,
+
+      speed: 4,
       heatDelta: 7,
       description: '黒蝶ジャックの固有技。首を絞め上げる嫌らしいホールド。',
     ),
@@ -1437,6 +1631,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.rough: 3},
       power: 22,
+
+      speed: 7,
       heatDelta: 9,
       hasFinisherEffect: true,
       finisherRequirements: {'maximumOwnHp': 40},
@@ -1451,6 +1647,8 @@ TechniqueDeckCardCatalog buildProvisionalTechniqueDeckCatalog() {
       minimumLevel: 1,
       attackEnergyCost: {MoveAttribute.submission: 3},
       power: 26,
+
+      speed: 7,
       heatDelta: 10,
       targetState: TechniqueTargetState.down,
       hasFinisherEffect: true,

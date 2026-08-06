@@ -248,6 +248,7 @@ class TechniqueDeckTechniqueCard {
     this.attackEnergyCost = const {},
     this.reversalEnergyCost = const {},
     this.power = 0,
+    this.speed = 1,
     this.heatDelta = 0,
     this.targetState = TechniqueTargetState.any,
     this.causesDown = false,
@@ -274,6 +275,13 @@ class TechniqueDeckTechniqueCard {
   final Map<MoveAttribute, int> attackEnergyCost;
   final Map<MoveAttribute, int> reversalEnergyCost;
   final int power;
+
+  /// Combo Speed Rules（Phase 8.5A）: 1ラリー中に攻撃側が消費するSpeedコスト。
+  /// 攻撃側は`comboSpeed`（既定値[defaultComboSpeed]）からこの値を差し引きながら
+  /// 連続攻撃でき、残りSpeedが足りない技は使用できない。暫定値
+  /// （小技1〜2/中技3〜4/大技5〜6/フィニッシャー6〜8、docs/design/
+  /// technique_deck_open_questions.md参照）。
+  final int speed;
   final int heatDelta;
   final TechniqueTargetState targetState;
   final bool causesDown;
@@ -325,6 +333,7 @@ class TechniqueDeckTechniqueCard {
     Map<MoveAttribute, int>? attackEnergyCost,
     Map<MoveAttribute, int>? reversalEnergyCost,
     int? power,
+    int? speed,
     int? heatDelta,
     TechniqueTargetState? targetState,
     bool? causesDown,
@@ -350,6 +359,7 @@ class TechniqueDeckTechniqueCard {
     attackEnergyCost: attackEnergyCost ?? this.attackEnergyCost,
     reversalEnergyCost: reversalEnergyCost ?? this.reversalEnergyCost,
     power: power ?? this.power,
+    speed: speed ?? this.speed,
     heatDelta: heatDelta ?? this.heatDelta,
     targetState: targetState ?? this.targetState,
     causesDown: causesDown ?? this.causesDown,
@@ -391,6 +401,7 @@ class TechniqueDeckTechniqueCard {
     'attackEnergyCost': _costMapToJson(attackEnergyCost),
     'reversalEnergyCost': _costMapToJson(reversalEnergyCost),
     'power': power,
+    'speed': speed,
     'heatDelta': heatDelta,
     'targetState': targetState.name,
     'causesDown': causesDown,
@@ -434,6 +445,7 @@ class TechniqueDeckTechniqueCard {
       attackEnergyCost: _costMapFromJson(json['attackEnergyCost']),
       reversalEnergyCost: _costMapFromJson(json['reversalEnergyCost']),
       power: _intOrNull(json['power']) ?? 0,
+      speed: _intOrNull(json['speed']) ?? 1,
       heatDelta: _intOrNull(json['heatDelta']) ?? 0,
       targetState: enumOrDefault(
         TechniqueTargetState.values,
@@ -470,6 +482,7 @@ class TechniqueDeckTechniqueCard {
       _costMapEquals(attackEnergyCost, other.attackEnergyCost) &&
       _costMapEquals(reversalEnergyCost, other.reversalEnergyCost) &&
       power == other.power &&
+      speed == other.speed &&
       heatDelta == other.heatDelta &&
       targetState == other.targetState &&
       causesDown == other.causesDown &&
@@ -497,6 +510,7 @@ class TechniqueDeckTechniqueCard {
     _costMapHash(attackEnergyCost),
     _costMapHash(reversalEnergyCost),
     power,
+    speed,
     heatDelta,
     targetState,
     Object.hash(
@@ -715,6 +729,7 @@ class TechniqueDeckWrestlerProfile {
     this.name = '',
     this.hp = 0,
     this.recoveryPower = 0,
+    this.comboSpeed = 10,
     this.initialHeat = 0,
     this.attributeBonus = const {},
     this.passiveAbility = '',
@@ -737,6 +752,14 @@ class TechniqueDeckWrestlerProfile {
   /// レスラーカードの基準HP（表示・将来のバランス調整用）。
   final int hp;
   final int recoveryPower;
+
+  /// Combo Speed Rules（Phase 8.5A）: 1ラリー中に攻撃側が持つSpeedの初期値。
+  /// 攻撃開始時にこの値へリセットされ、技を使うたびに
+  /// [TechniqueDeckTechniqueCard.speed] 分が差し引かれる。現状は全レスラー
+  /// 共通の暫定値10のみを使用し、`TechniqueMatchEngine`はこの値を
+  /// カタログから読み取って接続していない（[recoveryPower] と同じ
+  /// 「宣言のみ」の状態。docs/design/technique_deck_open_questions.md参照）。
+  final int comboSpeed;
 
   /// 試合開始時のHEAT基準値（表示・将来のエンジン接続用、現状は未使用で
   /// 全レスラー0固定）。
@@ -770,6 +793,7 @@ class TechniqueDeckWrestlerProfile {
     String? name,
     int? hp,
     int? recoveryPower,
+    int? comboSpeed,
     int? initialHeat,
     Map<MoveAttribute, int>? attributeBonus,
     String? passiveAbility,
@@ -783,6 +807,7 @@ class TechniqueDeckWrestlerProfile {
     name: name ?? this.name,
     hp: hp ?? this.hp,
     recoveryPower: recoveryPower ?? this.recoveryPower,
+    comboSpeed: comboSpeed ?? this.comboSpeed,
     initialHeat: initialHeat ?? this.initialHeat,
     attributeBonus: attributeBonus ?? this.attributeBonus,
     passiveAbility: passiveAbility ?? this.passiveAbility,
@@ -804,6 +829,7 @@ class TechniqueDeckWrestlerProfile {
     'name': name,
     'hp': hp,
     'recoveryPower': recoveryPower,
+    'comboSpeed': comboSpeed,
     'initialHeat': initialHeat,
     'attributeBonus': _costMapToJson(attributeBonus),
     'passiveAbility': passiveAbility,
@@ -823,6 +849,7 @@ class TechniqueDeckWrestlerProfile {
       name: _stringOrDefault(json['name'], ''),
       hp: _intOrNull(json['hp']) ?? 0,
       recoveryPower: _intOrNull(json['recoveryPower']) ?? 0,
+      comboSpeed: _intOrNull(json['comboSpeed']) ?? 10,
       initialHeat: _intOrNull(json['initialHeat']) ?? 0,
       attributeBonus: _costMapFromJson(json['attributeBonus']),
       passiveAbility: _stringOrDefault(json['passiveAbility'], ''),
@@ -847,6 +874,7 @@ class TechniqueDeckWrestlerProfile {
       name == other.name &&
       hp == other.hp &&
       recoveryPower == other.recoveryPower &&
+      comboSpeed == other.comboSpeed &&
       initialHeat == other.initialHeat &&
       _costMapEquals(attributeBonus, other.attributeBonus) &&
       passiveAbility == other.passiveAbility &&
@@ -862,6 +890,7 @@ class TechniqueDeckWrestlerProfile {
     name,
     hp,
     recoveryPower,
+    comboSpeed,
     initialHeat,
     _costMapHash(attributeBonus),
     passiveAbility,

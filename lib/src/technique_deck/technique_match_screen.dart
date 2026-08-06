@@ -23,9 +23,10 @@ import 'technique_wrestler_portraits.dart';
 
 /// Technique Deck Rules Phase 3〜7: 最初のプレイアブル画面「Technique Match」。
 ///
-/// スタンド／ダウン／疲労・休息・ターン進行・HP／HEAT表示・手札／山札・
-/// エネルギーセット・技の応酬（攻撃宣言→返技判定→成功なら攻守交代して連続
-/// 攻撃）・フォール／ギブアップの回避判定（キックアウト／ロープブレイク
+/// スタンド／ダウン／疲労・ターン進行・HP／HEAT／Combo Speed表示・手札／
+/// 山札・エネルギーセット・技の応酬（攻撃宣言→返技判定→成功なら攻守交代
+/// して連続攻撃、Combo Speedが続く限り同じ攻撃側が連続で技を使用可能）・
+/// フォール／ギブアップの回避判定（キックアウト／ロープブレイク
 /// カード・HP消費・諦めによる決着。返技エネルギーはラリー中の返技専用の
 /// リソースで、決着回避には使えない）・フィニッシャー（発動条件を満たした
 /// 場合のみ宣言可能→防御側のエスケープ／リバーサルによる発動キャンセル→
@@ -134,8 +135,7 @@ Color _attributeColor(MoveAttribute attribute) => switch (attribute) {
 /// 11番）。ルール上の意味は持たない、UIのバー表示のためだけの定数。
 const _heatVisualMax = 100;
 
-class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
-    with WidgetsBindingObserver {
+class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   late final LocalWrestlerRepository wrestlerRepository =
       widget.wrestlerRepository ?? LocalWrestlerRepository();
   late final TechniqueDeckRepository deckRepository =
@@ -159,22 +159,31 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
   TechniqueDeckEntry? _selectedEntry;
 
   // ============================================================
-  // 【ゲームサイクル整理ラウンド 優先度5・7・9】CPU対戦・1ターン30秒
-  // タイマー・JSON試合ログの状態。
+  // 【ゲームサイクル整理ラウンド 優先度7・9】CPU対戦・JSON試合ログの状態。
+  // 【Phase 8.5A】1ターン30秒タイマー・TIME OVER・AppLifecycle連携は廃止した
+  // （旧ルールの試合時間とは別物のため不採用。ユーザー指示）。
   // ============================================================
   late bool vsCpu = widget.vsCpu;
   final TechniqueCpuLevel cpuLevel = TechniqueCpuLevel.normal;
   late bool debugMode = widget.debugMode;
   static const Duration _cpuThinkDelay = Duration(milliseconds: 500);
-  static const int _turnSeconds = 30;
   Timer? _cpuTimer;
-  Timer? _turnTimer;
-  int? _remainingSeconds;
-  int? _timerOwnerIndex;
+  // 【Phase 8.5A】使用可能な技が無いフレッシュターンの無言自動終了を、
+  // _scheduleNextStep→_applyResult→_scheduleNextStepの同期再帰にせず
+  // イベントループを1周挟んで実行するためのタイマー（CPUの着手ディレイと
+  // 同じ考え方。同期再帰のままだと、両者とも無行動なターンが連続した場合に
+  // スタックオーバーフローする）。
+  Timer? _passTimer;
+  // 無言自動終了（passTurn）が何もせず連続した回数。山札・捨て札とも尽き、
+  // 手札にエネルギーカードも使用可能な技も無い状態が続くと、engineの
+  // endTurnは（isDrawにならない限り）ターン数だけを進め続ける可能性がある
+  // （open questions参照、Phase 6完了後に判明した山札枯渇問題と同種）。
+  // この安全弁が無いと無限に自動進行し続けてしまうため上限を設ける。
+  static const int _maxConsecutivePassTurns = 12;
+  int _consecutivePassTurns = 0;
   final Random _cpuRandom = Random();
   final List<TechniqueCpuDecisionTrace> _cpuTraces = [];
   final List<TechniqueMatchTurnEntry> _turnEntries = [];
-  int _timeOverCount = 0;
   DateTime? _matchStartedAt;
   DateTime? _matchFinishedAt;
   String _gameId = '';
@@ -184,7 +193,6 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     wrestlerRepository.loadAll().then((items) {
       if (!mounted) return;
       setState(() {
@@ -201,26 +209,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _cpuTimer?.cancel();
-    _turnTimer?.cancel();
+    _passTimer?.cancel();
     super.dispose();
-  }
-
-  /// 【優先度5】アプリがバックグラウンドへ回った場合、実時間差で減算せず
-  /// タイマーを一時停止する（明示的な設計判断。カジュアルなカードゲームで
-  /// 電話着信等により離席した際、復帰直後にいきなり時間切れになる体験を
-  /// 避けるため）。フォアグラウンド復帰時は残り秒数からカウントを再開する。
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      _turnTimer?.cancel();
-      _turnTimer = null;
-    } else if (state == AppLifecycleState.resumed) {
-      if (_remainingSeconds != null && matchState != null && !matchState!.isOver) {
-        _resumeTurnTimerTicking();
-      }
-    }
   }
 
   Future<(TechniqueDeckDefinition, String)> _resolveDeck(
@@ -267,7 +258,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
     if (!mounted) return;
     _turnEntries.clear();
     _cpuTraces.clear();
-    _timeOverCount = 0;
+    _consecutivePassTurns = 0;
     _matchStartedAt = DateTime.now();
     _matchFinishedAt = null;
     _gameId = '${a.id}_vs_${b.id}_${_matchStartedAt!.millisecondsSinceEpoch}';
@@ -308,6 +299,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
     String? cardName,
   }) {
     final before = matchState;
+    _consecutivePassTurns = action == 'passTurn' ? _consecutivePassTurns + 1 : 0;
     setState(() {
       matchState = newState;
       _selectedEntry = null;
@@ -342,7 +334,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
         turn: after.turnNumber,
         chain: after.rallyChain,
         timestamp: DateTime.now(),
-        remainingTurnSeconds: _remainingSeconds,
+        // 【Phase 8.5A】1ターン30秒タイマーを廃止したため、このフィールドは
+        // 常にnull（JSONログのスキーマ自体は無改修）。
+        remainingTurnSeconds: null,
         actorId: actorBefore.wrestlerId,
         phase: after.phase.name,
         action: action,
@@ -366,35 +360,56 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
 
   /// 現在の状態を見て、次に何をすべきかを決める。
   /// - 試合が終了していれば何もしない。
-  /// - 次に行動すべきがCPUなら、[_cpuThinkDelay]後にCPUの手番を自動実行する
-  ///   （人間の残り時間は減らさない。優先度5「CPU思考中はプレイヤーの時間を
-  ///   減らさない」に対応）。
-  /// - 次に行動すべきが人間なら、保留中の判定（返技・回避・フィニッシャー）が
-  ///   あれば対応するダイアログを表示する。1ターン30秒タイマーは「行動すべき
-  ///   人間が変わった時」だけリセットする（例: エネルギーセット→技選択は
-  ///   同じ手番の中の連続した行動なのでタイマーは継続する。攻撃側の手番から
-  ///   防御側の返技判定へ移るなど、判断の主体が変わった時は新しい30秒になる）。
+  /// - 次に行動すべきがCPUなら、[_cpuThinkDelay]後にCPUの手番を自動実行する。
+  /// - 次に行動すべきが人間で、フレッシュターン（ラリー外・判定待ちなし）に
+  ///   使用可能な技が1枚も無い場合は【Phase 8.5A】、休息廃止に伴い無言で
+  ///   ターンを自動終了する（Phase 8.2以前に存在した独立の「ターン終了」
+  ///   ボタンの復活ではなく、他に取れる行動が無い場合限定の自動処理）。
+  /// - それ以外の人間の手番では、保留中の判定（返技・回避・フィニッシャー）が
+  ///   あれば対応するダイアログを表示する。
   void _scheduleNextStep() {
     _cpuTimer?.cancel();
     _cpuTimer = null;
+    _passTimer?.cancel();
+    _passTimer = null;
     final state = matchState;
     if (state == null || state.isOver) {
-      _stopTurnTimer();
-      _timerOwnerIndex = null;
       return;
     }
     final actingIndex = TechniqueMatchCpu.actingPlayerIndex(state);
     if (_isCpu(actingIndex)) {
-      _stopTurnTimer();
-      _timerOwnerIndex = null;
       _cpuTimer = Timer(_cpuThinkDelay, _runCpuStep);
       return;
     }
-    if (_timerOwnerIndex != actingIndex || _remainingSeconds == null) {
-      _timerOwnerIndex = actingIndex;
-      _startTurnTimer();
+    // 技エネルギーをまだセットしていない、かつセットできるエネルギーカードが
+    // 手札にある場合は、それを先に選べる機会を必ず残す（エネルギーセットで
+    // 新たに技が使用可能になりうるため、ここで自動終了してはならない）。
+    final hasEnergyToSet = !state.energySetThisTurn &&
+        state.active.hand.any((e) => catalog.findEnergyById(e.cardId) != null);
+    if (!state.isRallyActive &&
+        state.pendingAttack == null &&
+        state.pendingEscape == null &&
+        state.pendingFinisher == null &&
+        !hasEnergyToSet &&
+        !TechniqueMatchEngine.hasUsableMove(state, catalog) &&
+        _consecutivePassTurns < _maxConsecutivePassTurns) {
+      // Timer.zero経由で実行する（_applyResultからの同期再帰を避けるため。
+      // 直接呼ぶと「両者とも無行動なターン」が続いた場合にスタック
+      // オーバーフローする）。
+      _passTimer = Timer(Duration.zero, _runPassTurn);
+      return;
     }
     _maybeShowPendingDialog(state);
+  }
+
+  void _runPassTurn() {
+    if (!mounted) return;
+    final state = matchState;
+    if (state == null || state.isOver) return;
+    _applyResult(
+      TechniqueMatchEngine.autoAdvanceTurnIfSettled(state),
+      action: 'passTurn',
+    );
   }
 
   void _maybeShowPendingDialog(TechniqueMatchState state) {
@@ -439,108 +454,6 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
       cardName: result.trace?.chosen.cardName,
     );
     _scheduleNextStep();
-  }
-
-  // ============================================================
-  // 【優先度5】1ターン30秒タイマー。
-  // ============================================================
-
-  void _startTurnTimer() {
-    _remainingSeconds = _turnSeconds;
-    _resumeTurnTimerTicking();
-  }
-
-  void _resumeTurnTimerTicking() {
-    _turnTimer?.cancel();
-    _turnTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      final remaining = _remainingSeconds;
-      if (remaining == null) return;
-      if (remaining <= 1) {
-        _turnTimer?.cancel();
-        _turnTimer = null;
-        setState(() => _remainingSeconds = 0);
-        _handleTimeOver();
-        return;
-      }
-      setState(() => _remainingSeconds = remaining - 1);
-    });
-  }
-
-  void _stopTurnTimer() {
-    _turnTimer?.cancel();
-    _turnTimer = null;
-    _remainingSeconds = null;
-  }
-
-  /// 時間切れになった局面に応じて自動処理する（優先度5）。すべての自動処理は
-  /// 試合ログへ「TIME OVER」として記録してから実行する。
-  void _handleTimeOver() {
-    final state = matchState;
-    if (state == null || state.isOver) return;
-    _timeOverCount++;
-    final label = _timeOverContextLabel(state);
-    setState(() {
-      matchState = state.copyWith(
-        log: [...state.log, 'TIME OVER（$label）：自動処理を行った'],
-      );
-    });
-
-    final pendingFinisher = matchState!.pendingFinisher;
-    if (pendingFinisher != null) {
-      if (pendingFinisher.stage == TechniqueFinisherStage.responsePending) {
-        // 発動前: キャンセルしない。
-        _resolveFinisher();
-      } else {
-        // 成立後: 特殊キックアウトがあれば自動使用、無ければ敗北。
-        final defender = matchState!.playerAt(pendingFinisher.defenderIndex);
-        final entry = defender.hand.where(
-          (e) => TechniqueMatchEngine.canEscapeFinisher(matchState!, e, catalog).canEscape,
-        ).firstOrNull;
-        if (entry != null) {
-          _escapeFinisherWithCard(entry);
-        } else {
-          _concedeFinisher();
-        }
-      }
-      return;
-    }
-    if (matchState!.pendingEscape != null) {
-      // 優先順位: ①対応する防御カード ②HP消費 ③回避不能なら敗北。
-      final pending = matchState!.pendingEscape!;
-      final defender = matchState!.playerAt(pending.defenderIndex);
-      final defenseEntry = defender.hand.where(
-        (e) => TechniqueMatchEngine.canEscapeWithDefenseCard(matchState!, e, catalog).canEscape,
-      ).firstOrNull;
-      if (defenseEntry != null) {
-        _escapeWithDefenseCard(defenseEntry);
-      } else if (TechniqueMatchEngine.canEscapeWithHp(matchState!, catalog).canEscape) {
-        _escapeWithHp();
-      } else {
-        _concede();
-      }
-      return;
-    }
-    if (matchState!.pendingAttack != null) {
-      // 返技しない→技を受ける。
-      _resolveHit();
-      return;
-    }
-    // 通常ターン（エネルギーセット／技選択の段階）: 自動休息。
-    _handleRest();
-  }
-
-  String _timeOverContextLabel(TechniqueMatchState state) {
-    final pendingFinisher = state.pendingFinisher;
-    if (pendingFinisher != null) {
-      return pendingFinisher.stage == TechniqueFinisherStage.responsePending
-          ? 'フィニッシャー発動判定'
-          : 'フィニッシャー脱出判定';
-    }
-    if (state.pendingEscape != null) {
-      return state.pendingEscape!.kind == TechniqueEscapeKind.fall ? 'フォール回避判定' : 'サブミッション回避判定';
-    }
-    if (state.pendingAttack != null) return '返技判定';
-    return '通常ターン';
   }
 
   // ============================================================
@@ -620,7 +533,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
       finishedAt: finishedAt,
       state: state,
       elapsedSeconds: finishedAt.difference(startedAt).inSeconds,
-      timeOverCount: _timeOverCount,
+      // 【Phase 8.5A】1ターン30秒タイマー（TIME OVER）を廃止したため常に0
+      // （JSONログのスキーマ自体は無改修）。
+      timeOverCount: 0,
       players: _buildPlayerSummaries(state),
       decks: decks,
       turns: _turnEntries,
@@ -1308,38 +1223,6 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
     TechniqueTargetState.down => 'DOWN',
   };
 
-  /// ③ 技使用のワンタップ化 ＋ ⑥「ダウンする」廃止に伴う統合休息。
-  ///
-  /// スタンド中に休息を選んだ場合、`goDown`→`rest`を連続で呼ぶ（エンジンの
-  /// 2メソッドはどちらも無変更。呼び出し方をUI側でまとめただけ）。`rest`は
-  /// 内部で常にターンを終了させる。
-  ///
-  /// 【ゲームサイクル整理ラウンド 優先度1】プレイヤーの1ターンは「技を使う」
-  /// か「休息する」のいずれかで必ず終了する。以前あった独立の「ターン終了」
-  /// ボタンは廃止した。安全弁: 現行エンジンの構造上、`rest`が失敗する
-  /// （状態が変化しない）ことは通常発生しないが、万一発生した場合はログに
-  /// 理由を残して強制的にターンを終了する。
-  void _handleRest() {
-    final state = matchState;
-    if (state == null) return;
-    var next = state;
-    if (next.active.posture == WrestlerPosture.stand) {
-      next = TechniqueMatchEngine.goDown(next);
-    }
-    final rested = TechniqueMatchEngine.rest(next);
-    if (identical(rested, next) && identical(next, state)) {
-      final forced = state.copyWith(
-        log: [
-          ...state.log,
-          '${state.active.wrestlerName}は技も休息も実行できない異常状態のため、'
-              '安全弁によりターンを自動終了した',
-        ],
-      );
-      _applyResult(TechniqueMatchEngine.endTurn(forced), action: 'endTurn');
-      return;
-    }
-    _applyResult(rested, action: 'rest');
-  }
 
   void _resetMatch() {
     setState(() {
@@ -1568,35 +1451,6 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
 
   /// Ver.3: 「STEP N」の番号バッジ＋1文の指示のみを表示する（5アイコンの
   /// ステッパー行は情報過多のため廃止）。
-  /// 【優先度5】「TIME N」バッジ。残り10秒以下でオレンジ、5秒以下で赤へ
-  /// 強調する。
-  Widget _timeBadge(int seconds) {
-    final Color color;
-    if (seconds <= 5) {
-      color = _red;
-    } else if (seconds <= 10) {
-      color = _orange;
-    } else {
-      color = Colors.white70;
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: color.withValues(alpha: 0.7)),
-      ),
-      child: Text(
-        'TIME $seconds',
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.bold,
-          fontSize: seconds <= 5 ? 13 : 12,
-        ),
-      ),
-    );
-  }
-
   Widget _actionHeader(TechniqueMatchState state) {
     final stepNumber = _currentStageIndex(state) + 1;
     final hint = _currentStepHint(state);
@@ -1625,7 +1479,6 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
               ),
             ),
             const SizedBox(width: 6),
-            if (_remainingSeconds != null) _timeBadge(_remainingSeconds!),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -2195,6 +2048,16 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
                       Text('${player.heat}', style: const TextStyle(fontSize: 9)),
                     ],
                   ),
+                  const SizedBox(height: 2),
+                  // Combo Speed Rules（Phase 8.5A）: 現在のラリー攻撃側なら
+                  // 残りSpeedを、そうでなければComboSpeedの基準値をそのまま
+                  // 表示する（常時表示。仕様書「8. UI」）。
+                  _comboSpeedRow(
+                    isEffectiveAttacker
+                        ? (state.rallyRemainingSpeed ?? player.comboSpeed)
+                        : player.comboSpeed,
+                    player.comboSpeed,
+                  ),
                   const SizedBox(height: 1),
                   // ⑨ エネルギーを属性ごとの横一列（ラベル＋ドット）で表示。
                   for (final attribute in player.energyPool.keys)
@@ -2234,6 +2097,33 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
           ],
         ),
       ),
+    );
+  }
+
+  /// Combo Speed Rules（Phase 8.5A）: 「残りSpeed X / Y」の常時表示。
+  /// [remaining]が[total]の半分以下ならオレンジ、0ならグレーで強調する。
+  Widget _comboSpeedRow(int remaining, int total) {
+    final ratio = total == 0 ? 0.0 : remaining / total;
+    final color = remaining <= 0
+        ? Colors.white38
+        : (ratio <= 0.5 ? _orange : _blue);
+    return Row(
+      children: [
+        const SizedBox(width: 24, child: Text('SPD', style: TextStyle(fontSize: 9))),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: total == 0 ? 0 : (remaining / total).clamp(0, 1),
+              minHeight: 6,
+              backgroundColor: Colors.white24,
+              valueColor: AlwaysStoppedAnimation(color),
+            ),
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text('$remaining/$total', style: TextStyle(fontSize: 9, color: color)),
+      ],
     );
   }
 
@@ -2682,9 +2572,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
   );
 
   // ============================================================
-  // 【ゲームサイクル整理ラウンド 優先度1】行動ボタン。「技を使う」（手札の
-  // カードをタップ）か「休息する」のいずれかで必ずターンが終わる仕様に
-  // 統一したため、独立した「ターン終了」ボタンは廃止した。
+  // 【Phase 8.5A】行動ボタン。休息システムを廃止したため、通常のフレッシュ
+  // ターンでは手札の技カードをタップするだけで行動が完結し、専用ボタンは
+  // 不要（使用可能な技が無ければ[_scheduleNextStep]が無言で自動終了する）。
+  // ラリー中（Combo Speedが残っていて追撃できる状態）のみ、追撃せず
+  // ラリーを終了する選択肢としてこのボタンを表示する。
   // ============================================================
 
   Widget _actionButtons(TechniqueMatchState state) {
@@ -2702,20 +2594,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen>
         ),
       );
     }
-    return SizedBox(
-      width: double.infinity,
-      child: FilledButton.tonalIcon(
-        onPressed: _handleRest,
-        icon: const Icon(Icons.self_improvement),
-        label: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('休息', style: TextStyle(fontWeight: FontWeight.bold)),
-            Text('ダウンしてHP回復・ターン終了', style: TextStyle(fontSize: 9)),
-          ],
-        ),
-      ),
-    );
+    return const SizedBox.shrink();
   }
 
   // ============================================================

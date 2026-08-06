@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_deck.dart';
+import 'package:one_night_match/src/technique_deck/technique_deck_defaults.dart'
+    show buildProvisionalTechniqueDeckCatalog;
 import 'package:one_night_match/src/technique_deck/technique_deck_models.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_storage.dart';
 import 'package:one_night_match/src/technique_deck/technique_match_screen.dart';
@@ -82,12 +84,13 @@ void main() {
     WidgetTester tester, {
     TechniqueDeckRepository? deckRepository,
     LocalWrestlerRepository? wrestlerRepository,
+    TechniqueDeckCardCatalog? catalog,
   }) async {
     await tester.binding.setSurfaceSize(const Size(800, 3000));
     await tester.pumpWidget(
       MaterialApp(
         home: TechniqueMatchScreen(
-          catalog: testCatalog(),
+          catalog: catalog ?? testCatalog(),
           deckRepository: deckRepository,
           wrestlerRepository: wrestlerRepository,
         ),
@@ -99,9 +102,10 @@ void main() {
   Future<String> startWithFixedDeck(
     WidgetTester tester,
     LocalTechniqueDeckRepository repo,
-    List<TechniqueDeckEntry> entries,
-  ) async {
-    await pumpScreen(tester, deckRepository: repo);
+    List<TechniqueDeckEntry> entries, {
+    TechniqueDeckCardCatalog? catalog,
+  }) async {
+    await pumpScreen(tester, deckRepository: repo, catalog: catalog);
     final state = tester.state(find.byType(TechniqueMatchScreen));
     // ignore: avoid_dynamic_calls
     final wrestlerAId = (state as dynamic).wrestlerA.id as String;
@@ -134,7 +138,13 @@ void main() {
       // 変更された。既定のレスラー（wrestler_akari等）は全員Phase 7A
       // モデルデッキを持つため、保存済みデッキが無い場合はモデルデッキが
       // 使われることを検証する。
-      await pumpScreen(tester);
+      // Phase 8.5A: 休息廃止により、使用可能な技も手札のエネルギーカードも
+      // 無いフレッシュターンは無言でターンを自動終了するようになった。この
+      // テストは「試合開始直後」の状態を検証したいため、gameplay用の
+      // testCatalog()（1技のみの縮小版）ではなく、実際のデッキと一致する
+      // 本物のカタログを使い、Aの手札のエネルギーカードが正しく認識されて
+      // 自動終了しない状態にする。
+      await pumpScreen(tester, catalog: buildProvisionalTechniqueDeckCatalog());
       await tester.tap(find.text('試合開始'));
       await tester.pumpAndSettle();
 
@@ -161,7 +171,12 @@ void main() {
             customWrestlers.map((w) => w.toJson()).toList(),
           ),
         });
-        await pumpScreen(tester, wrestlerRepository: LocalWrestlerRepository());
+        // Phase 8.5A: 上のテストと同じ理由で本物のカタログを使う。
+        await pumpScreen(
+          tester,
+          wrestlerRepository: LocalWrestlerRepository(),
+          catalog: buildProvisionalTechniqueDeckCatalog(),
+        );
         await tester.tap(find.text('試合開始'));
         await tester.pumpAndSettle();
 
@@ -174,42 +189,39 @@ void main() {
   });
 
   group('TechniqueMatchScreen: 試合進行', () {
-    testWidgets('休息するとダウン状態を経てHPが回復しターンが終了する', (tester) async {
-      await pumpScreen(tester);
-      await tester.tap(find.text('試合開始'));
-      await tester.pumpAndSettle();
+    testWidgets(
+      '使用可能な技もエネルギーカードも無いフレッシュターンは無言でターンが自動終了する（Phase 8.5A: 休息廃止）',
+      (tester) async {
+        // 休息・独立した「ターン終了」ボタンはPhase 8.5Aで廃止された。
+        // Aの手札を技カード1枚のみ（エネルギーカードは無し）にすることで、
+        // このターンにAが取れる行動が無い状況を作る。Bは本物のカタログで
+        // 通常どおり解決させ、Aの手番だけが無言で自動終了することを確認する。
+        final repo = LocalTechniqueDeckRepository();
+        await startWithFixedDeck(
+          tester,
+          repo,
+          const [
+            TechniqueDeckEntry(
+              instanceId: 'e1',
+              cardId: 'normal_1',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+          ],
+          catalog: buildProvisionalTechniqueDeckCatalog(),
+        );
 
-      // 「ダウンする」ボタンは廃止済み。スタンド中に「休息」を押すと
-      // ダウン→HP回復→ターン終了が連続で発生する。
-      await tester.tap(find.text('休息'));
-      await tester.pumpAndSettle();
+        // 「ターン終了」「休息」いずれのボタンも存在しない。
+        expect(find.text('ターン終了'), findsNothing);
+        expect(find.text('休息'), findsNothing);
 
-      // 休息した側（元のアクティブプレイヤー）はダウン状態のまま残るため、
-      // DOWNバッジが引き続き表示される（Ver.3で状態バッジは英語ラベル化）。
-      expect(find.text('DOWN'), findsWidgets);
+        final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
+        final TechniqueMatchState state = screenState.matchState;
+        expect(state.activePlayerIndex, 1); // Aの手番が無言でBへ移った
 
-      await expandLog(tester);
-      expect(find.textContaining('休息してHPを'), findsOneWidget);
-      expect(find.textContaining('の手番'), findsWidgets);
-    });
-
-    testWidgets('独立した「ターン終了」ボタンは存在しない（休息のみで終了する）', (tester) async {
-      // 【ゲームサイクル整理ラウンド 優先度1】「技を使う」か「休息する」の
-      // どちらかで必ずターンが終わる仕様に統一したため、以前存在した独立の
-      // 「ターン終了」ボタンは廃止された。
-      await pumpScreen(tester);
-      await tester.tap(find.text('試合開始'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('ターン終了'), findsNothing);
-      expect(find.text('休息'), findsOneWidget);
-
-      await tester.tap(find.text('休息'));
-      await tester.pumpAndSettle();
-
-      await expandLog(tester);
-      expect(find.textContaining('ターンを終了した'), findsOneWidget);
-    });
+        await expandLog(tester);
+        expect(find.textContaining('のターンを終了した'), findsWidgets);
+      },
+    );
 
     testWidgets('新しい試合ボタンは確認ダイアログを経てセットアップ画面へ戻る', (tester) async {
       // Ver.3⑧: デッキリセット相当の取り消せない操作のため確認ダイアログを
@@ -407,7 +419,16 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('ラリーを終了した'), findsOneWidget);
-      expect(find.text('休息'), findsOneWidget); // 次の手番（Bとの入れ替え後）の通常の行動選択
+      // 次の手番へ正常に進み、ラリー・判定待ちが残っていないことを確認する
+      // （Phase 8.5A: 休息ボタンは廃止済みのため状態レベルで確認する。
+      // このテストのB側は本物のカードIDを認識できないtestCatalog()を使う
+      // ため、Bの手番も直ちに無言で自動終了しAに戻りうる。誰の手番かでは
+      // なく、決着待ちの状態が残っていないことを確認する）。
+      final TechniqueMatchState afterState = screenState.matchState;
+      expect(afterState.isRallyActive, isFalse);
+      expect(afterState.pendingAttack, isNull);
+      expect(afterState.pendingEscape, isNull);
+      expect(afterState.pendingFinisher, isNull);
     });
   });
 
@@ -531,9 +552,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('を回避した'), findsOneWidget);
-      // 【優先度1】回避が成立した時点で自動的にターンが終了し、次の手番の
-      // 通常の行動選択（休息ボタン）に戻る。
-      expect(find.text('休息'), findsOneWidget);
+      // 回避が成立した時点で自動的にターンが終了し、決着待ちの状態が
+      // 残っていないことを確認する（Phase 8.5A: 休息ボタンは廃止済みの
+      // ため状態レベルで確認する。Bのカタログ非認識による無言自動終了の
+      // 連鎖で誰の手番になるかはこのテストでは断定しない）。
+      final dynamic screenStateAfter = tester.state(find.byType(TechniqueMatchScreen));
+      final TechniqueMatchState stateAfter = screenStateAfter.matchState;
+      expect(stateAfter.pendingEscape, isNull);
+      expect(stateAfter.isRallyActive, isFalse);
     });
 
     testWidgets('回避せず諦めると勝敗が決まり、勝利バナーが表示される', (tester) async {
@@ -774,19 +800,38 @@ void main() {
 
       await expandLog(tester);
       expect(find.textContaining('キャンセルした'), findsOneWidget);
-      // ダメージが発生していないこと（勝敗もついていない）。優先度1により
-      // キャンセル成立（エスケープ）でそのターンも自動終了し、次の手番の
-      // 通常の行動選択（休息ボタン）に戻る。
-      expect(find.text('休息'), findsOneWidget);
+      // ダメージが発生していないこと（勝敗もついていない）。キャンセル成立
+      // （エスケープ）でそのターンも自動終了し、判定待ちが残っていない
+      // ことを確認する（Phase 8.5A: 休息ボタンは廃止済みのため状態レベルで
+      // 確認する。Bのカタログ非認識による無言自動終了の連鎖で誰の手番に
+      // なるかはこのテストでは断定しない）。
+      final dynamic screenStateAfter = tester.state(find.byType(TechniqueMatchScreen));
+      final TechniqueMatchState stateAfter = screenStateAfter.matchState;
+      expect(stateAfter.winnerIndex, isNull);
+      expect(stateAfter.pendingFinisher, isNull);
+      expect(stateAfter.isRallyActive, isFalse);
     });
   });
 
   group('TechniqueMatchScreen: CPU対戦統合（優先度7）', () {
-    Future<void> pumpCpuScreen(WidgetTester tester) async {
+    // 【Phase 8.5A】testCatalog()（1技のみの縮小版）だとAの実デッキ
+    // （本物のカードID）を一切認識できず、有効な技もエネルギーカードも
+    // 無いと判定されてAの初手から無言で自動終了してしまう。このグループは
+    // 「Aの手番は人間として操作できる」ことの検証が目的のため、本物の
+    // カタログを使う。
+    Future<void> pumpCpuScreen(
+      WidgetTester tester, {
+      TechniqueDeckRepository? deckRepository,
+      TechniqueDeckCardCatalog? catalog,
+    }) async {
       await tester.binding.setSurfaceSize(const Size(800, 3000));
       await tester.pumpWidget(
         MaterialApp(
-          home: TechniqueMatchScreen(catalog: testCatalog(), vsCpu: true),
+          home: TechniqueMatchScreen(
+            catalog: catalog ?? buildProvisionalTechniqueDeckCatalog(),
+            vsCpu: true,
+            deckRepository: deckRepository,
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -797,56 +842,71 @@ void main() {
       await tester.tap(find.text('試合開始'));
       await tester.pumpAndSettle();
 
-      // 最初はAの手番（人間）なので、通常の操作UI（休息ボタン）が見える。
-      expect(find.text('休息'), findsOneWidget);
+      // 最初はAの手番（人間）。CPU思考中表示は出ない。
       expect(find.textContaining('CPU）思考中'), findsNothing);
+      final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
+      final TechniqueMatchState state = screenState.matchState;
+      expect(state.activePlayerIndex, 0);
     });
 
-    testWidgets('Aが休息してBの手番になると、CPUが手札を公開せず自動的に思考・行動する', (tester) async {
-      await pumpCpuScreen(tester);
+    testWidgets('Aがラリーを終えてBの手番になると、CPUが手札を公開せず自動的に思考・行動する', (tester) async {
+      final repo = LocalTechniqueDeckRepository();
+      // このテストではB（CPU）が実際に技を選べるかどうかは検証対象では
+      // なく、CPUの手番へ制御が渡った際にUIが正しく振る舞う（手札を公開
+      // しない・スピナー表示・行動後にログが伸びる）ことだけを見たいため、
+      // 挙動を決定的にできるtestCatalog()を使う（Bの実デッキのカードIDは
+      // このカタログでは認識されず、CPUは常に「有効な技が無い」と判定
+      // される＝有効な技が無い場合の無言自動終了で必ずBのターンが終わる）。
+      await pumpCpuScreen(tester, deckRepository: repo, catalog: testCatalog());
+      final state = tester.state(find.byType(TechniqueMatchScreen));
+      // ignore: avoid_dynamic_calls
+      final wrestlerAId = (state as dynamic).wrestlerA.id as String;
+      await repo.save(
+        TechniqueDeckSaveRecord(
+          deckId: 'cpu_test_deck',
+          name: 'CPU対戦テスト用デッキ',
+          wrestlerId: wrestlerAId,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          entries: const [
+            TechniqueDeckEntry(
+              instanceId: 'e1',
+              cardId: 'normal_1',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 'e2',
+              cardId: 'energy_strike',
+              cardType: TechniqueDeckCardType.energy,
+            ),
+          ],
+        ),
+      );
       await tester.tap(find.text('試合開始'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('休息'));
+      await selectAndConfirm(tester, '打エネルギー', 'セットする');
+      await tester.tap(find.text('通常技A').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('使用する'));
+      await tester.pumpAndSettle();
+
+      // Phase 8.5A: 単発ヒットだけではラリーが終わらないため、明示的に
+      // 終了してBの手番へ渡す。
+      await tester.tap(find.text('ラリーを終了する'));
       await tester.pump();
 
-      // Bの手番になった直後は「CPU思考中」表示のみで、休息ボタンや手札は
-      // 表示されない（CPUの手札は人間に見せない）。
+      // Bの手番になった直後は「CPU思考中」表示のみで、手札は表示されない
+      // （CPUの手札は人間に見せない）。
       expect(find.textContaining('CPU）思考中'), findsOneWidget);
-      expect(find.text('休息'), findsNothing);
 
-      // CPUの思考ディレイ（500ms）経過後、CPUが自動的に行動しログが増える。
+      // CPUの思考ディレイ（500ms）経過後、CPUが自動的に行動する
+      // （有効な技が無いため無言でターンを終了し、Aの手番に戻る）。
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pumpAndSettle();
 
       await expandLog(tester);
       expect(find.textContaining('の手番'), findsWidgets);
-    });
-  });
-
-  group('TechniqueMatchScreen: 1ターン30秒タイマー（優先度5）', () {
-    testWidgets('人間の番ではTIMEバッジが表示され、1秒ごとに減っていく', (tester) async {
-      await pumpScreen(tester);
-      await tester.tap(find.text('試合開始'));
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('TIME 30'), findsOneWidget);
-
-      await tester.pump(const Duration(seconds: 1));
-      expect(find.textContaining('TIME 29'), findsOneWidget);
-    });
-
-    testWidgets('30秒経過すると時間切れとなり、通常ターンは自動的に休息する', (tester) async {
-      await pumpScreen(tester);
-      await tester.tap(find.text('試合開始'));
-      await tester.pumpAndSettle();
-
-      await tester.pump(const Duration(seconds: 31));
-      await tester.pumpAndSettle();
-
-      await expandLog(tester);
-      expect(find.textContaining('TIME OVER'), findsOneWidget);
-      expect(find.textContaining('休息してHPを'), findsOneWidget);
     });
   });
 }

@@ -30,10 +30,10 @@
 - 関連章: 仕様書 14章
 - 候補:
   1. 通常どおり行動可能
-  2. 休息しか選べない
+  2. ~~休息しか選べない~~（Phase 8.5Aで休息自体を廃止したため対象外）
   3. 低コスト技のみ使用可能
   4. 返技不可
-  5. 自分のターン開始時に強制休息
+  5. ~~自分のターン開始時に強制休息~~（同上、対象外）
 - 解決が必要なPhase: Phase 3（最小実装／フラグ制で暫定対応し、Phase 6〜7で
   フォール・ギブアップとの相互作用を見て正式決定する）
 
@@ -59,10 +59,8 @@
 
 ## 8. 休息の連続使用制限
 
-- 関連章: 仕様書 12章
-- 候補: 未提示。現時点の暫定仕様は「連続休息は禁止しない」（12章）。制限を
-  課す場合の具体的なルール（例: 同一試合中の使用回数上限）は未検討。
-- 解決が必要なPhase: Phase 3
+- ステータス: **対象外（Phase 8.5Aで休息自体を廃止）**。休息システムが
+  存在しないため、連続使用制限という論点自体が消滅した（仕様書12章参照）。
 
 ## 9. フィニッシャーに対する返技エネルギーと特殊キックアウトの処理順
 
@@ -226,13 +224,26 @@
 
 ## 23. レスラー別回復力（recoveryPower）のカタログ接続
 
-- 関連章: 仕様書12章、実装: `TechniqueMatchEngine`/`defaultRecoveryPower`
-- 候補: 未提示。`TechniqueDeckWrestlerProfile.recoveryPower`（Phase 1で
-  モデル定義済み）はまだ試合状態へ接続しておらず、Phase 3では全レスラー
-  共通の暫定値 `defaultRecoveryPower`（15、正式値ではない）を使っている。
-  レスラーごとの回復力をどこで管理するか（`TechniqueDeckWrestlerProfile`を
-  正式に使う／`WrestlerDefinition`側に持たせる等）は未検討。
-- 解決が必要なPhase: Phase 4〜（本格的なバランス調整と合わせて）
+- ステータス: **対象外（Phase 8.5Aで休息自体を廃止）**。休息システムの
+  廃止により`recoveryPower`はゲームプレイ上の効果を一切持たなくなった
+  （`TechniqueDeckWrestlerProfile.recoveryPower`／
+  `TechniqueMatchPlayerState.recoveryPower`はJSONログのスキーマ互換のため
+  フィールドとしては残置しているが、無効果の表示専用データ）。この論点は
+  もはや解決を要しない。
+
+## 23A. 技のspeed・レスラーのcomboSpeedのカタログ接続（Phase 8.5A新設）
+
+- 関連章: 仕様書7.4章、実装: `TechniqueDeckWrestlerProfile.comboSpeed` /
+  `TechniqueMatchPlayerState.comboSpeed` / `defaultComboSpeed`
+- 候補: 未提示。`recoveryPower`（旧23番）と同じ構造の未接続状態が
+  `comboSpeed`にも残っている。`TechniqueDeckWrestlerProfile.comboSpeed`は
+  カタログに定義できるが、`TechniqueMatchEngine.start`は現状これを読み取ら
+  ず、全レスラー共通の暫定値`defaultComboSpeed`（10）を使う。レスラーごとに
+  ComboSpeedを差別化するかどうかは未検討。
+- 技カードの`speed`値（`technique_deck_defaults.dart`に付与した暫定値、
+  power帯に基づく機械的な割り当て：小技1〜2／中技3〜4／大技5〜6／
+  フィニッシャー6〜8の目安）も同様に、正式なバランス調整は未実施。
+- 解決が必要なPhase: Phase 8.5C（数値調整）
 
 ## 24. HP・maxHpの初期値
 

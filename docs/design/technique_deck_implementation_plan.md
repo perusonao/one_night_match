@@ -1,13 +1,10 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **UI/UX改善+CPU実装ラウンド完了時点**（Phase 7A完了後、
-  ユーザー指示により①Technique Match UIの全面改善（縦1画面化・手札
-  カード縮小・レスラーカードの立ち絵表示調整・返技ダイアログ簡潔化）と
-  ②Phase 8 CPU（`TechniqueCpuLevel.normal`、Decision Trace付き）を実装。
-  技エネルギーは1ターンに1枚のみセット可能というルールをエンジン
-  レベル（`TechniqueMatchEngine.setEnergy`）で明文化・強制した（唯一の
-  エンジン変更。ダメージ計算・フォール・ギブアップ・フィニッシャー・
-  デッキ構築ロジックは無改修）。詳細はPhase 8章を参照）
+- ステータス: **Phase 8.5A（ゲームサイクル再設計）完了時点**（UI/UX改善+
+  CPU実装ラウンド・Phase 8 CPUに続き、休息システムと1ターン30秒タイマーを
+  廃止し、Combo Speedによる1ターン複数技化へ置き換えた。CPU評価式・
+  バランス調整・フィニッシャー数値・ダメージ／フォール／サブミッション
+  処理・JSONログ・シミュレーションは対象外。詳細はPhase 8.5A章を参照）
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 - CPU設計: [`technique_deck_cpu_design.md`](technique_deck_cpu_design.md)
@@ -815,7 +812,8 @@ Phase 7.5完了後のユーザー指示により、CPUの実装に入る前に�
 - フィニッシャー対策（発動条件を読んで警戒する、エスケープ／リバーサルを
   適切に温存する。Level 3）
 - ダウン追撃の判断（Level 2〜3）
-- 休息の判断（Level 1〜3）
+- ~~休息の判断（Level 1〜3）~~ → Phase 8.5Aで休息自体を廃止。有効な技が
+  無い場合は無言でターンを自動終了する（判断ロジック不要）
 - CPU対CPUシミュレーション・Decision Traceの記録（Phase 8.4）
 - デッキ評価・Deck Simulator対応（`DeckSimConfig` / `DeckBalanceReport` を
   新モードへ拡張するか、新モード専用のシミュレータを用意するかは実装時に
@@ -825,6 +823,73 @@ Phase 7.5完了後のユーザー指示により、CPUの実装に入る前に�
 
 **依存関係**: Phase 4〜7.5（ルール全体の実装完了後でなければAIの意思決定を
 正しく評価できない）。
+
+---
+
+## Phase 8.5A：ゲームサイクル再設計
+
+Phase 7.5完了時点で、Technique Matchの1ターンは「技を1回使う」か「休息する」
+のいずれかで必ず終わる仕様だった。加えてUI側には1ターン30秒のターンタイマー
+（TIME OVER時の自動処理・AppLifecycle連携込み）が実装されていた。ユーザー
+指示により、CPUバランス調整や数値調整ではなく**ゲームサイクルそのものの
+再設計**として、以下を実施した（対象は`technique_deck_rules.md` 5・7・12章。
+CPU評価式・バランス調整・フィニッシャー数値・ダメージ／フォール／サブミッ
+ション処理・JSONログ・シミュレーションには一切手を入れていない）。
+
+### 変更内容
+
+1. **休息システムの廃止**: `TechniqueMatchEngine.rest()`／`goDown()`
+   （Phase 3の暫定デバッグ関数）を削除。休息ボタン（UI）・CPUの休息判断
+   （`technique_match_cpu.dart`）を削除。ダウンは技（`causesDown`）に
+   よってのみ発生する状態になった。`recoveryPower`関連のフィールド・定数は
+   JSONログのスキーマを変えないため残置したが、ゲームプレイ上は無効果に
+   なった（open questions 23番）。
+2. **1ターン30秒タイマーの廃止**: `technique_match_screen.dart`の
+   `_turnTimer`／`TIME OVER`自動処理／`WidgetsBindingObserver`による
+   AppLifecycle連携を削除（CPUの着手ディレイ`_cpuTimer`は演出目的の別物
+   として残置）。
+3. **Combo Speedの新設**: `TechniqueDeckTechniqueCard.speed`（技ごとの
+   Speedコスト、暫定値）・`TechniqueDeckWrestlerProfile.comboSpeed`／
+   `TechniqueMatchPlayerState.comboSpeed`（初期値10、`defaultComboSpeed`）・
+   `TechniqueMatchState.rallyRemainingSpeed`（ラリー中の残りSpeed）を追加。
+4. **1ターン複数技化**: `TechniqueMatchEngine.resolveHit`を変更し、
+   フォール／ギブアップ効果を伴わない通常のヒットではラリーを終了させない
+   ようにした（`copyWithRallyEnded`を呼ばず、攻撃側・残りSpeedを維持した
+   まま`pendingAttack`のみクリア）。攻撃側は残りSpeedが尽きるか、明示的に
+   ラリーを終了するまで技を連続使用できる。攻守交代（返技成功・フィニッ
+   シャーのリバーサルキャンセル）時は新しい攻撃側の残りSpeedを全回復する
+   （引き継がない）。フィニッシャーは宣言と同時にラリーを終了させる既存
+   構造（Phase 7）により、追加コードなしで「ラリー最後のみ使用可能」を
+   満たしている。
+5. **行動不能フレッシュターンの自動終了**: 休息廃止により、使用可能な技が
+   1枚も無いフレッシュターンで人間・CPUともに行き詰まらないよう、
+   `TechniqueMatchEngine.hasUsableMove`（既存だが未配線だったヘルパー）を
+   人間UI（`technique_match_screen.dart`）・CPU
+   （`technique_match_cpu.dart`）の両方に初めて配線し、無言でターンを
+   自動終了する処理を追加した。人間UI側は、この自動終了を
+   `_scheduleNextStep`から`_applyResult`へ同期再帰させると（両者とも
+   無行動なターンが連続した場合に）スタックオーバーフローしうるため、
+   `Timer(Duration.zero, ...)`経由の非同期スケジューリングにし、かつ
+   連続自動終了回数の安全弁（`_maxConsecutivePassTurns`）を設けた
+   （CPUの着手ディレイと同じ考え方）。
+
+### 既存仕様との差分（要約）
+
+| 項目 | Phase 7.5まで | Phase 8.5A |
+|---|---|---|
+| 1ターンに使える技の数 | 実質1回（返技が無い限りラリーが1撃で終了） | ComboSpeedが続く限り複数回 |
+| 休息 | ダウン→HP回復→ターン終了 | 廃止（ダウンは技のみで発生） |
+| ターン制限時間 | 30秒（TIME OVER自動処理あり） | 無し |
+| 有効な技が無い場合 | 休息が唯一の選択肢 | 無言で自動的にターン終了 |
+| 攻守交代時のリソース | （該当リソースなし） | ComboSpeedが全回復 |
+
+### Phase 8.5B・8.5Cへの持ち越し
+
+CPU評価式の見直し（ラリー継続を前提とした多段攻撃の評価）・UIブラッシュ
+アップ・技ごとのSpeed値やComboSpeed初期値の数値調整・シミュレーションに
+よる検証は、この後のPhase 8.5B（CPU改修・UIブラッシュアップ・バランス
+調整）・Phase 8.5C（シミュレーション・数値調整）で扱う（本ラウンドでは
+着手しない）。
 
 ---
 

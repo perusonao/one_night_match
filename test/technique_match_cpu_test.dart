@@ -226,7 +226,7 @@ void main() {
       expect(result.trace!.chosen.cardId, 'down_move');
     });
 
-    test('有効な技が無くHPが減っていれば休息する', () {
+    test('有効な技が無ければ無言でターンを自動終了する（Phase 8.5A: 休息廃止）', () {
       final catalog = microCatalog();
       final deckA = deckOf('w1', ['weak_strike']);
       var state = TechniqueMatchEngine.start(
@@ -247,17 +247,15 @@ void main() {
         energySetThisTurn: true,
       );
       final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
-      expect(result.trace!.chosen.action, 'rest');
-      // restはHP回復後endTurnまで連続で行うため、手番はBへ移る
-      // （Aの状態はplayerAとして参照する必要がある）。
-      expect(result.state.playerA.posture, WrestlerPosture.down);
+      expect(result.trace!.chosen.action, 'passTurn');
+      // 休息が無くなったため、Aはスタンドのまま手番だけがBへ移る。
+      expect(result.state.playerA.posture, WrestlerPosture.stand);
       expect(result.state.activePlayerIndex, 1);
     });
 
-    test('有効な技が無くHPが満タンでも、「技を使う」か「休息する」しか選択肢が無いため休息する', () {
-      // 【ゲームサイクル整理ラウンド 優先度1】「何もせずターン終了」という
-      // 第3の選択肢が廃止されたため、HPが満タンでも有効な技が無ければ
-      // 必ず休息する（休息はHPが満タンでも実行できる）。
+    test('有効な技が無ければHPが満タンでも無言でターンを自動終了する', () {
+      // 【Phase 8.5A】休息システムを廃止したため、有効な技が無いフレッシュ
+      // ターンでは（HPの多寡によらず）無言でターンが自動終了する。
       final catalog = microCatalog();
       final deckA = deckOf('w1', ['weak_strike']);
       var state = TechniqueMatchEngine.start(
@@ -274,7 +272,7 @@ void main() {
       );
       state = state.copyWith(energySetThisTurn: true);
       final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
-      expect(result.trace!.chosen.action, 'rest');
+      expect(result.trace!.chosen.action, 'passTurn');
       expect(result.state.activePlayerIndex, 1);
     });
   });

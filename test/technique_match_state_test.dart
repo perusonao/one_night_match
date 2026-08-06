@@ -76,45 +76,6 @@ void main() {
     });
   });
 
-  group('TechniqueMatchEngine.goDown / rest', () {
-    test('ダウンするとpostureがdownになる', () {
-      final state = freshMatch(seed: 1);
-      final down = TechniqueMatchEngine.goDown(state);
-      expect(down.playerA.posture, WrestlerPosture.down);
-    });
-
-    test('スタンド以外の状態でダウンしても変化しない', () {
-      final state = freshMatch(seed: 1);
-      final down = TechniqueMatchEngine.goDown(state);
-      final downAgain = TechniqueMatchEngine.goDown(down);
-      expect(downAgain.playerA.posture, WrestlerPosture.down);
-      expect(downAgain.log.length, down.log.length); // 変化なし＝ログも増えない
-    });
-
-    test('スタンド中は休息できない（状態が変化しない）', () {
-      final state = freshMatch(seed: 1);
-      final rested = TechniqueMatchEngine.rest(state);
-      expect(rested.playerA.hp, state.playerA.hp);
-      expect(rested.activePlayerIndex, state.activePlayerIndex);
-    });
-
-    test('ダウン中に休息するとHPが回復力分回復し、ターンが終了する', () {
-      final state = freshMatch(startingHpA: 50, seed: 1);
-      final down = TechniqueMatchEngine.goDown(state);
-      final rested = TechniqueMatchEngine.rest(down, random: Random(1));
-      expect(rested.playerA.hp, 50 + defaultRecoveryPower);
-      // 休息はターン終了を伴うため、手番はBへ移る。
-      expect(rested.activePlayerIndex, 1);
-    });
-
-    test('休息によるHP回復はmaxHpでクランプされる', () {
-      final state = freshMatch(startingHpA: 95, maxHpA: 100, seed: 1);
-      final down = TechniqueMatchEngine.goDown(state);
-      final rested = TechniqueMatchEngine.rest(down, random: Random(1));
-      expect(rested.playerA.hp, 100);
-    });
-  });
-
   group('TechniqueMatchEngine.endTurn', () {
     test('ターン終了で手番が相手に移り、ターン数はBの間は変わらない', () {
       final state = freshMatch(seed: 1);
@@ -140,7 +101,12 @@ void main() {
 
     test('ダウンしたままターン終了しても、次の自分のターン開始時にスタンドへ戻る', () {
       final state = freshMatch(seed: 1);
-      final down = TechniqueMatchEngine.goDown(state); // Aがダウン
+      // Phase 8.5A: ダウンは技によってのみ発生する仕様のため、goDown()は
+      // 廃止済み。ここでは技成立を経由せず、状態遷移のテストとして
+      // 直接ダウン状態を作る。
+      final down = state.copyWith(
+        playerA: state.playerA.copyWith(posture: WrestlerPosture.down),
+      );
       final afterA = TechniqueMatchEngine.endTurn(down, random: Random(1)); // Bの手番
       final afterB = TechniqueMatchEngine.endTurn(afterA, random: Random(1)); // Aの手番に戻る
       expect(afterB.activePlayerIndex, 0);
@@ -226,11 +192,9 @@ void main() {
       expect(result.playerA.hand.length, customA.hand.length + 1);
     });
 
-    test('試合終了後（時間切れ引き分け）はgoDown/rest/endTurn/setEnergyが無効化される', () {
+    test('試合終了後（時間切れ引き分け）はendTurnが無効化される', () {
       final base = freshMatch(seed: 1);
       final draw = base.copyWith(isDraw: true, winReason: '時間切れ引き分け（テスト）');
-      expect(TechniqueMatchEngine.goDown(draw), same(draw));
-      expect(TechniqueMatchEngine.rest(draw), same(draw));
       expect(TechniqueMatchEngine.endTurn(draw), same(draw));
     });
 
@@ -803,7 +767,7 @@ void main() {
       expect(afterCounter2.state.rallyChain, 2); // Chainは宣言のたびに増える
     });
 
-    test('返技しない場合は技が成立し、ダメージ・HEAT・ダウンが即時反映されラリーが終了する', () {
+    test('返技しない場合は技が成立し、ダメージ・HEAT・ダウンが即時反映される（Phase 8.5A: フォール／ギブアップを伴わなければラリーは継続する）', () {
       final state = startWith(
         handA: ['strike_move'],
         energyA: const {MoveAttribute.strike: 1},
@@ -819,8 +783,10 @@ void main() {
       expect(resolved.playerA.heat, 5);
       expect(resolved.playerB.posture, WrestlerPosture.down);
       expect(resolved.pendingAttack, isNull);
-      expect(resolved.rallyAttackerIndex, isNull);
-      expect(resolved.rallyChain, 0);
+      // Combo Speed Rulesにより、フォール／ギブアップを伴わない通常のヒット
+      // ではラリーが終了しない。攻撃側は同じ攻撃側のまま残る。
+      expect(resolved.rallyAttackerIndex, 0);
+      expect(resolved.rallyChain, 1);
       expect(resolved.activePlayerIndex, 0); // 公式なターンはAのまま
     });
 
@@ -944,7 +910,177 @@ void main() {
       final resolved = TechniqueMatchEngine.resolveHit(declared, catalog());
       expect(resolved.log.any((l) => l.contains('Hit!')), isTrue);
       expect(resolved.log.any((l) => l.contains('ダメージ')), isTrue);
-      expect(resolved.log.any((l) => l.contains('ラリー終了')), isTrue);
+      // Phase 8.5A: フォール／ギブアップを伴わない通常のヒットはラリーを
+      // 終了させないため「ラリー終了」ログは出ない。
+      expect(resolved.log.any((l) => l.contains('ラリー終了')), isFalse);
+    });
+  });
+
+  group('Phase 8.5A: Combo Speed Rules', () {
+    // comboSpeedは既定値10（defaultComboSpeed）。speedを明示した技カードで
+    // 残りSpeedの消費・不足判定・攻守交代時の全回復を検証する。
+    TechniqueDeckCardCatalog catalog() => const TechniqueDeckCardCatalog(
+      techniques: [
+        TechniqueDeckTechniqueCard(
+          id: 'speed6_move',
+          name: '重い技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.strike,
+          attackEnergyCost: {MoveAttribute.strike: 1},
+          reversalEnergyCost: {MoveAttribute.counter: 1},
+          power: 5,
+          speed: 6,
+        ),
+        TechniqueDeckTechniqueCard(
+          id: 'speed11_move',
+          name: 'Speed超過技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.strike,
+          attackEnergyCost: {MoveAttribute.strike: 1},
+          power: 5,
+          speed: 11,
+        ),
+        TechniqueDeckTechniqueCard(
+          id: 'speed1_move',
+          name: '軽い技',
+          category: TechniqueCardCategory.normal,
+          attribute: MoveAttribute.throwMove,
+          attackEnergyCost: {MoveAttribute.throwMove: 1},
+          reversalEnergyCost: {MoveAttribute.counter: 1},
+          power: 5,
+          speed: 1,
+        ),
+      ],
+      energies: [],
+      defenseCards: [],
+    );
+
+    TechniqueDeckDefinition deckWithSpecificCards(
+      String wrestlerId,
+      List<String> cardIds,
+    ) => TechniqueDeckDefinition(
+      id: '${wrestlerId}_deck',
+      wrestlerId: wrestlerId,
+      entries: [
+        for (var i = 0; i < cardIds.length; i++)
+          TechniqueDeckEntry(
+            instanceId: '${wrestlerId}_entry_$i',
+            cardId: cardIds[i],
+            cardType: TechniqueDeckCardType.technique,
+          ),
+      ],
+    );
+
+    TechniqueMatchState startWith({
+      List<String> handA = const [],
+      List<String> handB = const [],
+      Map<MoveAttribute, int> energyA = const {},
+      Map<MoveAttribute, int> energyB = const {},
+    }) {
+      final handSize = handA.length > handB.length ? handA.length : handB.length;
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'wrestler_a',
+        wrestlerAName: 'レスラーA',
+        wrestlerAMaxHp: 100,
+        deckA: deckWithSpecificCards('wrestler_a', handA),
+        wrestlerBId: 'wrestler_b',
+        wrestlerBName: 'レスラーB',
+        wrestlerBMaxHp: 100,
+        deckB: deckWithSpecificCards('wrestler_b', handB),
+        handSize: handSize == 0 ? 1 : handSize,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        playerA: state.playerA.copyWith(energyPool: energyA),
+        playerB: state.playerB.copyWith(energyPool: energyB),
+      );
+      return state;
+    }
+
+    test('新しいラリー開始時、comboSpeedを超えるSpeedコストの技は使用できない', () {
+      final state = startWith(
+        handA: ['speed11_move'],
+        energyA: const {MoveAttribute.strike: 1},
+      );
+      final check = TechniqueMatchEngine.canDeclareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      );
+      expect(check.canUse, isFalse);
+      expect(check.reason, contains('Speed'));
+    });
+
+    test('技を宣言するたびに残りSpeedが減り、足りなくなると追撃できない', () {
+      final state = startWith(
+        handA: ['speed6_move', 'speed6_move'],
+        energyA: const {MoveAttribute.strike: 2},
+      );
+      final afterFirst = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      ).state;
+      expect(afterFirst.rallyRemainingSpeed, 4); // 10 - 6
+
+      final resolved = TechniqueMatchEngine.resolveHit(afterFirst, catalog());
+      expect(resolved.rallyRemainingSpeed, 4); // ヒット解決では変化しない
+      expect(resolved.rallyAttackerIndex, 0); // ラリーは継続する
+
+      final secondCheck = TechniqueMatchEngine.canDeclareAttack(
+        resolved,
+        resolved.playerA.hand.first,
+        catalog(),
+      );
+      expect(secondCheck.canUse, isFalse); // 残り4 < 必要6
+      expect(secondCheck.reason, contains('Speed'));
+    });
+
+    test('残りSpeedが足りれば連続で技を使用できる（1ターン複数技）', () {
+      final state = startWith(
+        handA: ['speed1_move', 'speed1_move'],
+        energyA: const {MoveAttribute.throwMove: 2},
+      );
+      final afterFirst = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      ).state;
+      final resolved1 = TechniqueMatchEngine.resolveHit(afterFirst, catalog());
+      expect(resolved1.rallyAttackerIndex, 0);
+      expect(resolved1.rallyRemainingSpeed, 9); // 10 - 1
+
+      final afterSecond = TechniqueMatchEngine.declareAttack(
+        resolved1,
+        resolved1.playerA.hand.first,
+        catalog(),
+      ).state;
+      final resolved2 = TechniqueMatchEngine.resolveHit(afterSecond, catalog());
+      expect(resolved2.rallyRemainingSpeed, 8); // 10 - 1 - 1
+      expect(resolved2.rallyChain, 2);
+    });
+
+    test('攻守交代（返技成功）すると新しい攻撃側のComboSpeedが全回復する（残りは引き継がない）', () {
+      final state = startWith(
+        handA: ['speed6_move'],
+        handB: ['speed1_move'],
+        energyA: const {MoveAttribute.strike: 1},
+        energyB: const {MoveAttribute.counter: 1},
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      ).state;
+      expect(declared.rallyRemainingSpeed, 4); // 10 - 6
+
+      final countered = TechniqueMatchEngine.counterAttack(
+        declared,
+        declared.playerB.hand.first,
+        catalog(),
+      ).state;
+      expect(countered.rallyAttackerIndex, 1);
+      expect(countered.rallyRemainingSpeed, 10); // 新攻撃側は全回復（引き継がない）
     });
   });
 
@@ -1346,10 +1482,8 @@ void main() {
       expect(result, same(state));
     });
 
-    test('決着判定待ちの間はgoDown/rest/endTurn/setEnergyが無効化される', () {
+    test('決着判定待ちの間はendTurn/setEnergyが無効化される', () {
       final state = resolveToEscape('fall_move');
-      expect(TechniqueMatchEngine.goDown(state), same(state));
-      expect(TechniqueMatchEngine.rest(state), same(state));
       expect(TechniqueMatchEngine.endTurn(state), same(state));
 
       const dummyEnergyEntry = TechniqueDeckEntry(
@@ -1366,13 +1500,11 @@ void main() {
       expect(energyResult.state, same(state));
     });
 
-    test('試合終了後はgoDown/rest/endTurn/setEnergy/declareAttackが無効化される', () {
+    test('試合終了後はendTurn/setEnergy/declareAttackが無効化される', () {
       final resolved = resolveToEscape('fall_move');
       final over = TechniqueMatchEngine.concede(resolved);
       expect(over.winnerIndex, isNotNull);
 
-      expect(TechniqueMatchEngine.goDown(over), same(over));
-      expect(TechniqueMatchEngine.rest(over), same(over));
       expect(TechniqueMatchEngine.endTurn(over), same(over));
 
       const dummyEnergyEntry = TechniqueDeckEntry(
@@ -1807,15 +1939,13 @@ void main() {
       expect(conceded.pendingFinisher, isNull);
     });
 
-    test('フィニッシャー判定待ちの間はgoDown/rest/endTurn/setEnergy/declareAttackが無効化される', () {
+    test('フィニッシャー判定待ちの間はendTurn/setEnergy/declareAttackが無効化される', () {
       final base = stateWithFinisherInHand();
       final declared = TechniqueMatchEngine.declareFinisher(
         base,
         base.playerA.hand.first,
         catalog(),
       ).state;
-      expect(TechniqueMatchEngine.goDown(declared), same(declared));
-      expect(TechniqueMatchEngine.rest(declared), same(declared));
       expect(TechniqueMatchEngine.endTurn(declared), same(declared));
 
       const dummyEntry = TechniqueDeckEntry(

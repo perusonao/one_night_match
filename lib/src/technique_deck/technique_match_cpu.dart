@@ -93,10 +93,10 @@ class TechniqueMatchCpu {
       return _settled(_decideCounter(state, catalog, level, rng), rng);
     }
     if (state.isRallyActive) {
-      // 【ゲームサイクル整理ラウンド 優先度1】_decideRallyAction自身が
-      // 「休息」の枝で既にendTurnまで完了させる場合があるため、二重に
-      // ターンを進めてしまわないよう、settle処理は_decideRallyAction内部で
-      // 枝ごとに個別に行う（ここではラップしない）。
+      // _decideRallyAction自身が「有効技なし」の枝で既にautoAdvanceTurn
+      // IfSettledまで完了させる場合があるため、二重にターンを進めてしまわ
+      // ないよう、settle処理は_decideRallyAction内部で枝ごとに個別に行う
+      // （ここではラップしない）。
       return _decideRallyAction(state, catalog, level, rng, isFreshTurn: false);
     }
     if (!state.energySetThisTurn) {
@@ -109,14 +109,13 @@ class TechniqueMatchCpu {
     return _decideRallyAction(state, catalog, level, rng, isFreshTurn: true);
   }
 
-  /// 【ゲームサイクル整理ラウンド 優先度1】技の使用（ラリー・返技・決着判定を
-  /// 含む）または休息のいずれかで必ずターンが終わる、という仕様をCPUの
-  /// 意思決定にも一律で適用する。[TechniqueMatchEngine.
-  /// autoAdvanceTurnIfSettled]はラリー継続中・判定待ちの間は何もしない
-  /// （内部でガードする）ため安全に呼べるが、**既にそのものが`endTurn`／
-  /// `rest`（内部でendTurnを呼ぶ）を実行済みの結果には絶対に二重適用しては
-  /// ならない**（ターンが2回分進んでしまう）。そのため呼び出し側は、まだ
-  /// ターンを終える処理を行っていない結果に対してのみこれを呼ぶこと。
+  /// 【Phase 8.5A】技の使用（ラリー・返技・決着判定を含む）が完全に完結する
+  /// か、使用可能な技が尽きるまでは、CPUの意思決定にもターンを進めない
+  /// 方針を一律で適用する。[TechniqueMatchEngine.autoAdvanceTurnIfSettled]は
+  /// ラリー継続中・判定待ちの間は何もしない（内部でガードする）ため安全に
+  /// 呼べるが、**既にそのものが`endTurn`を実行済みの結果には絶対に二重適用
+  /// してはならない**（ターンが2回分進んでしまう）。そのため呼び出し側は、
+  /// まだターンを終える処理を行っていない結果に対してのみこれを呼ぶこと。
   static TechniqueCpuStepResult _settled(TechniqueCpuStepResult result, Random rng) =>
       TechniqueCpuStepResult(
         state: TechniqueMatchEngine.autoAdvanceTurnIfSettled(result.state, random: rng),
@@ -401,50 +400,26 @@ class TechniqueMatchCpu {
       return TechniqueCpuStepResult(state: newState, trace: trace);
     }
 
-    // 【ゲームサイクル整理ラウンド 優先度1】「技を使う」か「休息する」の
-    // どちらかで必ずターンが終わる仕様になったため、有効な技が無い場合は
-    // HPの多寡によらず必ず休息する（「何もせずターン終了」という第3の
-    // 選択肢は廃止された）。
-    if (attacker.posture == WrestlerPosture.stand) {
-      var next = TechniqueMatchEngine.goDown(state);
-      next = TechniqueMatchEngine.rest(next, random: rng);
-      final trace = TechniqueCpuDecisionTrace(
-        turnNumber: state.turnNumber,
-        playerIndex: attackerIndex,
-        cpuLevel: level.name,
-        decisionType: 'restOrEndTurn',
-        candidates: candidates,
-        chosen: TechniqueCpuChosenAction(
-          action: 'rest',
-          reason: shouldRetreat
-              ? 'HPが${(hpRatio * 100).round()}%まで減っており、決定的な技も無いため休息を優先した'
-              : '有効な技が無いため休息した（「技を使う」か「休息する」のいずれかで必ずターンを終える仕様）',
-        ),
-      );
-      return TechniqueCpuStepResult(state: next, trace: trace);
-    }
-    // 安全弁: 理論上到達しない想定（フレッシュターン開始時は常にスタンドへ
-    // 戻るため）だが、念のためログを残して自動的にターンを終了する。
-    final safety = state.copyWith(
-      log: [
-        ...state.log,
-        '${attacker.wrestlerName}は技も休息も実行できない異常状態のため、'
-            '安全弁によりターンを自動終了した',
-      ],
+    // 【Phase 8.5A】休息システムの廃止に伴い、フレッシュターン開始時に
+    // 使用可能な技が1枚も無い場合は、無言でターンを自動終了する
+    // （Phase 8.2以前に存在した独立の「ターン終了」ボタンの復活ではなく、
+    // 他に取れる行動が無い場合限定の自動処理。ユーザー確認済み）。
+    final passed = TechniqueMatchEngine.autoAdvanceTurnIfSettled(
+      state,
+      random: rng,
     );
-    final ended = TechniqueMatchEngine.endTurn(safety, random: rng);
     final trace = TechniqueCpuDecisionTrace(
       turnNumber: state.turnNumber,
       playerIndex: attackerIndex,
       cpuLevel: level.name,
-      decisionType: 'restOrEndTurn',
+      decisionType: 'passTurn',
       candidates: candidates,
       chosen: const TechniqueCpuChosenAction(
-        action: 'endTurn',
-        reason: '安全弁: 技も休息も実行できない異常状態のためターンを終了した',
+        action: 'passTurn',
+        reason: '使用可能な技が無いためターンを自動終了した',
       ),
     );
-    return TechniqueCpuStepResult(state: ended, trace: trace);
+    return TechniqueCpuStepResult(state: passed, trace: trace);
   }
 
   /// 技カード1枚のスコアを算出する。単純な威力最大は禁止（ユーザー指示）で、
