@@ -89,6 +89,12 @@ class TechniqueMatchTurnEntry {
 }
 
 /// 1プレイヤー分の集計サマリー（`players[]`の1要素）。
+///
+/// **LEGACY / deprecated fields**: [recoveryPower]（休息システム廃止により
+/// 常に無効果）・[restsUsed]（休息廃止によりカウント対象の行動自体が
+/// 発生しないため常に0）は、既存JSONログ・分析ツールとの互換性維持のため
+/// 残しているが、次期`schemaVersion`での削除候補（詳細は docs/history/
+/// technique_deck_rule_history.md）。新しい用途へ転用しないこと。
 class TechniqueMatchPlayerSummary {
   const TechniqueMatchPlayerSummary({
     required this.playerId,
@@ -177,6 +183,11 @@ class TechniqueMatchJsonLog {
     required DateTime finishedAt,
     required TechniqueMatchState state,
     required int elapsedSeconds,
+    // **LEGACY / deprecated**: 1ターン30秒のリアルタイム制限（TIME OVER）は
+    // Phase 8.5Aで廃止済みのため、この値は呼び出し側で常に0が渡される。
+    // 既存JSONログ・分析ツールとの互換性維持のため`game.timeOverCount`
+    // キーは残しているが、次期schemaVersionでの削除候補（詳細はdocs/history/
+    // technique_deck_rule_history.md）。新しい用途へ転用しないこと。
     required int timeOverCount,
     required List<TechniqueMatchPlayerSummary> players,
     required List<TechniqueDeckDefinition> decks,

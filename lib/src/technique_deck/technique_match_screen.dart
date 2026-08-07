@@ -698,6 +698,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         isCpu: _isCpu(index),
         movesUsed: count((e) => e.action == 'declareAttack' || e.action == 'declareFinisher'),
         countersUsed: count((e) => e.action == 'counterAttack'),
+        // LEGACY / deprecated: 休息は廃止済みのため'rest'というaction値は
+        // もう発生しない。常に0になる（JSON互換性のため残置、STEP7）。
         restsUsed: count((e) => e.action == 'rest'),
         pinAttempts: count(
           (e) => e.action == 'declareAttack' && techniqueHas(e, (c) => c.hasPinEffect),

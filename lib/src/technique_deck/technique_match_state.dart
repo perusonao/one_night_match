@@ -197,10 +197,13 @@ class TechniqueMatchPlayerState {
   final int heat;
   final WrestlerPosture posture;
 
-  /// [TechniqueDeckWrestlerProfile.recoveryPower] 由来のデータ。**Phase 8.5A
-  /// で休息システムを廃止したため、現在このエンジンはこの値を一切参照しない
-  /// （表示専用の無効果データとして残置。JSONログのスキーマを変更しない
-  /// 方針のため）**。
+  /// **LEGACY / deprecated**: [TechniqueDeckWrestlerProfile.recoveryPower]
+  /// 由来のデータ。休息システム廃止（旧12章、docs/history/
+  /// technique_deck_rule_history.md参照）に伴い、現在このエンジンはこの値を
+  /// 一切参照しない（常に無効果）。既存JSONログ・分析ツールとの互換性維持の
+  /// ため`recoveryPower`フィールド自体とJSON出力キーは残置しているが、
+  /// 次期`schemaVersion`での削除候補（Rule Cleanupラウンド、STEP7）。
+  /// 新しい用途へ転用しないこと。
   final int recoveryPower;
 
   /// Combo Speed Rules（Phase 8.5A）: このプレイヤーの1ラリーあたりのSpeed
@@ -789,7 +792,8 @@ class TechniqueMatchEngine {
   }
 
   /// 攻撃エネルギー消費・技カードの捨て札化・ダメージ即時適用（HPは0未満に
-  /// しない）・HEAT・ダウン付与を行う。[useMove] と [resolveHit] の共通処理。
+  /// しない）・HEAT・ダウン付与を行う。[resolveHit] / [resolveFinisher] の
+  /// 共通処理。
   static ({
     TechniqueMatchPlayerState attacker,
     TechniqueMatchPlayerState defender,
@@ -859,55 +863,8 @@ class TechniqueMatchEngine {
     return (attacker: updatedAttacker, defender: updatedDefender, log: log);
   }
 
-  /// 手札の技カードを1枚使用する（Phase 4互換API: 単発技のみ、返技は無い。
-  /// ラリー機構を経由せず即座に成立させたい場合はこちらを使う）。
-  ///
-  /// 即時に以下を反映する: 攻撃エネルギー消費、技カードの捨て札化、
-  /// ダメージ（HPは0未満にしない）、HEAT、ダウン付与。HP0到達時は疲労状態へ
-  /// 移行する。フォール／ギブアップ／フィニッシャー効果（`hasPinEffect` /
-  /// `hasSubmissionEffect` / `hasFinisherEffect`）はまだ決着処理へ接続しない
-  /// （Phase 6・7）。
-  static TechniqueMoveResult useMove(
-    TechniqueMatchState state,
-    TechniqueDeckEntry entry,
-    TechniqueDeckCardCatalog catalog,
-  ) {
-    final check = canUseMove(state, entry, catalog);
-    if (!check.canUse) {
-      return TechniqueMoveResult(
-        state: state,
-        success: false,
-        failureReason: check.reason,
-      );
-    }
-    final card = catalog.findTechniqueById(entry.cardId)!;
-    final resolved = _resolveAttack(
-      state.active,
-      state.inactive,
-      card,
-      entryToConsume: entry,
-    );
-    final log = [
-      ...state.log,
-      '${resolved.attacker.wrestlerName}が「${card.name}」を使用した（威力${card.power}）',
-      ...resolved.log,
-    ];
-
-    final newPlayerA = state.activePlayerIndex == 0
-        ? resolved.attacker
-        : resolved.defender;
-    final newPlayerB = state.activePlayerIndex == 0
-        ? resolved.defender
-        : resolved.attacker;
-
-    return TechniqueMoveResult(
-      state: state.copyWith(playerA: newPlayerA, playerB: newPlayerB, log: log),
-      success: true,
-    );
-  }
-
   // ============================================================
-  // Phase 5: ラリー（攻撃 → 返技判定 → 攻守交代 → また攻撃）
+  // ラリー（攻撃 → 返技判定 → 攻守交代 → また攻撃）
   // ============================================================
 
   /// 1ラリーで許容する最大攻撃回数（無限ループ防止の安全弁）。
@@ -2043,8 +2000,8 @@ class TechniqueMatchEngine {
   }
 }
 
-/// [TechniqueMatchEngine.useMove] / [TechniqueMatchEngine.setEnergy] の結果。
-/// 失敗時は[state]は入力のまま変化しない。
+/// [TechniqueMatchEngine.declareAttack] / [TechniqueMatchEngine.setEnergy]
+/// 等、エンジンの各操作の結果。失敗時は[state]は入力のまま変化しない。
 class TechniqueMoveResult {
   const TechniqueMoveResult({
     required this.state,

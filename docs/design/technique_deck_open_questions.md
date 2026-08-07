@@ -1,11 +1,16 @@
 # Technique Deck Rules — 未決定事項一覧
 
-- ステータス: Phase 6（フォール・ギブアップの回避判定）完了後、ゲームサイクル
-  見直し（返技エネルギーの決着回避廃止・4レスラー全モデルデッキ完成・
-  「技カードを使えないターン」原因分析）完了時点の一覧。4レスラー全組み合わせ
-  で決着率100%を達成（実装が進むにつれて追記・解決していく）
-- 関連: [`technique_deck_rules.md`](../rules/technique_deck_rules.md) /
-  [`technique_deck_implementation_plan.md`](technique_deck_implementation_plan.md)
+- ステータス: Phase 8.5A（ゲームサイクル再設計）・CPU対人間実装（CPU
+  Normalのみ、Level2/3は未実装）完了時点の一覧。Technique Match Rule
+  Cleanupラウンドで`technique_deck_rules.md`を現行仕様のみの正式版へ再構築し、
+  過去のPhase履歴を[`../history/technique_deck_rule_history.md`](../history/technique_deck_rule_history.md)
+  へ分離した。本ファイル自体の各項目のステータス（未決定／解決済み）は
+  この整理による変更を受けていない（実装が進むにつれて追記・解決していく）
+- 関連: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
+  （現行仕様。過去のPhase履歴は含まない） /
+  [`technique_deck_implementation_plan.md`](technique_deck_implementation_plan.md) /
+  [`../history/technique_deck_rule_history.md`](../history/technique_deck_rule_history.md)
+  （廃止ルール・Phase履歴）
 
 各項目には「関連章」「候補（あれば）」「解決が必要なPhase」を記す。ここに
 記載された項目は、担当者・プレイテスト結果を踏まえて別途決定し、決定後は

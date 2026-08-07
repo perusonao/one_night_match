@@ -1,11 +1,21 @@
 # Technique Deck Rules — 段階実装計画
 
-- ステータス: **Phase 8.5A（ゲームサイクル再設計）完了時点**（UI/UX改善+
-  CPU実装ラウンド・Phase 8 CPUに続き、休息システムと1ターン30秒タイマーを
-  廃止し、Combo Speedによる1ターン複数技化へ置き換えた。CPU評価式・
-  バランス調整・フィニッシャー数値・ダメージ／フォール／サブミッション
-  処理・JSONログ・シミュレーションは対象外。詳細はPhase 8.5A章を参照）
+- ステータス: **Phase 8.5A・8.5A-2（ゲームサイクル再設計＋周辺UI）完了時点。
+  CPU対人間・CPU Normalは実装済みで、Technique Matchのトップページ導線
+  （`TechniqueMatchSetupScreen`）から標準に遊べる。CPU Level2/3（中級・
+  上級、温存判断）は未実装のまま。Technique Match Rule Cleanupラウンドで
+  現行仕様を`technique_deck_rules.md`として正式化し、過去のPhase履歴は
+  [`../history/technique_deck_rule_history.md`](../history/technique_deck_rule_history.md)
+  へ分離した。休息・1ターン30秒タイマー・1ターン1技はLEGACY（廃止済み、
+  履歴ドキュメント参照）。旧Phase 4互換API`TechniqueMatchEngine.useMove`と、
+  本番未使用だったPhase 6/7/7.5世代のモデルデッキ生成関数12個
+  （`technique_deck_model_decks.dart`）を削除した。現行の正式モデルデッキは
+  Phase 7Aのみ。SPEED-vs-COUNTER判定・`calculateEffectiveSpeed`等は
+  引き続きEXPERIMENTAL（既定OFFのFeature Flag、正式ルールではない）**
 - 対象仕様: [`technique_deck_rules.md`](../rules/technique_deck_rules.md)
+  （現行ルールのみを記載する正式仕様書。過去のPhase履歴は含まない）
+- 履歴: [`../history/technique_deck_rule_history.md`](../history/technique_deck_rule_history.md)
+  （廃止ルール・Phase履歴・旧モデルデッキ世代）
 - 未決定事項: [`technique_deck_open_questions.md`](technique_deck_open_questions.md)
 - CPU設計: [`technique_deck_cpu_design.md`](technique_deck_cpu_design.md)
 
@@ -295,7 +305,12 @@ HP0時の細かな行動制限（[open questions 3番](technique_deck_open_quest
 
 ## Phase 4：単発技の使用
 
-**ステータス: 完了。**
+**ステータス: 完了。（このPhase 4の成果物`TechniqueMatchEngine.useMove`は、
+Phase 5以降のラリー・フォール／ギブアップ／フィニッシャーのフローと
+非互換になったため、Technique Match Rule Cleanupラウンドで削除済み。
+現行フローは`declareAttack`→`counterAttack`/`resolveHit`。詳細は
+[`../history/technique_deck_rule_history.md`](../history/technique_deck_rule_history.md)
+4章参照。以下は削除前の記録として残す。）**
 
 実装対象（すべて完了）:
 
@@ -763,7 +778,13 @@ Botが“必殺技を温存する”という発想を持たないことが真�
 
 ## Phase 8：CPU・シミュレーション
 
-**ステータス: Phase 8.0〜8.1相当まで完了（「UI/UX改善+CPU実装」ラウンド）**
+**ステータス: Phase 8.0〜8.1（CPU基盤・Normal実装）完了。CPU対人間は
+その後のラウンド（ゲームサイクル整理ラウンド 優先度7、UI/UX関連ラウンド）で
+実装され、`TechniqueMatchSetupScreen`から標準に遊べる状態になっている
+（下記「Technique Match画面へのCPU対戦UI統合は本ラウンドでも非目標のまま」
+という記述は本Phase 8ラウンド時点の記録であり、現在は解消済み。詳細は
+[`technique_deck_rules.md`](../rules/technique_deck_rules.md) 18章参照）。
+Level 2（中級）・Level 3（上級、温存判断）は引き続き未実装。**
 
 Phase 7.5完了後のユーザー指示により、CPUの実装に入る前に設計を確定させた
 （[`technique_deck_cpu_design.md`](technique_deck_cpu_design.md)）。以下の

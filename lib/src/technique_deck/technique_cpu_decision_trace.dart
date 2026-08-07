@@ -94,7 +94,7 @@ class TechniqueCpuChosenAction {
     this.reasonCode,
   });
 
-  /// 'setEnergy' | 'declareAttack' | 'declareFinisher' | 'rest' | 'endTurn' |
+  /// 'setEnergy' | 'declareAttack' | 'declareFinisher' | 'passTurn' |
   /// 'endRally' | 'counterAttack' | 'acceptHit' | 'escapeWithCard' |
   /// 'escapeWithHp' | 'concede' | 'cancelFinisher' | 'acceptFinisher' |
   /// 'escapeFinisherWithCard' | 'concedeFinisher'

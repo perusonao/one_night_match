@@ -444,9 +444,11 @@ void main() {
         ),
       );
       final entry = state.active.hand.first;
-      final result = TechniqueMatchEngine.useMove(state, entry, catalog());
-      expect(result.success, isTrue);
-      final updated = result.state;
+      // 現行フロー: declareAttack（宣言・エネルギー消費）→ resolveHit（返技
+      // されなかった場合の成立・ダメージ適用）。
+      final declared = TechniqueMatchEngine.declareAttack(state, entry, catalog());
+      expect(declared.success, isTrue);
+      final updated = TechniqueMatchEngine.resolveHit(declared.state, catalog());
       expect(updated.playerB.hp, 90); // 100 - 10
       expect(updated.playerA.heat, 5);
       expect(updated.playerB.posture, WrestlerPosture.down);
@@ -459,10 +461,11 @@ void main() {
     test('HPが0になると疲労状態になる（0未満にはならない）', () {
       var state = matchWithHand(['lethal_move']);
       final entry = state.active.hand.first;
-      final result = TechniqueMatchEngine.useMove(state, entry, catalog());
-      expect(result.success, isTrue);
-      expect(result.state.playerB.hp, 0);
-      expect(result.state.playerB.posture, WrestlerPosture.fatigued);
+      final declared = TechniqueMatchEngine.declareAttack(state, entry, catalog());
+      expect(declared.success, isTrue);
+      final updated = TechniqueMatchEngine.resolveHit(declared.state, catalog());
+      expect(updated.playerB.hp, 0);
+      expect(updated.playerB.posture, WrestlerPosture.fatigued);
     });
 
     test('スタンド限定技はダウン中の相手には使用できない', () {
@@ -559,10 +562,10 @@ void main() {
       expect(check.reason, contains('手札'));
     });
 
-    test('検証に失敗した場合、useMoveは状態を変化させない', () {
+    test('検証に失敗した場合、declareAttackは状態を変化させない', () {
       final state = matchWithHand(['lv2_move']);
       final entry = state.active.hand.first;
-      final result = TechniqueMatchEngine.useMove(state, entry, catalog());
+      final result = TechniqueMatchEngine.declareAttack(state, entry, catalog());
       expect(result.success, isFalse);
       expect(result.state, same(state));
     });
@@ -1738,35 +1741,38 @@ void main() {
 
     test('相手がスタンド中は基礎威力のみ（downBonusPowerは加算されない）', () {
       final state = stateWith(defenderPosture: WrestlerPosture.stand);
-      final result = TechniqueMatchEngine.useMove(
+      final declared = TechniqueMatchEngine.declareAttack(
         state,
         state.playerA.hand.first,
         catalog(),
       );
-      expect(result.success, isTrue);
-      expect(result.state.playerB.hp, 94); // 100 - 6
+      expect(declared.success, isTrue);
+      final result = TechniqueMatchEngine.resolveHit(declared.state, catalog());
+      expect(result.playerB.hp, 94); // 100 - 6
     });
 
     test('相手がダウン中はdownBonusPowerが加算される', () {
       final state = stateWith(defenderPosture: WrestlerPosture.down);
-      final result = TechniqueMatchEngine.useMove(
+      final declared = TechniqueMatchEngine.declareAttack(
         state,
         state.playerA.hand.first,
         catalog(),
       );
-      expect(result.success, isTrue);
-      expect(result.state.playerB.hp, 88); // 100 - (6 + 6)
+      expect(declared.success, isTrue);
+      final result = TechniqueMatchEngine.resolveHit(declared.state, catalog());
+      expect(result.playerB.hp, 88); // 100 - (6 + 6)
     });
 
     test('相手が疲労中もdown系状態としてdownBonusPowerが加算される', () {
       final state = stateWith(defenderPosture: WrestlerPosture.fatigued);
-      final result = TechniqueMatchEngine.useMove(
+      final declared = TechniqueMatchEngine.declareAttack(
         state,
         state.playerA.hand.first,
         catalog(),
       );
-      expect(result.success, isTrue);
-      expect(result.state.playerB.hp, 88); // 100 - (6 + 6)
+      expect(declared.success, isTrue);
+      final result = TechniqueMatchEngine.resolveHit(declared.state, catalog());
+      expect(result.playerB.hp, 88); // 100 - (6 + 6)
     });
   });
 

@@ -751,6 +751,11 @@ class TechniqueDeckWrestlerProfile {
 
   /// レスラーカードの基準HP（表示・将来のバランス調整用）。
   final int hp;
+
+  /// **LEGACY / deprecated**: 休息システム廃止（docs/history/
+  /// technique_deck_rule_history.md参照）により、現在ゲームプレイ上の効果を
+  /// 一切持たない。JSON互換性のためフィールドとしては残置しているが、
+  /// 次期schemaVersionでの削除候補。新しい用途へ転用しないこと。
   final int recoveryPower;
 
   /// Combo Speed Rules（Phase 8.5A）: 1ラリー中に攻撃側が持つSpeedの初期値。
