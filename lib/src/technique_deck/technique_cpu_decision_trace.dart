@@ -49,6 +49,41 @@ class TechniqueCpuCandidate {
   };
 }
 
+/// 【次フェーズ Stage7】CPUの意思決定理由を機械可読な形で分類する
+/// （既存の自由文`TechniqueCpuChosenAction.reason`は人間が読む説明として
+/// そのまま残し、こちらは将来の集計・分析用の追加情報として併記する）。
+enum TechniqueCpuDecisionReason {
+  /// 使用可能な攻撃技が手札に無い。
+  noPlayableAttack,
+
+  /// 返技用エネルギーを温存するため、あえてこの技を選ばなかった／使わない。
+  saveEnergy,
+
+  /// 返技可能な候補があり、返技を選んだ。
+  counterAvailable,
+
+  /// 複数の返技候補の中から、最も評価の高いものを選んだ。
+  counterPreferred,
+
+  /// 返技可能だったが、脅威スコアが閾値未満のため受けを選んだ。
+  counterDeclined,
+
+  /// フィニッシャーの発動条件を満たしていない。
+  finisherNotReady,
+
+  /// エネルギーをセットした。
+  energySet,
+
+  /// 追撃せず攻防（ラリー）を終えた。
+  rallyEnded,
+
+  /// 使用可能な技が無いため無言でターンを自動終了した。
+  autoPassTurn,
+
+  /// 上記のいずれにも当てはまらない。
+  other,
+}
+
 /// 最終的に選ばれた行動。
 class TechniqueCpuChosenAction {
   const TechniqueCpuChosenAction({
@@ -56,6 +91,7 @@ class TechniqueCpuChosenAction {
     this.cardId,
     this.cardName,
     required this.reason,
+    this.reasonCode,
   });
 
   /// 'setEnergy' | 'declareAttack' | 'declareFinisher' | 'rest' | 'endTurn' |
@@ -67,11 +103,17 @@ class TechniqueCpuChosenAction {
   final String? cardName;
   final String reason;
 
+  /// 【次フェーズ Stage7】[reason]（自由文）を機械可読に分類したもの。
+  /// 追加のみのnullableフィールドのため、未設定の既存呼び出し箇所には
+  /// 一切影響しない。
+  final TechniqueCpuDecisionReason? reasonCode;
+
   Map<String, dynamic> toJson() => {
     'action': action,
     if (cardId != null) 'cardId': cardId,
     if (cardName != null) 'cardName': cardName,
     'reason': reason,
+    if (reasonCode != null) 'reasonCode': reasonCode!.name,
   };
 }
 

@@ -71,6 +71,10 @@ class TechniqueMatchCpu {
     TechniqueDeckCardCatalog catalog, {
     TechniqueCpuLevel level = TechniqueCpuLevel.normal,
     Random? random,
+    // 【次フェーズ Stage6】デフォルトfalse。trueの場合のみ、返技判定に
+    // SPEED-vs-SPEEDゲートを適用する（既存のCPU強さ・意思決定には
+    // 一切影響しない機能フラグ）。
+    bool enableSpeedGate = false,
   }) {
     if (state.isOver) {
       return TechniqueCpuStepResult(state: state);
@@ -90,7 +94,10 @@ class TechniqueMatchCpu {
       return _settled(_decideEscape(state, catalog, level, rng), rng);
     }
     if (state.pendingAttack != null) {
-      return _settled(_decideCounter(state, catalog, level, rng), rng);
+      return _settled(
+        _decideCounter(state, catalog, level, rng, enableSpeedGate: enableSpeedGate),
+        rng,
+      );
     }
     if (state.isRallyActive) {
       // _decideRallyAction自身が「有効技なし」の枝で既にautoAdvanceTurn
@@ -254,6 +261,7 @@ class TechniqueMatchCpu {
         reason: bestDemand > 0
             ? '手札の技が最も必要としている属性（${moveAttributeLabel(chosenCard.attribute)}）を優先してセットした'
             : '手札の技の不足属性が無いため、最初のエネルギーカードをセットした',
+        reasonCode: TechniqueCpuDecisionReason.energySet,
       ),
     );
     return TechniqueCpuStepResult(state: result.state, trace: trace);
@@ -379,6 +387,7 @@ class TechniqueMatchCpu {
           cardId: bestEntry.cardId,
           cardName: bestCard.name,
           reason: 'スコア$bestScore点で最も評価が高い技を選択した',
+          reasonCode: TechniqueCpuDecisionReason.other,
         ),
         rejected: rejected,
         rallyAttackerIndex: state.rallyAttackerIndex,
@@ -408,6 +417,7 @@ class TechniqueMatchCpu {
         chosen: const TechniqueCpuChosenAction(
           action: 'endRally',
           reason: '追撃に値するスコアの技が無いためラリーを終了した',
+          reasonCode: TechniqueCpuDecisionReason.rallyEnded,
         ),
         rallyAttackerIndex: state.rallyAttackerIndex,
         remainingSpeed: remainingSpeed,
@@ -435,6 +445,7 @@ class TechniqueMatchCpu {
       chosen: const TechniqueCpuChosenAction(
         action: 'passTurn',
         reason: '使用可能な技が無いためターンを自動終了した',
+        reasonCode: TechniqueCpuDecisionReason.noPlayableAttack,
       ),
       rallyAttackerIndex: state.rallyAttackerIndex,
       remainingSpeed: remainingSpeed,
@@ -567,13 +578,18 @@ class TechniqueMatchCpu {
     TechniqueMatchState state,
     TechniqueDeckCardCatalog catalog,
     TechniqueCpuLevel level,
-    Random rng,
-  ) {
+    Random rng, {
+    bool enableSpeedGate = false,
+  }) {
     final pending = state.pendingAttack!;
     final defenderIndex = 1 - pending.attackerIndex;
     final defender = state.playerAt(defenderIndex);
     final card = catalog.findTechniqueById(pending.cardId);
-    final check = TechniqueMatchEngine.checkCounterEligibility(state, catalog);
+    final check = TechniqueMatchEngine.checkCounterEligibility(
+      state,
+      catalog,
+      enableSpeedGate: enableSpeedGate,
+    );
 
     var threat = 0;
     final factors = <TechniqueCpuScoreFactor>[];
@@ -592,7 +608,11 @@ class TechniqueMatchCpu {
     // 【ゲームサイクル整理ラウンド 優先度2】返技には手札の返技候補カードが
     // 必要になった。候補の中から「返技すると自分のエネルギーが枯渇しない
     // カード」を優先して選ぶ（返技用エネルギーを残す、という既存方針の延長）。
-    final candidates = TechniqueMatchEngine.counterCandidates(state, catalog);
+    final candidates = TechniqueMatchEngine.counterCandidates(
+      state,
+      catalog,
+      enableSpeedGate: enableSpeedGate,
+    );
     TechniqueDeckEntry? chosenEntry;
     if (candidates.isNotEmpty) {
       chosenEntry = candidates.reduce((a, b) {
@@ -641,6 +661,7 @@ class TechniqueMatchCpu {
           cardName: counterCardName,
           reason: '脅威スコア$threat点（閾値$threshold）が高いため'
               '「$counterCardName」で返技した',
+          reasonCode: TechniqueCpuDecisionReason.counterAvailable,
         ),
       );
       return TechniqueCpuStepResult(state: result.state, trace: trace);
@@ -670,6 +691,7 @@ class TechniqueMatchCpu {
         reason: !check.canCounter
             ? (check.reason ?? '返技できないため受けた')
             : '脅威スコア$threat点（閾値$threshold未満）のため返技せず受けた',
+        reasonCode: TechniqueCpuDecisionReason.counterDeclined,
       ),
     );
     return TechniqueCpuStepResult(state: resolved, trace: trace);

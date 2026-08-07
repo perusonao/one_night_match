@@ -314,6 +314,11 @@ void main() {
       await selectAndConfirm(tester, '打エネルギー', 'セットする');
       expect(find.textContaining('エネルギーとしてセットした'), findsOneWidget);
 
+      // 【次フェーズ Stage4】手札の技カードにSPEEDが表示され、speed未指定
+      // カード（testCatalog()のnormal_1、既定値1）でも例外にならないこと
+      // を確認する。
+      expect(find.textContaining('SPD1'), findsWidgets);
+
       // 技カードも同様にタップ→選択→「使用する」で宣言する。
       await tester.tap(find.text('通常技A').first);
       await tester.pumpAndSettle();
@@ -401,22 +406,32 @@ void main() {
       await tester.tap(find.text('使用する'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('[Chain 1]'), findsWidgets);
+      expect(find.textContaining('[COMBO ×1]'), findsWidgets);
       expect(find.text('使用できる返技'), findsOneWidget);
+
+      // 【次フェーズ Stage3】判定待ち中は中央RINGにATTACK/DEFENSEラベルと
+      // 使用技の威力・SPEEDチップが表示される。
+      expect(find.text('ATTACK'), findsOneWidget);
+      expect(find.text('DEFENSE'), findsOneWidget);
+      expect(find.textContaining('「通常技A」 POW10 SPD1'), findsOneWidget);
+
       final counterButton = find.widgetWithText(OutlinedButton, '通常技A　返×1');
       expect(counterButton, findsOneWidget);
 
       await tester.tap(counterButton);
       await tester.pumpAndSettle();
 
+      // 【次フェーズ Stage3】返技成立時はCOUNTER！が中央RINGに表示される
+      // （旧正規表現の不一致バグを修正）。
+      expect(find.textContaining('COUNTER'), findsWidgets);
       expect(find.textContaining('攻守交代'), findsOneWidget);
-      expect(find.textContaining('Chain 1'), findsWidgets);
+      expect(find.textContaining('COMBO ×1'), findsWidgets);
       expect(find.textContaining('攻撃側'), findsWidgets);
-      expect(find.text('ラリーを終了する'), findsOneWidget);
+      expect(find.text('攻防を終了する'), findsOneWidget);
 
-      // 攻守交代後、追撃せずラリーを終了できる。優先度1により、追撃せず
-      // ラリーを終了した時点で自動的にターンも終了する。
-      await tester.tap(find.text('ラリーを終了する'));
+      // 攻守交代後、追撃せず攻防を終了できる。優先度1により、追撃せず
+      // 攻防を終了した時点で自動的にターンも終了する。
+      await tester.tap(find.text('攻防を終了する'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('ラリーを終了した'), findsOneWidget);
@@ -906,6 +921,23 @@ void main() {
       expect(state.activePlayerIndex, 0);
     });
 
+    // 【次フェーズ Stage2: 対面レイアウト】vsCpu時は相手（CPU、常にB）が
+    // 画面上部、自分（人間、常にA）が下部に来ることを、両者の名前
+    // テキストの画面上の垂直位置（dy）で確認する。
+    testWidgets('vsCpu時はCPU（相手）が画面上部、人間（自分）が下部に表示される', (tester) async {
+      await pumpCpuScreen(tester);
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+
+      final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
+      final String wrestlerAName = screenState.wrestlerA.name as String;
+      final String wrestlerBName = screenState.wrestlerB.name as String;
+
+      final aTop = tester.getTopLeft(find.text(wrestlerAName).first).dy;
+      final bTop = tester.getTopLeft(find.text(wrestlerBName).first).dy;
+      expect(bTop, lessThan(aTop));
+    });
+
     testWidgets('Aがラリーを終えてBの手番になると、CPUが手札を公開せず自動的に思考・行動する', (tester) async {
       final repo = LocalTechniqueDeckRepository();
       // このテストではB（CPU）が実際に技を選べるかどうかは検証対象では
@@ -950,7 +982,7 @@ void main() {
 
       // Phase 8.5A: 単発ヒットだけではラリーが終わらないため、明示的に
       // 終了してBの手番へ渡す。
-      await tester.tap(find.text('ラリーを終了する'));
+      await tester.tap(find.text('攻防を終了する'));
       await tester.pump();
 
       // Bの手番になった直後は思考中インジケーター表示のみで、手札は表示
@@ -1010,7 +1042,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('使用する'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('ラリーを終了する'));
+      await tester.tap(find.text('攻防を終了する'));
       await tester.pump();
     }
 

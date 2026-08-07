@@ -952,6 +952,15 @@ class TechniqueMatchEngine {
   static int _remainingSpeedFor(TechniqueMatchState state, int attackerIndex) =>
       state.rallyRemainingSpeed ?? state.playerAt(attackerIndex).comboSpeed;
 
+  /// 【次フェーズ Stage6】コンボが長く続くほど技の「実効SPEED」が下がる、
+  /// という将来ルールのための純粋関数（`cardSpeed - (comboCount - 1)`）。
+  /// 現時点ではどの判定ロジックからも呼ばれていない（意図的：今回のフェーズ
+  /// では画面表示・返技判定への組み込みは行わず、将来の段階的導入に備えて
+  /// 独立した検証可能な関数として先に用意するだけに留める、というユーザー
+  /// 指示による）。`comboCount`は1始まり（1発目=comboCount 1）。
+  static int calculateEffectiveSpeed(int cardSpeed, int comboCount) =>
+      cardSpeed - (comboCount - 1);
+
   /// 現在攻撃側になり得るプレイヤー（ラリー中ならその攻撃側、ラリー外なら
   /// `activePlayerIndex`）が、手札の中に使用可能な技を1枚でも持っているか。
   /// UIが「使用可能技がない」による自動終了を判定するのに使う。
@@ -1007,10 +1016,30 @@ class TechniqueMatchEngine {
   /// 定義されていた値）を支払うことで、任意の保留中攻撃への「返技」として
   /// 使用できる（＝カードを1枚消費し、そのカード固有の返技コストを払う）。
   /// 値そのもの（威力・エネルギー数値等）は一切変更していない。
+  /// 【次フェーズ Stage6】攻撃技の実効SPEED（`calculateEffectiveSpeed`、
+  /// `pending.chain`＝そのコンボの何発目かを使用）に対し、返技候補カードの
+  /// 実効SPEED（返技は単発の使用なのでcomboCount=1固定）が下回っていない
+  /// かを判定する。[enableSpeedGate]がfalse（既定値）の場合は常にtrueを
+  /// 返し、既存の返技可否ロジックには一切影響しない。
+  static bool _passesSpeedGate(
+    TechniquePendingAttack pending,
+    TechniqueDeckTechniqueCard counterCard,
+    TechniqueDeckCardCatalog catalog, {
+    required bool enableSpeedGate,
+  }) {
+    if (!enableSpeedGate) return true;
+    final attackCard = catalog.findTechniqueById(pending.cardId);
+    if (attackCard == null) return true;
+    final attackEffective = calculateEffectiveSpeed(attackCard.speed, pending.chain);
+    final counterEffective = calculateEffectiveSpeed(counterCard.speed, 1);
+    return counterEffective >= attackEffective;
+  }
+
   static List<TechniqueDeckEntry> counterCandidates(
     TechniqueMatchState state,
-    TechniqueDeckCardCatalog catalog,
-  ) {
+    TechniqueDeckCardCatalog catalog, {
+    bool enableSpeedGate = false,
+  }) {
     final pending = state.pendingAttack;
     if (pending == null) return const [];
     final defenderIndex = 1 - pending.attackerIndex;
@@ -1032,6 +1061,9 @@ class TechniqueMatchEngine {
           return false;
         }
       }
+      if (!_passesSpeedGate(pending, card, catalog, enableSpeedGate: enableSpeedGate)) {
+        return false;
+      }
       return true;
     }).toList();
   }
@@ -1041,12 +1073,13 @@ class TechniqueMatchEngine {
   /// 使用する具体的なカードを指定して [counterAttack] を呼ぶ）。
   static ({bool canCounter, String? reason}) checkCounterEligibility(
     TechniqueMatchState state,
-    TechniqueDeckCardCatalog catalog,
-  ) {
+    TechniqueDeckCardCatalog catalog, {
+    bool enableSpeedGate = false,
+  }) {
     if (state.pendingAttack == null) {
       return (canCounter: false, reason: '返技可能な攻撃がありません。');
     }
-    final candidates = counterCandidates(state, catalog);
+    final candidates = counterCandidates(state, catalog, enableSpeedGate: enableSpeedGate);
     if (candidates.isEmpty) {
       return (canCounter: false, reason: '使用できる返技カードがありません。');
     }
@@ -1058,8 +1091,9 @@ class TechniqueMatchEngine {
   static ({bool canCounter, String? reason}) canCounterWithEntry(
     TechniqueMatchState state,
     TechniqueDeckEntry entry,
-    TechniqueDeckCardCatalog catalog,
-  ) {
+    TechniqueDeckCardCatalog catalog, {
+    bool enableSpeedGate = false,
+  }) {
     final pending = state.pendingAttack;
     if (pending == null) {
       return (canCounter: false, reason: '返技可能な攻撃がありません。');
@@ -1098,6 +1132,12 @@ class TechniqueMatchEngine {
               '（必要${costEntry.value}、使用可能${defender.availableEnergyFor(costEntry.key)}）。',
         );
       }
+    }
+    if (!_passesSpeedGate(pending, card, catalog, enableSpeedGate: enableSpeedGate)) {
+      return (
+        canCounter: false,
+        reason: '攻撃技よりSPEEDが不足しているため返技できません。',
+      );
     }
     return (canCounter: true, reason: null);
   }

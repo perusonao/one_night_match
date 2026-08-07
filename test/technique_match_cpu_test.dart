@@ -849,5 +849,22 @@ void main() {
       expect(json['chosen'], isA<Map<String, dynamic>>());
       expect((json['rejected'] as List).length, 1);
     });
+
+    // 【次フェーズ Stage7】reasonCodeは追加のみのnullableフィールドで、
+    // 未設定なら従来どおりJSONに現れないこと・設定時はenum名の文字列で
+    // 出力されることを確認する。
+    test('reasonCode未設定ならJSONに現れない', () {
+      const chosen = TechniqueCpuChosenAction(action: 'passTurn', reason: '技が無い');
+      expect(chosen.toJson().containsKey('reasonCode'), isFalse);
+    });
+
+    test('reasonCode設定時はenum名の文字列としてJSONへ出力される', () {
+      const chosen = TechniqueCpuChosenAction(
+        action: 'passTurn',
+        reason: '技が無い',
+        reasonCode: TechniqueCpuDecisionReason.noPlayableAttack,
+      );
+      expect(chosen.toJson()['reasonCode'], 'noPlayableAttack');
+    });
   });
 }

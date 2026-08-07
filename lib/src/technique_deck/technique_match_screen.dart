@@ -82,6 +82,7 @@ class TechniqueMatchScreen extends StatefulWidget {
     this.vsCpu = false,
     this.cpuLevel = TechniqueCpuLevel.normal,
     this.cpuPresentationSpeed = TechniqueCpuPresentationSpeed.normal,
+    this.enableSpeedCounterGate = false,
     this.initialWrestlerAId,
     this.initialWrestlerBId,
     this.debugMode = false,
@@ -95,6 +96,13 @@ class TechniqueMatchScreen extends StatefulWidget {
   /// CPUの意思決定（`TechniqueMatchCpu`）や難易度には一切影響しない、
   /// 純粋にUI層の演出速度設定。
   final TechniqueCpuPresentationSpeed cpuPresentationSpeed;
+
+  /// 【次フェーズ Stage6】既定値false（未活性）の機能フラグ。trueにすると
+  /// CPUの返技判定へSPEED-vs-SPEEDゲート（攻撃技の実効SPEED以上の実効
+  /// SPEEDを持つ返技でなければ返せない）を適用する。既存の返技バランスを
+  /// 今回のフェーズでいきなり変更しないため、UI（セットアップ画面等）に
+  /// トグルは設けず、コンストラクタ引数としてのみ用意する。
+  final bool enableSpeedCounterGate;
 
   /// 【ゲームサイクル整理ラウンド 優先度7】trueならPlayer B（レスラーB）を
   /// Normal CPUが自動操作する。既定値はfalse（従来どおりの2人対戦
@@ -175,6 +183,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   final TechniqueCpuLevel cpuLevel = TechniqueCpuLevel.normal;
   late bool debugMode = widget.debugMode;
   late TechniqueCpuPresentationSpeed cpuPresentationSpeed = widget.cpuPresentationSpeed;
+  late bool enableSpeedCounterGate = widget.enableSpeedCounterGate;
   Timer? _cpuTimer;
   // 【Phase 8.5A-2 ⑪】CPUが行動した「結果」（技名等）を見せたまま次の
   // ステップへ進むまでの静止時間用タイマー。_cpuTimer（着手前の「考えて
@@ -212,6 +221,12 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   String _gameId = '';
 
   bool _isCpu(int playerIndex) => vsCpu && playerIndex == 1;
+
+  // 【次フェーズ Stage2: 対面レイアウト】vsCpu時は相手（CPU、常にindex1）を
+  // 上、自分（人間、常にindex0）を下に固定する。2人対戦（hotseat）時は
+  // 「自分」を固定できないため、従来どおりA(0)を上・B(1)を下のまま。
+  int get _topPlayerIndex => vsCpu ? 1 : 0;
+  int get _bottomPlayerIndex => vsCpu ? 0 : 1;
 
   @override
   void initState() {
@@ -353,6 +368,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     required String action,
     String? cardId,
     String? cardName,
+    String? counterReason,
   }) {
     final actorIndex = TechniqueMatchCpu.actingPlayerIndex(before);
     final actorBefore = before.playerAt(actorIndex);
@@ -382,11 +398,77 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         targetPostureBefore: actorBefore.posture.name,
         targetPostureAfter: actorAfter.posture.name,
         message: newLines.join(' / '),
+        details: _buildTurnEntryDetails(
+          before: before,
+          after: after,
+          action: action,
+          cardId: cardId,
+          counterReason: counterReason,
+        ),
       ),
     );
     if (after.isOver && _matchFinishedAt == null) {
       _matchFinishedAt = DateTime.now();
     }
+  }
+
+  /// 【次フェーズ Stage7】今後のバランス分析用に、SPEED・COUNTER関連の
+  /// 診断情報を`TechniqueMatchTurnEntry.details`（既存のnullableマップ、
+  /// スキーマ非破壊）へ格納する。「返せる技があったが使わなかった」
+  /// 「返せる技がなかった」を後から区別できるよう、`counterAvailable`は
+  /// `pendingAttack`が存在する時点（防御側の意思決定点）で常に計算する。
+  Map<String, dynamic>? _buildTurnEntryDetails({
+    required TechniqueMatchState before,
+    required TechniqueMatchState after,
+    required String action,
+    String? cardId,
+    String? counterReason,
+  }) {
+    final attackerIndex = before.rallyAttackerIndex ?? before.activePlayerIndex;
+    final attackerId = before.playerAt(attackerIndex).wrestlerId;
+    final defenderId = before.playerAt(1 - attackerIndex).wrestlerId;
+
+    int? cardSpeed;
+    int? effectiveSpeed;
+    String? attackCardId;
+    if ((action == 'declareAttack' || action == 'declareFinisher') && cardId != null) {
+      attackCardId = cardId;
+      cardSpeed = catalog.findTechniqueById(cardId)?.speed;
+      if (cardSpeed != null) {
+        effectiveSpeed = TechniqueMatchEngine.calculateEffectiveSpeed(cardSpeed, after.rallyChain);
+      }
+    }
+
+    String? counterCardId;
+    bool? counterUsed;
+    if (action == 'counterAttack' || action == 'cancelFinisher') {
+      counterCardId = cardId;
+      counterUsed = true;
+    } else if (action == 'acceptHit' || action == 'acceptFinisher') {
+      counterUsed = false;
+    }
+
+    bool? counterAvailable;
+    if (before.pendingAttack != null) {
+      counterAvailable = TechniqueMatchEngine.checkCounterEligibility(before, catalog).canCounter;
+    }
+
+    final initiativeChanged = before.rallyAttackerIndex != after.rallyAttackerIndex;
+
+    final details = <String, dynamic>{
+      'cardSpeed': ?cardSpeed,
+      'effectiveSpeed': ?effectiveSpeed,
+      'comboCount': after.rallyChain,
+      'attackCardId': ?attackCardId,
+      'counterCardId': ?counterCardId,
+      'counterAvailable': ?counterAvailable,
+      'counterUsed': ?counterUsed,
+      'counterReason': ?counterReason,
+      'attackerId': attackerId,
+      'defenderId': defenderId,
+      'initiativeChanged': initiativeChanged,
+    };
+    return details.isEmpty ? null : details;
   }
 
   /// 現在の状態を見て、次に何をすべきかを決める。
@@ -492,7 +574,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   /// 【Phase 8.5A-2 ⑪】行動後に見せる短い状況テキスト（例:
   /// 「豪田ミサキが「パワーボム」を使用！」「豪田ミサキが「スパイン
   /// バスター」で返した！」）。
-  String _cpuResultStatusText(String wrestlerName, String action, String? cardName) {
+  /// 【次フェーズ Stage5】setEnergyは「何をセットしたか」が最低限確認
+  /// できるよう、属性名を含めた文言にする（例:「豪田ミサキ 投エネルギー
+  /// をセット」）。カード名は`cardId`からカタログ経由で解決する
+  /// （traceは既にPhase 8.5A-2からcardId/cardNameを持っている）。
+  String _cpuResultStatusText(String wrestlerName, String action, String? cardId, String? cardName) {
     switch (action) {
       case 'declareAttack':
       case 'declareFinisher':
@@ -507,7 +593,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       case 'acceptHit':
         return '$wrestlerNameが技を受けた';
       case 'endRally':
-        return '$wrestlerNameがラリーを終えた';
+        return '$wrestlerNameが攻防を終えた';
       case 'escapeWithCard':
       case 'escapeWithHp':
       case 'escapeFinisherWithCard':
@@ -518,7 +604,10 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       case 'acceptFinisher':
         return '$wrestlerNameがフィニッシャーを受けた';
       case 'setEnergy':
-        return '$wrestlerNameがエネルギーをセットした';
+        final attribute = cardId == null ? null : catalog.findEnergyById(cardId)?.attribute;
+        return attribute != null
+            ? '$wrestlerName\n${moveAttributeLabel(attribute)}エネルギーをセット'
+            : '$wrestlerNameがエネルギーをセットした';
       case 'passTurn':
         return '$wrestlerNameは行動できず手番を終えた';
       default:
@@ -537,12 +626,14 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       catalog,
       level: cpuLevel,
       random: _cpuRandom,
+      enableSpeedGate: enableSpeedCounterGate,
     );
     if (result.trace != null) {
       _cpuTraces.add(result.trace!);
       if (_cpuTraces.length > 300) _cpuTraces.removeAt(0);
     }
     final action = result.trace?.chosen.action ?? 'cpuStep';
+    final cardId = result.trace?.chosen.cardId;
     final cardName = result.trace?.chosen.cardName;
     if (!mounted) return;
     // 【Phase 8.5A-2 ⑪】passTurn／endRally等、CPUのアクション自体に手番の
@@ -552,7 +643,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     // 誤って人間側の操作UIへ切り替わらないようにする。
     setState(() {
       matchState = result.state;
-      _cpuStatusText = _cpuResultStatusText(cpuPlayer.wrestlerName, action, cardName);
+      _cpuStatusText = _cpuResultStatusText(cpuPlayer.wrestlerName, action, cardId, cardName);
       _cpuHoldingResult = !result.state.isOver;
     });
     _recordTurnEntry(
@@ -561,6 +652,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       action: action,
       cardId: result.trace?.chosen.cardId,
       cardName: cardName,
+      counterReason: result.trace?.chosen.reason,
     );
     // 【Phase 8.5A-2 ⑪】試合が終了した場合は、結果表示（勝敗バナー）に
     // 切り替わるため、これ以上CPUの行動をスケジュールしない。
@@ -767,7 +859,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
-        title: Text('[Chain ${pending.chain}] ${defender.wrestlerName}の返技判定'),
+        title: Text('[COMBO ×${pending.chain}] ${defender.wrestlerName}の返技判定'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1225,7 +1317,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '威力: ${technique.power} ・ HEAT: ${technique.heatDelta}',
+                '威力: ${technique.power} ・ SPEED: ${technique.speed} ・ '
+                'HEAT: ${technique.heatDelta}',
                 style: const TextStyle(color: _gold, fontWeight: FontWeight.bold),
               ),
               Text('対象状態: ${_targetStateLabel(technique.targetState)}'),
@@ -1283,7 +1376,10 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('威力: ${technique.power} ・ HEAT: ${technique.heatDelta}'),
+              Text(
+                '威力: ${technique.power} ・ SPEED: ${technique.speed} ・ '
+                'HEAT: ${technique.heatDelta}',
+              ),
               Text(
                 '必要レベル: Lv.${technique.minimumLevel} ・ '
                 '対象状態: ${_targetStateLabel(technique.targetState)}',
@@ -1555,12 +1651,12 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     if (state.pendingAttack != null) {
       final defender = state.playerAt(1 - state.pendingAttack!.attackerIndex);
       return '${defender.wrestlerName}が返技を選択しています'
-          '（Chain ${state.pendingAttack!.chain}）';
+          '（COMBO ×${state.pendingAttack!.chain}）';
     }
     if (state.isRallyActive) {
       final attacker = state.playerAt(state.rallyAttackerIndex!);
-      return '${attacker.wrestlerName}が攻撃側・Chain ${state.rallyChain}'
-          '：続けて技を選ぶか、ラリーを終了してください';
+      return '${attacker.wrestlerName}が攻撃側・COMBO ×${state.rallyChain}'
+          '：続けて技を選ぶか、攻防を終了してください';
     }
     final hasEnergyInHand = state.active.hand.any(
       (e) => catalog.findEnergyById(e.cardId) != null,
@@ -1653,7 +1749,14 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
 
   static final _highlightRules = <(RegExp, String Function(RegExpMatch), Color)>[
     (RegExp('「(.+?)」を宣言した（フィニッシャー）'), (m) => '${m.group(1)}!!', _gold),
-    (RegExp('が「(.+?)」を返技した'), (m) => '返した！', _green),
+    // 【次フェーズ Stage3】返技の実際のログ文言は
+    // 「〜が「返技名」で「攻撃技名」を返した（ダメージ無効・攻守交代）」
+    // （technique_match_state.dart:1265-1266）。旧パターン
+    // 「が「(.+?)」を返技した」はこの文言と一致せず、返技イベントが
+    // 一度もハイライトされていなかった（見つけたバグ、今回のCOUNTER演出
+    // 強化の一環として修正）。COUNTER演出はユーザー指示の重要イベントの
+    // ため、他の技成立より大きく強調する。
+    (RegExp('「(.+?)」で(.+?)を返した'), (m) => 'COUNTER！', _gold),
     (RegExp('「(.+?)」が成立した'), (m) => '「${m.group(1)}」ヒット！', Colors.white),
     (RegExp('「(.+?)」を宣言した'), (m) => '${m.group(1)}！', Colors.white),
     (RegExp('がダウンした'), (m) => 'ダウン！！', _orange),
@@ -1692,11 +1795,33 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
           }
         } else if (pattern.pattern.contains('フィニッシャー')) {
           sub = '必殺技発動！';
+        } else if (pattern.pattern.contains('で(.+?)を返した')) {
+          sub = '「${match.group(1)}」で「${match.group(2)}」を返した！';
         }
         return (main: build(match), sub: sub, color: color);
       }
     }
     return null;
+  }
+
+  /// 【次フェーズ Stage3】判定待ち中（`pendingAttack`）の攻撃技を、人間・
+  /// CPUどちらの手番でも同じ描画ロジックで拾えるようにするヘルパー。
+  /// `state`のみから導出するため、CPU側の演出（`_cpuStatusText`等）には
+  /// 依存しない＝「人間・CPUで同じ視覚文法を使う」という要件を満たす。
+  ({String attackerName, String defenderName, String cardName, int cardPower, MoveAttribute cardAttribute, int cardSpeed})?
+  _currentExchangeCard(TechniqueMatchState state) {
+    final pending = state.pendingAttack;
+    if (pending == null) return null;
+    final card = catalog.findTechniqueById(pending.cardId);
+    if (card == null) return null;
+    return (
+      attackerName: state.playerAt(pending.attackerIndex).wrestlerName,
+      defenderName: state.playerAt(1 - pending.attackerIndex).wrestlerName,
+      cardName: card.name,
+      cardPower: card.power,
+      cardAttribute: card.attribute,
+      cardSpeed: card.speed,
+    );
   }
 
   /// Ver.3 ④: リングを画面の主役として拡大し、両者の立ち絵をリング背景に
@@ -1707,6 +1832,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final highlight = _highlightFor(state.log);
     final effectiveAttackerIndex = state.rallyAttackerIndex ?? state.activePlayerIndex;
     final attackerName = state.playerAt(effectiveAttackerIndex).wrestlerName;
+    final defenderName = state.playerAt(1 - effectiveAttackerIndex).wrestlerName;
+    final exchangeCard = _currentExchangeCard(state);
     final portraitA = techniqueWrestlerPortraits[state.playerA.wrestlerId];
     final portraitB = techniqueWrestlerPortraits[state.playerB.wrestlerId];
     return AnimatedContainer(
@@ -1769,13 +1896,41 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
           Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (!state.isOver && !state.isDraw)
-                Text(
-                  '← $attackerNameが攻撃中',
-                  style: const TextStyle(fontSize: 10, color: Colors.white38),
+              if (!state.isOver && !state.isDraw) ...[
+                // 【次フェーズ Stage3・優先度16】ATTACK/DEFENSEを常に明示する。
+                // `effectiveAttackerIndex`は`counterAttack`成立時に既に
+                // `rallyAttackerIndex`が反転済みのため、追加ロジック無しで
+                // 攻守交代が自動的に反映される。
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _ringRoleChip('ATTACK', attackerName, _red),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 6),
+                      child: Icon(Icons.arrow_forward, size: 12, color: Colors.white38),
+                    ),
+                    _ringRoleChip('DEFENSE', defenderName, _blue),
+                  ],
                 ),
+                if (state.isRallyActive) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'COMBO ×${state.rallyChain}',
+                    style: const TextStyle(
+                      color: _gold,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+                if (exchangeCard != null) ...[
+                  const SizedBox(height: 4),
+                  _exchangeCardChip(exchangeCard),
+                ],
+              ],
               const SizedBox(height: 6),
               AnimatedSwitcher(
+                key: const Key('ringHighlightSwitcher'),
                 duration: const Duration(milliseconds: 350),
                 switchInCurve: Curves.easeOutBack,
                 switchOutCurve: Curves.easeIn,
@@ -1834,6 +1989,42 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     );
   }
 
+  /// 【次フェーズ Stage3】RING中央のATTACK/DEFENSEラベル。
+  Widget _ringRoleChip(String role, String wrestlerName, Color color) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        role,
+        style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 9, letterSpacing: 1),
+      ),
+      Text(
+        wrestlerName,
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+      ),
+    ],
+  );
+
+  /// 【次フェーズ Stage3】判定待ち中の技の威力・属性・SPEEDを簡易表示する。
+  Widget _exchangeCardChip(
+    ({String attackerName, String defenderName, String cardName, int cardPower, MoveAttribute cardAttribute, int cardSpeed})
+    info,
+  ) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: _attributeColor(info.cardAttribute).withValues(alpha: 0.16),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: _attributeColor(info.cardAttribute).withValues(alpha: 0.5)),
+    ),
+    child: Text(
+      '「${info.cardName}」 POW${info.cardPower} SPD${info.cardSpeed}',
+      style: TextStyle(
+        color: _attributeColor(info.cardAttribute),
+        fontWeight: FontWeight.bold,
+        fontSize: 11,
+      ),
+    ),
+  );
+
   Widget _battleView(TechniqueMatchState state) {
     final isNarrow = MediaQuery.sizeOf(context).width < 420;
     final effectiveAttackerIndex = state.rallyAttackerIndex ?? state.activePlayerIndex;
@@ -1872,9 +2063,14 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         ],
         // Ver.3 ⑫⑬: 相手カード→リング→自分カード→STEP→手札の縦構成
         // （ユーザー提示モックアップの並び順に合わせた）。
-        _compactPlayerCard(state, 0),
+        // 【次フェーズ Stage2: 対面レイアウト】vsCpu時は常にCPU（相手）を
+        // 上、人間（自分）を下に固定する（従来はplayerA=0が常に上で、
+        // 人間がplayerAの場合にCPUより人間が上に来てしまっていた）。
+        // 2人対戦（hotseat）時は「自分」が固定できないため、従来どおり
+        // A-top/B-bottomのまま変更しない。
+        _compactPlayerCard(state, _topPlayerIndex),
         _ringPanel(state),
-        _compactPlayerCard(state, 1),
+        _compactPlayerCard(state, _bottomPlayerIndex),
         _actionHeader(state),
         if (actingIsCpu) _cpuThinkingIndicator(state) else ...[
           if (canDeclare && actingPlayer.hand.isNotEmpty) _handScroller(state, actingPlayer),
@@ -2660,6 +2856,14 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
                         ),
                       ],
                     ),
+                    // 【次フェーズ Stage4】SPEEDは全カード必須フィールドとして
+                    // 既にPhase 8.5Aから存在し攻撃可否判定にも使われている
+                    // が、画面には一度も表示されていなかった。幅128のカード
+                    // 内で「威力」行に収まらないため独立した行にする。
+                    Text(
+                      'SPD${technique.speed}',
+                      style: const TextStyle(fontSize: 11, color: Colors.white70),
+                    ),
                   ],
                   if (!cardEligible && reason != null)
                     Padding(
@@ -2804,7 +3008,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         child: OutlinedButton.icon(
           onPressed: _endRally,
           icon: const Icon(Icons.stop_circle_outlined),
-          label: const Text('ラリーを終了する'),
+          label: const Text('攻防を終了する'),
         ),
       );
     }
@@ -2852,7 +3056,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
-          stat('ラリー数', '${state.rallyChain}'),
+          stat('COMBO数', '${state.rallyChain}'),
           stat('ターン数', '${state.turnNumber}'),
           // 【Phase 8.5A-2 ⑫】以前はTechnique Deck Rules側が未実装のため
           // 常に「―」を表示するダミーだったが、ターン数からの換算表示

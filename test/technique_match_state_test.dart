@@ -1082,6 +1082,141 @@ void main() {
       expect(countered.rallyAttackerIndex, 1);
       expect(countered.rallyRemainingSpeed, 10); // 新攻撃側は全回復（引き継がない）
     });
+
+    // 【次フェーズ Stage6】SPEED-vs-COUNTER判定は既定でOFF。
+    // enableSpeedGate:trueを明示した場合のみ、返技の実効SPEEDが攻撃技の
+    // 実効SPEEDを下回っていると返技できなくなる。
+    test('enableSpeedGate未指定（既定false）では、返技のSPEEDが低くても返技できる', () {
+      final state = startWith(
+        handA: ['speed6_move'],
+        handB: ['speed1_move'],
+        energyA: const {MoveAttribute.strike: 1},
+        energyB: const {MoveAttribute.counter: 1},
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      ).state;
+      final check = TechniqueMatchEngine.canCounterWithEntry(
+        declared,
+        declared.playerB.hand.first,
+        catalog(),
+      );
+      expect(check.canCounter, isTrue);
+    });
+
+    test('enableSpeedGate:trueだと、攻撃技よりSPEEDが低い返技は使用できない', () {
+      final state = startWith(
+        handA: ['speed6_move'],
+        handB: ['speed1_move'],
+        energyA: const {MoveAttribute.strike: 1},
+        energyB: const {MoveAttribute.counter: 1},
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      ).state;
+      final check = TechniqueMatchEngine.canCounterWithEntry(
+        declared,
+        declared.playerB.hand.first,
+        catalog(),
+        enableSpeedGate: true,
+      );
+      expect(check.canCounter, isFalse);
+      expect(check.reason, contains('SPEED'));
+
+      final candidates = TechniqueMatchEngine.counterCandidates(
+        declared,
+        catalog(),
+        enableSpeedGate: true,
+      );
+      expect(candidates, isEmpty);
+    });
+
+    test('enableSpeedGate:trueでも、返技のSPEEDが攻撃技以上なら返技できる', () {
+      final state = startWith(
+        handA: ['speed1_move'],
+        handB: ['speed6_move'],
+        energyA: const {MoveAttribute.throwMove: 1},
+        energyB: const {MoveAttribute.counter: 1},
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog(),
+      ).state;
+      final check = TechniqueMatchEngine.canCounterWithEntry(
+        declared,
+        declared.playerB.hand.first,
+        catalog(),
+        enableSpeedGate: true,
+      );
+      expect(check.canCounter, isTrue);
+    });
+  });
+
+  group('TechniqueMatchEngine.calculateEffectiveSpeed（次フェーズ Stage6）', () {
+    test('comboCount=1（1発目）なら実効SPEEDはcardSpeedそのまま', () {
+      expect(TechniqueMatchEngine.calculateEffectiveSpeed(5, 1), 5);
+    });
+
+    test('comboCountが増えるほど実効SPEEDが下がる', () {
+      expect(TechniqueMatchEngine.calculateEffectiveSpeed(5, 2), 4);
+      expect(TechniqueMatchEngine.calculateEffectiveSpeed(5, 3), 3);
+    });
+
+    test('この関数自体はどの判定ロジックからも呼ばれていない（未活性の確認）', () {
+      // 通常のSpeedゲート（既存の攻撃可否判定）はremainingSpeedベースで
+      // あり、calculateEffectiveSpeedとは無関係に動作し続けることを
+      // 回帰確認する（新関数の追加が既存挙動へ影響しないことの担保）。
+      const catalog = TechniqueDeckCardCatalog(
+        techniques: [
+          TechniqueDeckTechniqueCard(
+            id: 'plain_move',
+            name: '技',
+            attribute: MoveAttribute.strike,
+            attackEnergyCost: {MoveAttribute.strike: 1},
+            power: 5,
+            speed: 3,
+          ),
+        ],
+        energies: [],
+        defenseCards: [],
+      );
+      final state = TechniqueMatchEngine.start(
+        wrestlerAId: 'wrestler_a',
+        wrestlerAName: 'レスラーA',
+        wrestlerAMaxHp: 100,
+        deckA: TechniqueDeckDefinition(
+          id: 'deck_a',
+          wrestlerId: 'wrestler_a',
+          entries: const [
+            TechniqueDeckEntry(
+              instanceId: 'a1',
+              cardId: 'plain_move',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+          ],
+        ),
+        wrestlerBId: 'wrestler_b',
+        wrestlerBName: 'レスラーB',
+        wrestlerBMaxHp: 100,
+        deckB: const TechniqueDeckDefinition(id: 'deck_b', wrestlerId: 'wrestler_b', entries: []),
+        handSize: 1,
+        random: Random(1),
+      );
+      final withEnergy = state.copyWith(
+        playerA: state.playerA.copyWith(energyPool: const {MoveAttribute.strike: 1}),
+      );
+      final check = TechniqueMatchEngine.canDeclareAttack(
+        withEnergy,
+        withEnergy.playerA.hand.first,
+        catalog,
+      );
+      expect(check.canUse, isTrue);
+    });
   });
 
   group('Phase 6: フォール・ギブアップの回避判定', () {
