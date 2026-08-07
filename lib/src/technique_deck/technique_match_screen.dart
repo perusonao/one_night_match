@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../level_match/report_export.dart';
+import '../playtest_analytics/playtest_match_repository.dart';
+import '../playtest_analytics/technique_match_analysis_result.dart';
+import '../playtest_analytics/technique_match_analyzer.dart';
 import '../wrestler_editor/models.dart'
     show MoveAttribute, WrestlerDefinition, moveAttributeLabel;
 import '../wrestler_editor/repository.dart';
@@ -219,6 +222,9 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   DateTime? _matchStartedAt;
   DateTime? _matchFinishedAt;
   String _gameId = '';
+  // 【Playtest Analytics Phase A】試合終了時の自動解析・自動保存
+  // （[_autoAnalyzeAndSaveIfNeeded]）を1試合につき1回だけ行うためのガード。
+  bool _autoSaveTriggered = false;
 
   bool _isCpu(int playerIndex) => vsCpu && playerIndex == 1;
 
@@ -307,6 +313,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     _cpuHoldingResult = false;
     _matchStartedAt = DateTime.now();
     _matchFinishedAt = null;
+    _autoSaveTriggered = false;
     _gameId = '${a.id}_vs_${b.id}_${_matchStartedAt!.millisecondsSinceEpoch}';
     setState(() {
       deckSourceNoteA = noteA;
@@ -409,6 +416,54 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     );
     if (after.isOver && _matchFinishedAt == null) {
       _matchFinishedAt = DateTime.now();
+      // 【Playtest Analytics Phase A】人間がJSONダウンロードボタンを押さ
+      // なくても、試合終了と同時に自動解析・ローカル保存が行われるように
+      // する。await はしない（保存に時間がかかっても対戦結果画面の表示を
+      // 妨げないため）が、例外は内部で捕捉して画面をクラッシュさせない。
+      unawaited(_autoAnalyzeAndSaveIfNeeded());
+    }
+  }
+
+  /// 【Playtest Analytics Phase A】試合終了時に1回だけ、
+  /// 試合ログJSON→[TechniqueMatchAnalyzer]→[PlaytestMatchRepository]の
+  /// 自動解析・自動保存を行う。Firestore未導入のこのフェーズでは
+  /// ローカル（SharedPreferences）へ保存するのみ。保存に失敗しても
+  /// 試合そのものがエラー終了しないよう、例外は握りつぶしてSnackBarで
+  /// 通知するに留める（JSONダウンロードは常に手動で可能なまま残る）。
+  Future<void> _autoAnalyzeAndSaveIfNeeded() async {
+    if (_autoSaveTriggered) return;
+    _autoSaveTriggered = true;
+    try {
+      final json = _buildMatchJson();
+      if (json == null) return;
+      final results = const TechniqueMatchAnalyzer().analyze(json);
+      await PlaytestMatchRepository().save(
+        PlaytestMatchRecord(
+          matchJson: json,
+          analysisResults: results,
+          savedAt: DateTime.now(),
+        ),
+      );
+      if (!mounted) return;
+      final summary = TechniqueMatchAnalysisSummary.fromResults(results);
+      if (summary.criticalCount > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Playtest Analytics: CRITICAL${summary.criticalCount}件を検出（自動保存済み）'),
+          ),
+        );
+      }
+    } catch (_) {
+      // 【重要】Firestore未導入のPhase Aではローカル保存の失敗は稀だが、
+      // 万一失敗しても試合結果画面はそのまま表示を継続する
+      // （ユーザー指示: 保存失敗によって試合そのものがエラー終了しては
+      // ならない）。JSONダウンロードボタンから手動取得できる旨を案内する。
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('試合ログの自動保存に失敗しました。JSONダウンロードから手動保存できます。'),
+        ),
+      );
     }
   }
 
@@ -743,18 +798,18 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     return [summarize(0), summarize(1)];
   }
 
-  /// JSONを組み立ててWebダウンロードを試み、未対応環境ではクリップボードへ
-  /// コピーする（優先度9「コピーだけでなく、ファイルとしてダウンロード
-  /// できるようにしてください」に対応。ダウンロード非対応環境向けの
-  /// フォールバックとしてクリップボードコピーも残す）。
-  Future<void> _exportJsonLog() async {
+  /// 試合ログJSONの組み立て（【Playtest Analytics Phase A】手動ダウンロード
+  /// [_exportJsonLog]と試合終了時の自動解析[_autoAnalyzeAndSaveIfNeeded]の
+  /// 両方から使う共通ロジック。以前は`_exportJsonLog`内に直接書かれていたが、
+  /// 自動解析でも同じJSONが必要なため切り出した。組み立てる内容自体は無変更）。
+  Map<String, dynamic>? _buildMatchJson() {
     final state = matchState;
-    if (state == null) return;
+    if (state == null) return null;
     final decks = [?_deckA, ?_deckB];
     final startedAt = _matchStartedAt ?? DateTime.now();
     final finishedAt = _matchFinishedAt ?? DateTime.now();
     final realElapsedSeconds = finishedAt.difference(startedAt).inSeconds;
-    final json = TechniqueMatchJsonLog.build(
+    return TechniqueMatchJsonLog.build(
       gameId: _gameId.isEmpty ? 'unknown' : _gameId,
       schemaVersion: '1.0.0',
       // 【Phase 8.5A-2 ⑩】画面表示（TitleScreenの「更新内容」等）とJSONログ
@@ -789,6 +844,19 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       // 一因）。
       cpuTraces: _cpuTraces,
     );
+  }
+
+  /// JSONを組み立ててWebダウンロードを試み、未対応環境ではクリップボードへ
+  /// コピーする（優先度9「コピーだけでなく、ファイルとしてダウンロード
+  /// できるようにしてください」に対応。ダウンロード非対応環境向けの
+  /// フォールバックとしてクリップボードコピーも残す）。
+  ///
+  /// 【Playtest Analytics Phase A】試合終了時の自動解析・自動保存
+  /// （[_autoAnalyzeAndSaveIfNeeded]）を導入した後も、このボタン・処理は
+  /// 削除せず維持する（詳細調査用に手動でJSONを取得できる手段を残す）。
+  Future<void> _exportJsonLog() async {
+    final json = _buildMatchJson();
+    if (json == null) return;
     final content = const JsonEncoder.withIndent('  ').convert(json);
     final now = DateTime.now();
     String two(int n) => n.toString().padLeft(2, '0');
