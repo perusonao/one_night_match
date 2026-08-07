@@ -156,11 +156,14 @@ class TitleScreen extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 10),
-                // 【Phase 8.5A-2 ⑩】アプリ全体のバージョンを、ゲーム開始ボタン
-                // を邪魔しない位置（最下部）に常時・控えめに表示する。値は
-                // AppBuildInfoが唯一の定義元。
+                // 【Phase 8.5A-2 ⑩、Playtest Analytics Phase A】アプリ全体の
+                // バージョン・Buildラベルを、ゲーム開始ボタンを邪魔しない位置
+                // （最下部）に常時・控えめに表示する。値はAppBuildInfoが
+                // 唯一の定義元（「どのビルドでプレイしたログか」を後から
+                // 見分けられるようにするBuild Provenanceの最小版。
+                // gitCommitの自動注入は別フェーズで対応）。
                 Text(
-                  'Ver. ${AppBuildInfo.version}',
+                  'Ver. ${AppBuildInfo.version} ・ Build ${AppBuildInfo.buildLabel}',
                   style: const TextStyle(color: Colors.white38, fontSize: 12),
                 ),
               ],

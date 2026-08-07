@@ -11,10 +11,10 @@ class AppBuildInfo {
   const AppBuildInfo._();
 
   /// 画面・JSONログ双方で表示するフェーズバージョン。
-  static const String version = '0.8.5A-2';
+  static const String version = '0.9.0';
 
   /// 今回のビルドの一言ラベル。
-  static const String buildLabel = 'CPU Attack Fix';
+  static const String buildLabel = 'Playtest Analytics Phase A';
 
   /// リリース日（表示用、YYYY-MM-DD）。
   static const String releasedAt = '2026-08-07';
@@ -33,6 +33,14 @@ class AppBuildInfo {
   /// トップ画面の「更新内容」ボタンで表示する改修履歴（最新が先頭）。
   /// 3〜5件程度を目安に、直近のリリースのみを保持する。
   static const List<AppChangelogEntry> changelog = [
+    AppChangelogEntry(
+      version: '0.9.0',
+      items: [
+        'Playtest Analytics Phase Aを追加（試合終了時に自動診断・自動保存）',
+        'Debug分析からPlaytest Analytics画面へ遷移可能に',
+        'CPU Decision Traceの診断フィールド（legalMoveCount等）を追加',
+      ],
+    ),
     AppChangelogEntry(
       version: '0.8.5A-2',
       items: [
