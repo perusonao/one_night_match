@@ -84,6 +84,31 @@ enum TechniqueCpuDecisionReason {
   other,
 }
 
+/// 【Rule Cleanup STEP7: CPU Action Selection Fix】`_decideRallyAction`が
+/// passTurn／endRallyを選んだ際、なぜ合法な技が1つも無かったかを機械可読に
+/// 分類する診断情報。**新しい戦略的判断（撤退・温存等）を追加するものでは
+/// なく**、`_checkEligibility`が既に返している`ineligibleReason`（自由文）を
+/// 事後的に分類するだけの、既存の意思決定ロジックには一切影響しない
+/// 付加情報。
+enum TechniqueCpuNoLegalMoveReason {
+  /// 手札に技カード（フィニッシャー含む）自体が無い。
+  noLegalMove,
+
+  /// 候補はあるが、いずれもCombo Speed不足で使用できない。
+  insufficientSpeed,
+
+  /// 候補はあるが、いずれも技エネルギー不足で使用できない。
+  insufficientEnergy,
+
+  /// 候補はあるが、いずれも相手の`targetState`条件（スタンド／ダウン限定）
+  /// を満たさない。
+  targetStateMismatch,
+
+  /// 上記のいずれにも当てはまらない（複合的な理由、レベル不足、使用可能
+  /// レスラー制限、フィニッシャー発動条件未達等）。
+  other,
+}
+
 /// 最終的に選ばれた行動。
 class TechniqueCpuChosenAction {
   const TechniqueCpuChosenAction({
@@ -150,6 +175,11 @@ class TechniqueCpuDecisionTrace {
     this.comboSpeed,
     this.handCardIds,
     this.energyPool,
+    this.legalMoveCount,
+    this.bestEligibleCardId,
+    this.bestEligibleCardName,
+    this.bestEligibleScore,
+    this.noLegalMoveReasonCode,
   });
 
   final int turnNumber;
@@ -178,6 +208,23 @@ class TechniqueCpuDecisionTrace {
   final List<String>? handCardIds;
   final Map<String, int>? energyPool;
 
+  /// 【Rule Cleanup STEP7】`candidates`のうち`eligible == true`だった件数
+  /// （`_decideRallyAction`のみ設定。他の意思決定点ではnull）。
+  /// `passTurn`／`endRally`の場合はこれが`0`であることが不変条件
+  /// （`legalMoveCount > 0`のままpassTurn／endRallyを選ぶのは異常）。
+  final int? legalMoveCount;
+
+  /// 候補の中で最もスコアが高かった合法技（`eligible == true`）のID／名前／
+  /// スコア。合法技が無ければ全てnull。`declareAttack`／`declareFinisher`
+  /// の場合は`chosen`と同じ値になる（冗長だが解析の一貫性のため）。
+  final String? bestEligibleCardId;
+  final String? bestEligibleCardName;
+  final int? bestEligibleScore;
+
+  /// `legalMoveCount == 0`だった場合の理由分類
+  /// （[TechniqueCpuNoLegalMoveReason].name）。合法技が1つでもあればnull。
+  final String? noLegalMoveReasonCode;
+
   Map<String, dynamic> toJson() => {
     'turnNumber': turnNumber,
     'playerIndex': playerIndex,
@@ -191,6 +238,11 @@ class TechniqueCpuDecisionTrace {
     if (comboSpeed != null) 'comboSpeed': comboSpeed,
     if (handCardIds != null) 'handCardIds': handCardIds,
     if (energyPool != null) 'energyPool': energyPool,
+    if (legalMoveCount != null) 'legalMoveCount': legalMoveCount,
+    if (bestEligibleCardId != null) 'bestEligibleCardId': bestEligibleCardId,
+    if (bestEligibleCardName != null) 'bestEligibleCardName': bestEligibleCardName,
+    if (bestEligibleScore != null) 'bestEligibleScore': bestEligibleScore,
+    if (noLegalMoveReasonCode != null) 'noLegalMoveReasonCode': noLegalMoveReasonCode,
   };
 
   @override

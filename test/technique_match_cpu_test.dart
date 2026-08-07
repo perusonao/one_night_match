@@ -816,6 +816,280 @@ void main() {
     });
   });
 
+  group('Rule Cleanup STEP7: CPU Action Selection Fix（合法技の不整合検証）', () {
+    // 実プレイログ（白銀レイナ vs 黒蝶ジャックCPU、33ターンDRAW、ジャックの
+    // movesUsed=0）で報告された「Decision Traceにeligible:trueの候補が
+    // あるのにpassTurn/endRallyを選んでいる」という不整合の再現・回帰防止用。
+    //
+    // 調査の結論（詳細はdocs/design/technique_deck_implementation_plan.md
+    // 「Rule Cleanup STEP7」参照）: `_decideRallyAction`は`bestScore`の初期値
+    // が`-1 << 30`で、スコアの符号を問わず「eligible:trueな候補が1つでも
+    // あれば必ずbestEntryに採用する」構造になっており、この構造上
+    // 「eligible:trueなのにpassTurn/endRallyを選ぶ」ことはコード上不可能
+    // （STEP7以前のPhase 8.5A-2で既に修正済み）。CPU対CPU計4000試合超の
+    // 総当たりシミュレーションでもこの矛盾は一度も再現しなかった。
+    // 以下のテストは、この不変条件が今後の変更で壊れないことを保証する
+    // 回帰テストと、それを機械可読に検出するための`legalMoveCount`フィールド
+    // （STEP7で新設）の検証。
+
+    test('TEST1: 通常手番でeligible技が1枚以上あればpassTurnを選ばない', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['weak_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['weak_strike']),
+        handSize: 1,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        activePlayerIndex: 1,
+        playerB: state.playerB.copyWith(
+          energyPool: const {MoveAttribute.strike: 1},
+        ),
+        energySetThisTurn: true,
+      );
+      final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+      expect(result.trace!.decisionType, isNot('passTurn'));
+      expect(result.trace!.decisionType, 'declareAttack');
+      expect(result.trace!.legalMoveCount, 1);
+      expect(result.trace!.bestEligibleCardId, 'weak_strike');
+    });
+
+    test('TEST2: 複数のeligible技がある場合、最高評価候補を選択できる', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['weak_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['weak_strike', 'strong_strike']),
+        handSize: 2,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        activePlayerIndex: 1,
+        playerB: state.playerB.copyWith(
+          energyPool: const {MoveAttribute.strike: 2},
+        ),
+        energySetThisTurn: true,
+      );
+      final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+      expect(result.trace!.decisionType, 'declareAttack');
+      expect(result.trace!.legalMoveCount, 2);
+      // strong_strike（威力20）はweak_strike（威力3）よりスコアが高い。
+      expect(result.trace!.chosen.cardId, 'strong_strike');
+      expect(result.trace!.bestEligibleCardId, 'strong_strike');
+    });
+
+    test('TEST3・4: 返技成功後、remainingSpeed>0かつeligible技があれば即'
+        'endRallyせず、合法な追撃技を最低1回使用する', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['strong_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['weak_strike', 'weak_strike']),
+        handSize: 2,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        playerA: state.playerA.copyWith(
+          energyPool: const {MoveAttribute.strike: 1},
+        ),
+        playerB: state.playerB.copyWith(
+          energyPool: const {MoveAttribute.strike: 2},
+        ),
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog,
+      ).state;
+      final counterResult = TechniqueMatchCpu.step(declared, catalog, random: Random(1));
+      expect(counterResult.trace!.decisionType, 'counterAttack');
+      expect(counterResult.state.rallyAttackerIndex, 1); // Bが新しい攻撃側。
+      expect(counterResult.state.rallyRemainingSpeed, greaterThan(0));
+
+      final followUp = TechniqueMatchCpu.step(counterResult.state, catalog, random: Random(1));
+      // 即endRallyしない。合法な追撃技（残るweak_strike）を使用する。
+      expect(followUp.trace!.decisionType, isNot('endRally'));
+      expect(followUp.trace!.decisionType, 'declareAttack');
+      expect(followUp.trace!.chosen.cardId, 'weak_strike');
+      expect(followUp.trace!.legalMoveCount, greaterThan(0));
+    });
+
+    test('TEST5・6: エネルギー不足で本当に合法技が0枚の場合のみpassTurnし、'
+        'legalMoveCount==0・理由分類がinsufficientEnergyになる', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['weak_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['costly_strike']),
+        handSize: 1,
+        random: Random(1),
+      );
+      // エネルギーが無いため costly_strike は使用不可（合法技0枚）。
+      state = state.copyWith(activePlayerIndex: 1, energySetThisTurn: true);
+      final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+      expect(result.trace!.decisionType, 'passTurn');
+      expect(result.trace!.legalMoveCount, 0);
+      expect(result.trace!.bestEligibleCardId, isNull);
+      expect(
+        result.trace!.noLegalMoveReasonCode,
+        TechniqueCpuNoLegalMoveReason.insufficientEnergy.name,
+      );
+    });
+
+    test('TEST7: Speed不足で本当に合法技が0枚の場合のみendRallyし、'
+        'legalMoveCount==0・理由分類がinsufficientSpeedになる', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['weak_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['speed_heavy']),
+        handSize: 1,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        activePlayerIndex: 1,
+        rallyAttackerIndex: 1,
+        rallyChain: 1,
+        rallyRemainingSpeed: 3, // speed_heavy（Speed7）には不足。
+        playerB: state.playerB.copyWith(
+          energyPool: const {MoveAttribute.strike: 1},
+        ),
+      );
+      final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+      expect(result.trace!.decisionType, 'endRally');
+      expect(result.trace!.legalMoveCount, 0);
+      expect(
+        result.trace!.noLegalMoveReasonCode,
+        TechniqueCpuNoLegalMoveReason.insufficientSpeed.name,
+      );
+    });
+
+    test('targetState不一致で合法技が0枚の場合、理由分類がtargetStateMismatch'
+        'になる', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['weak_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        // pin_moveはtargetState: down限定。相手（A）はstand状態のまま。
+        deckB: deckOf('w2', ['pin_move']),
+        handSize: 1,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        activePlayerIndex: 1,
+        playerB: state.playerB.copyWith(
+          energyPool: const {MoveAttribute.throwMove: 1},
+        ),
+        energySetThisTurn: true,
+      );
+      final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+      expect(result.trace!.decisionType, 'passTurn');
+      expect(result.trace!.legalMoveCount, 0);
+      expect(
+        result.trace!.noLegalMoveReasonCode,
+        TechniqueCpuNoLegalMoveReason.targetStateMismatch.name,
+      );
+    });
+
+    test(
+      'Reina vs Jack（実プレイ報告のマッチアップ）: 固定シード100試合'
+      '（両陣営順）で、Decision Trace上「legalMoveCount > 0なのに'
+      'passTurn/endRallyを選ぶ」矛盾が一度も発生しない',
+      () {
+        final catalog = buildProvisionalTechniqueDeckCatalog();
+        var contradictions = 0;
+        var zeroAttackGames = 0;
+        var totalJackDeclares = 0;
+
+        for (final swap in [false, true]) {
+          for (var seed = 0; seed < 50; seed++) {
+            final reinaDeck = findTechniquePhase7AModelDeck('wrestler_reina')!;
+            final jackDeck = findTechniquePhase7AModelDeck('wrestler_jack')!;
+            final start = TechniqueMatchEngine.start(
+              wrestlerAId: swap ? 'wrestler_jack' : 'wrestler_reina',
+              wrestlerAName: swap ? '黒蝶ジャック' : '白銀レイナ',
+              wrestlerAMaxHp: 100,
+              deckA: swap ? jackDeck : reinaDeck,
+              wrestlerBId: swap ? 'wrestler_reina' : 'wrestler_jack',
+              wrestlerBName: swap ? '白銀レイナ' : '黒蝶ジャック',
+              wrestlerBMaxHp: 100,
+              deckB: swap ? reinaDeck : jackDeck,
+              random: Random(seed * 7 + 1),
+            );
+            final jackIndex = swap ? 0 : 1;
+            final result = TechniqueMatchCpu.playFullMatch(
+              start,
+              catalog,
+              random: Random(seed * 7 + 2),
+            );
+            expect(result.hitStepLimit, isFalse); // 無限ループが無いこと。
+
+            for (final trace in result.traces) {
+              if ((trace.decisionType == 'passTurn' || trace.decisionType == 'endRally') &&
+                  (trace.legalMoveCount ?? 0) > 0) {
+                contradictions++;
+              }
+            }
+            final jackDeclares = result.traces
+                .where(
+                  (t) =>
+                      t.playerIndex == jackIndex &&
+                      (t.decisionType == 'declareAttack' ||
+                          t.decisionType == 'declareFinisher'),
+                )
+                .length;
+            totalJackDeclares += jackDeclares;
+            if (jackDeclares == 0) zeroAttackGames++;
+          }
+        }
+
+        expect(
+          contradictions,
+          0,
+          reason:
+              'legalMoveCount > 0のままpassTurn/endRallyを選ぶ矛盾が発生した'
+              '（実プレイ報告のバグそのもの）。',
+        );
+        // このシード範囲（両陣営0〜49、計100試合）ではジャックの自発攻撃が
+        // 0試合になることも無い（固定シードでの回帰確認。無限に0%を保証する
+        // ものではなく、このシード範囲での再現防止のための固定回帰テスト）。
+        expect(zeroAttackGames, 0);
+        expect(totalJackDeclares, greaterThan(0));
+      },
+    );
+  });
+
   group('TechniqueCpuDecisionTrace', () {
     test('toJsonが期待するキーを持つ', () {
       const trace = TechniqueCpuDecisionTrace(

@@ -914,6 +914,119 @@ CPU評価式の見直し（ラリー継続を前提とした多段攻撃の評�
 
 ---
 
+## Rule Cleanupラウンド STEP7：CURRENT仕様確定 + CPU Action Selection Fix
+
+**ステータス: 完了。CPUのバランス調整・強化は行っていない。**
+
+Technique Match Rule Cleanupラウンド（STEP6）の内容を`main`へ確定した上で、
+実プレイで報告された「Normal CPU（黒蝶ジャック）が返技はするが自分からは
+一度も攻撃しない」不具合の調査を行った。
+
+### 報告された症状
+
+白銀レイナ（人間）対黒蝶ジャック（Normal CPU）の対戦で、33ターン・時間切れ
+DRAW・レイナHP104/104（無傷）・ジャックHP17/100・ジャックmovesUsed=0・
+countersUsed=9・HEAT=0という結果が報告された。加えて、Decision Traceの
+`candidates`に`eligible: true`かつスコアが正の候補が存在するにもかかわらず
+`passTurn`／`endRally`が選ばれているように見える、という矛盾も報告された。
+
+### 調査結果（根本原因の特定）
+
+`TechniqueMatchCpu._decideRallyAction`のコードを精査した結果、技候補の
+選定ロジック（`bestScore`の初期値`-1 << 30`に対し`score > bestScore`で
+比較するため、スコアの符号を問わず`eligible: true`な候補が1つでもあれば
+必ず`bestEntry`に採用される構造）は、**「eligible:trueの候補があるのに
+passTurn/endRallyを選ぶ」ことがコード上構造的に起こり得ない**ようになって
+いることを確認した（この構造はPhase 8.5A-2「CPU攻撃停止バグの修正」で
+既に導入済みで、`test/technique_match_cpu_test.dart`の「Phase 8.5A-2:
+CPU攻撃停止バグの修正確認」グループで回帰確認されている）。
+
+これを踏まえ、CPU対CPUの大規模シミュレーションで実際に矛盾が起きるかを
+検証した。
+
+- 4人総当たり（ミラー除く）×150試合＝1800試合: 矛盾0件
+- 4人総当たり（ミラー含む）×100試合＝1600試合: 矛盾0件
+- 白銀レイナ対黒蝶ジャック（両陣営）×1000試合＝2000試合: 矛盾0件
+
+**結論: 報告された「eligible:trueの候補が無視される」という文字どおりの
+コード欠陥は、現行コードでは再現できなかった。**
+
+一方、上記シミュレーションで「CPUの自発攻撃が0試合」というケースが低確率
+（1600試合中6試合、0.375%）で発生することを確認したが、いずれも4〜8ターン
+で短時間に決着する試合であり、該当プレイヤーの技候補の`ineligibleReason`は
+すべて「エネルギーが不足しています」で、実際に合法な技が存在しない状態
+だった（`legalMoveCount == 0`）。これは技を正しく捨てているのではなく
+「まだエネルギーが足りていないだけ」であり、返技（`reversalEnergyCost`）を
+優先しがちなNormal CPUの評価戦略が、短い試合では自分の攻撃エネルギーを
+貯める前に試合が終わってしまう、という**CPUの強さ・戦略に関する特性**
+であって、コードの選択ロジックの欠陥ではないと判断した（CPUスコア・
+返技閾値・エネルギーコスト等の変更は今回のスコープ外のため、この特性
+自体には手を加えていない）。
+
+報告された33ターン・DRAWという長い試合でジャックのmovesUsedが終始0
+だった具体的な現象は、実際のプレイ環境（人間対CPU、`TechniqueMatchScreen`
+経由）でしか再現できていない（本ラウンドで用意したCPU対CPUシミュレーション
+2000試合超では再現しなかった）。今後、該当プレイヤーの実際のJSON試合ログ
+（`cpuTraces`）が入手できれば、STEP7で追加した`legalMoveCount`／
+`bestEligibleCardId`／`noLegalMoveReasonCode`フィールドにより、矛盾が実際に
+起きているかどうかを一目で判定できる。
+
+### 実施した変更（コード動作は変更していない、診断機能の追加のみ）
+
+推測での修正は行わず、以下の**観測性の強化**のみを行った。
+
+- `TechniqueCpuDecisionTrace`へ`legalMoveCount`／`bestEligibleCardId`／
+  `bestEligibleCardName`／`bestEligibleScore`／`noLegalMoveReasonCode`を
+  追加（`lib/src/technique_deck/technique_cpu_decision_trace.dart`）。
+  既存フィールドは無変更、追加のみ。
+- `noLegalMoveReasonCode`の分類には新しい戦略判断を追加せず、既存の
+  `ineligibleReason`（自由文）を事後的に分類するだけの
+  `TechniqueCpuNoLegalMoveReason { noLegalMove, insufficientSpeed,
+  insufficientEnergy, targetStateMismatch, other }`を新設した。
+- `_decideRallyAction`のpassTurn／endRally分岐の直前に、デバッグ・
+  テストビルド限定の`assert()`不変条件（`legalMoveCount == 0`）を追加した。
+  release ビルドでは無効化されるため既存の性能・挙動には影響しない。
+- `TechniqueCpuChosenAction.action`のドキュメントコメントを実際の値
+  （`passTurn`）に合わせて修正（STEP6の一部として実施済み）。
+- 回帰テスト（`test/technique_match_cpu_test.dart`、新規グループ
+  「Rule Cleanup STEP7: CPU Action Selection Fix」）を9件追加した。
+  合法技がある場合にpassTurnしないこと・複数候補から最良を選ぶこと・
+  返技成功後に合法な追撃技を最低1回使用すること・本当に合法技が0枚の
+  場合のみpass/endRallyが許可されること・エネルギー/Speed/targetState
+  不一致それぞれの理由分類が正しく付くこと・レイナ対ジャックの固定シード
+  100試合（両陣営）で矛盾が発生しないことを検証する。
+
+`_decideRallyAction`の選択ロジック自体（`bestEntry`の決定方法）・CPUの
+スコア重み・返技の脅威しきい値・技のエネルギーコスト・Speed・
+モデルデッキ構成は一切変更していない。
+
+### シミュレーション結果（4人総当たり×100試合、ミラー含む1600試合）
+
+| 指標 | 結果 |
+|---|---|
+| 矛盾（legalMoveCount>0でpassTurn/endRally） | 0件 |
+| 合法技ありpass | 0件 |
+| 合法追撃ありendRally | 0件 |
+| 無限ループ／hit step limit到達 | 0件 |
+| CPU自発攻撃0試合率 | 6/1600（0.375%、いずれも短時間決着かつエネルギー
+  不足が原因） |
+| DRAW率 | 0.0% |
+| 平均ターン数 | 15.6 |
+| 平均movesUsed（1人あたり） | 7.70 |
+| 平均countersUsed（1人あたり） | 0.63 |
+
+勝率・フィニッシャー率は今回のスコープ外のため調整・報告していない
+（STEP7の目的はバランス調整ではないため）。
+
+**未解決のまま持ち越す点**: 実プレイ報告と同一の「33ターンDRAW・
+movesUsed=0」という長時間パターンそのものは、CPU対CPUシミュレーションで
+再現できていない。人間対CPUの実プレイ特有のカード運・タイミング（人間が
+CPUの脅威スコアリングでは起こらない選択をする等）に起因する可能性がある。
+新しく追加した`legalMoveCount`等のDecision Traceフィールドにより、今後
+同様の報告があった場合は実際の矛盾の有無を機械的に検証できる。
+
+---
+
 ## Phase 9：チュートリアル・UI完成
 
 実装対象:

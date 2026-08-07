@@ -348,6 +348,14 @@ class TechniqueMatchCpu {
       }
     }
 
+    // 【Rule Cleanup STEP7】診断用: 合法候補数と最良合法候補のスナップ
+    // ショット（Decision Traceの新規フィールド。既存の選択ロジックには
+    // 一切影響しない）。
+    final legalMoveCount = candidates.where((c) => c.eligible).length;
+    final bestEligibleCardId = bestEntry?.cardId;
+    final bestEligibleCardName = bestCard?.name;
+    final bestEligibleScore = bestEntry != null ? bestScore : null;
+
     // 攻撃するかどうかは「スコアが正か」ではなく「有効な技が他に無いか」
     // で決める。同じ技しか手札に無い場合など、多様性ペナルティ等の
     // ソフトな減点だけでスコアが0以下になることがあり、絶対しきい値で
@@ -395,9 +403,31 @@ class TechniqueMatchCpu {
         comboSpeed: attacker.comboSpeed,
         handCardIds: handCardIds,
         energyPool: energyPoolSnapshot,
+        legalMoveCount: legalMoveCount,
+        bestEligibleCardId: bestEligibleCardId,
+        bestEligibleCardName: bestEligibleCardName,
+        bestEligibleScore: bestEligibleScore,
       );
       return TechniqueCpuStepResult(state: result.state, trace: trace);
     }
+
+    // 【Rule Cleanup STEP7 不変条件】ここに到達するのは`legalMoveCount == 0`
+    // （合法な技が1枚も無い）の場合に限る。合法技が存在するのに
+    // passTurn／endRallyへ落ちてきた場合は、選択ロジックの回帰
+    // （「eligible:trueなのにpassした」実プレイ報告の再発）を意味するため、
+    // デバッグ・テストビルドで即座に検出できるようにする（release
+    // ビルドではassertは無効化されるため、既存の挙動・性能には影響しない）。
+    assert(
+      legalMoveCount == 0,
+      'CPU invariant violated: passTurn/endRally chosen while '
+      '$legalMoveCount eligible candidate(s) existed: '
+      '${candidates.where((c) => c.eligible).map((c) => "${c.cardName}(score=${c.score})").toList()}',
+    );
+    final noLegalMoveReasonCode = _classifyNoLegalMoveReason(
+      candidates,
+      attacker,
+      catalog,
+    );
 
     // 十分なスコアの技が無い。
     if (!isFreshTurn) {
@@ -424,6 +454,8 @@ class TechniqueMatchCpu {
         comboSpeed: attacker.comboSpeed,
         handCardIds: handCardIds,
         energyPool: energyPoolSnapshot,
+        legalMoveCount: legalMoveCount,
+        noLegalMoveReasonCode: noLegalMoveReasonCode,
       );
       return TechniqueCpuStepResult(state: newState, trace: trace);
     }
@@ -452,8 +484,41 @@ class TechniqueMatchCpu {
       comboSpeed: attacker.comboSpeed,
       handCardIds: handCardIds,
       energyPool: energyPoolSnapshot,
+      legalMoveCount: legalMoveCount,
+      noLegalMoveReasonCode: noLegalMoveReasonCode,
     );
     return TechniqueCpuStepResult(state: passed, trace: trace);
+  }
+
+  /// 【Rule Cleanup STEP7】`legalMoveCount == 0`だった理由を、既存の
+  /// `ineligibleReason`（自由文、`_checkEligibility`由来）から事後的に
+  /// 分類する。新しい判定条件を追加するものではなく、既存の理由文字列を
+  /// 読み分けるだけの診断ヘルパー。
+  static String _classifyNoLegalMoveReason(
+    List<TechniqueCpuCandidate> candidates,
+    TechniqueMatchPlayerState attacker,
+    TechniqueDeckCardCatalog catalog,
+  ) {
+    final hasAnyTechniqueCard = attacker.hand.any(
+      (e) => catalog.findTechniqueById(e.cardId) != null,
+    );
+    if (!hasAnyTechniqueCard) {
+      return TechniqueCpuNoLegalMoveReason.noLegalMove.name;
+    }
+    final ineligible = candidates.where((c) => !c.eligible).toList();
+    bool allMatch(bool Function(String reason) test) =>
+        ineligible.isNotEmpty &&
+        ineligible.every((c) => test(c.ineligibleReason ?? ''));
+    if (allMatch((r) => r.contains('Speed'))) {
+      return TechniqueCpuNoLegalMoveReason.insufficientSpeed.name;
+    }
+    if (allMatch((r) => r.contains('エネルギー'))) {
+      return TechniqueCpuNoLegalMoveReason.insufficientEnergy.name;
+    }
+    if (allMatch((r) => r.contains('スタンド') || r.contains('ダウン'))) {
+      return TechniqueCpuNoLegalMoveReason.targetStateMismatch.name;
+    }
+    return TechniqueCpuNoLegalMoveReason.other.name;
   }
 
   /// 技カード1枚のスコアを算出する。単純な威力最大は禁止（ユーザー指示）で、
