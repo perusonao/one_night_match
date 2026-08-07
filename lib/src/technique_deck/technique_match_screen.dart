@@ -664,6 +664,27 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     });
   }
 
+  /// 【STEP7.1 診断専用】Widget Testから、実プレイ報告の特定局面
+  /// （例: 実プレイJSONのTurn3相当）を`TechniqueMatchScreen`の本番実行経路
+  /// （`_scheduleNextStep`→`_runCpuStep`→`TechniqueMatchCpu.step`）へ直接
+  /// 注入するためのフック。`matchState`はpublicフィールドで外部から代入
+  /// 自体は可能だが、代入だけでは`_scheduleNextStep`（private）が呼ばれず
+  /// CPUの手番が進まないため、注入と再スケジュールを1つにまとめて公開する。
+  /// CPUの意思決定ロジック・スコア・閾値には一切影響しない、テスト専用の
+  /// 配線コード。
+  @visibleForTesting
+  void debugInjectMatchStateAndSchedule(TechniqueMatchState state) {
+    setState(() => matchState = state);
+    _scheduleNextStep();
+  }
+
+  /// 【STEP7.1 診断専用】直近のCPU Decision Trace（`_cpuTraces`はprivateで
+  /// Widget Testから読めないため）。CPU単体の判断とUI実行経路の判断を
+  /// 比較するために使う。
+  @visibleForTesting
+  TechniqueCpuDecisionTrace? get debugLastCpuTrace =>
+      _cpuTraces.isEmpty ? null : _cpuTraces.last;
+
   // ============================================================
   // 【優先度9】試合ログのJSON出力。
   // ============================================================

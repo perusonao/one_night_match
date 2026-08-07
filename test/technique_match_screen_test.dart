@@ -8,6 +8,7 @@ import 'package:one_night_match/src/technique_deck/technique_deck_defaults.dart'
     show buildProvisionalTechniqueDeckCatalog;
 import 'package:one_night_match/src/technique_deck/technique_deck_models.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_storage.dart';
+import 'package:one_night_match/src/technique_deck/technique_cpu_decision_trace.dart';
 import 'package:one_night_match/src/technique_deck/technique_cpu_presentation_timing.dart';
 import 'package:one_night_match/src/technique_deck/technique_match_screen.dart';
 import 'package:one_night_match/src/technique_deck/technique_match_state.dart';
@@ -1076,6 +1077,194 @@ void main() {
       // mountedチェックにより例外や不正なsetStateは起きないはず。
       await tester.pump(const Duration(seconds: 2));
       expect(tester.takeException(), isNull);
+    });
+
+    group('STEP7.1: Human-vs-CPU UI経路の再現（実プレイJSON比較）', () {
+      // 実プレイJSON（Human vs CPU Normal、黒蝶ジャック vs 火神アカリ、
+      // 33ターンDRAW）のcpuTracesで報告された「候補にeligible:trueの技が
+      // あるのにchosen.action=passTurn/endRally」という矛盾が、
+      // `TechniqueMatchCpu`単体ではなく`TechniqueMatchScreen(vsCpu:true)`
+      // の本番実行経路（_scheduleNextStep→_runCpuStep→
+      // TechniqueMatchCpu.step→setState）でも起こるかどうかを検証する。
+      //
+      // `debugInjectMatchStateAndSchedule`/`debugLastCpuTrace`は本ラウンド
+      // （STEP7.1）で追加した診断専用フック（@visibleForTesting）で、CPUの
+      // 意思決定ロジック自体には触れていない。既にJSONと同一のstate
+      // （手札・エネルギープール・turnNumber等）を本番実行経路へ注入できる。
+      const jsonTurn3AkariHand = [
+        TechniqueDeckEntry(
+          instanceId: 't1',
+          cardId: 'td_p6_akari_sig_kneestrike',
+          cardType: TechniqueDeckCardType.technique,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 't2',
+          cardId: 'td_p7a_akari_normal_armwhip',
+          cardType: TechniqueDeckCardType.technique,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 't3',
+          cardId: 'td_energy_throwMove',
+          cardType: TechniqueDeckCardType.energy,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 't4',
+          cardId: 'td_energy_strike',
+          cardType: TechniqueDeckCardType.energy,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 't5',
+          cardId: 'td_kickout_special_1',
+          cardType: TechniqueDeckCardType.kickOut,
+        ),
+      ];
+
+      testWidgets(
+        'TEST A: 実プレイJSON Turn3のアカリ手札状態をUI実行経路へ注入しても、'
+        'eligible技が2枚あればpassTurnしない（CPU単体側の結果は'
+        'technique_match_cpu_test.dart「STEP7.1」と比較する）',
+        (tester) async {
+          await tester.binding.setSurfaceSize(const Size(800, 3000));
+          await tester.pumpWidget(
+            MaterialApp(
+              home: TechniqueMatchScreen(
+                catalog: buildProvisionalTechniqueDeckCatalog(),
+                vsCpu: true,
+                initialWrestlerAId: 'wrestler_jack',
+                initialWrestlerBId: 'wrestler_akari',
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('試合開始'));
+          await tester.pumpAndSettle();
+
+          final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
+          final TechniqueMatchState started = screenState.matchState as TechniqueMatchState;
+          expect(started.playerB.wrestlerId, 'wrestler_akari');
+
+          final injected = started.copyWith(
+            turnNumber: 3,
+            activePlayerIndex: 1,
+            energySetThisTurn: true,
+            rallyAttackerIndex: null,
+            rallyChain: 0,
+            rallyRemainingSpeed: null,
+            pendingAttack: null,
+            pendingEscape: null,
+            pendingFinisher: null,
+            playerA: started.playerA.copyWith(hp: 100),
+            playerB: started.playerB.copyWith(
+              hp: 114,
+              hand: jsonTurn3AkariHand,
+              energyPool: const {MoveAttribute.strike: 2, MoveAttribute.throwMove: 1},
+            ),
+          );
+
+          screenState.debugInjectMatchStateAndSchedule(injected);
+          // CPUの「考える」ディレイ＋行動後の静止ディレイを確実に経過させる
+          // （標準速度でも数百ms程度のため、余裕を持って2秒×2回進める）。
+          await tester.pump(const Duration(seconds: 2));
+          await tester.pump(const Duration(seconds: 2));
+
+          final trace = screenState.debugLastCpuTrace as TechniqueCpuDecisionTrace?;
+          expect(trace, isNotNull, reason: 'CPUのDecision Traceが記録されていない');
+          expect(trace!.turnNumber, 3);
+          expect(trace.legalMoveCount, 2);
+          expect(
+            trace.decisionType,
+            isNot('passTurn'),
+            reason:
+                '実プレイJSONで報告された矛盾（候補にeligible:trueの技が'
+                'あるのにchosen.action=passTurn）がTechniqueMatchScreen'
+                '(vsCpu:true)の本番実行経路で再現するかどうかの検証。',
+          );
+          expect(trace.decisionType, 'declareAttack');
+          expect(trace.chosen.cardId, 'td_p6_akari_sig_kneestrike');
+
+          final TechniqueMatchState after = screenState.matchState as TechniqueMatchState;
+          expect(after.playerB.hand.length, lessThan(jsonTurn3AkariHand.length));
+        },
+      );
+
+      testWidgets(
+        'TEST D: 実プレイJSON Turn11相当（返技成功後のラリー継続）をUI実行'
+        '経路へ注入しても、eligible追撃技が複数あればendRallyしない',
+        (tester) async {
+          await tester.binding.setSurfaceSize(const Size(800, 3000));
+          await tester.pumpWidget(
+            MaterialApp(
+              home: TechniqueMatchScreen(
+                catalog: buildProvisionalTechniqueDeckCatalog(),
+                vsCpu: true,
+                initialWrestlerAId: 'wrestler_jack',
+                initialWrestlerBId: 'wrestler_akari',
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('試合開始'));
+          await tester.pumpAndSettle();
+
+          final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
+          final TechniqueMatchState started = screenState.matchState as TechniqueMatchState;
+
+          final injected = started.copyWith(
+            turnNumber: 11,
+            activePlayerIndex: 1,
+            energySetThisTurn: true,
+            rallyAttackerIndex: 1,
+            rallyChain: 1,
+            rallyRemainingSpeed: 10,
+            pendingAttack: null,
+            pendingEscape: null,
+            pendingFinisher: null,
+            playerA: started.playerA.copyWith(posture: WrestlerPosture.stand),
+            playerB: started.playerB.copyWith(
+              hp: 114,
+              hand: const [
+                TechniqueDeckEntry(
+                  instanceId: 'r1',
+                  cardId: 'td_kickout_special_1',
+                  cardType: TechniqueDeckCardType.kickOut,
+                ),
+                TechniqueDeckEntry(
+                  instanceId: 'r2',
+                  cardId: 'td_p7a_akari_normal_runningknee',
+                  cardType: TechniqueDeckCardType.technique,
+                ),
+                TechniqueDeckEntry(
+                  instanceId: 'r3',
+                  cardId: 'td_p7a_akari_normal_middlekick',
+                  cardType: TechniqueDeckCardType.technique,
+                ),
+                TechniqueDeckEntry(
+                  instanceId: 'r4',
+                  cardId: 'td_p7a_akari_sig_soulhighkick',
+                  cardType: TechniqueDeckCardType.technique,
+                ),
+              ],
+              energyPool: const {MoveAttribute.strike: 3, MoveAttribute.throwMove: 3},
+            ),
+          );
+
+          screenState.debugInjectMatchStateAndSchedule(injected);
+          await tester.pump(const Duration(seconds: 2));
+          await tester.pump(const Duration(seconds: 2));
+
+          final trace = screenState.debugLastCpuTrace as TechniqueCpuDecisionTrace?;
+          expect(trace, isNotNull);
+          expect(trace!.legalMoveCount, greaterThan(0));
+          expect(
+            trace.decisionType,
+            isNot('endRally'),
+            reason:
+                '実プレイJSON Turn11で報告された矛盾（返技成功後、合法な'
+                '追撃技があるのにendRally）がUI実行経路で再現するかの検証。',
+          );
+          expect(trace.decisionType, 'declareAttack');
+        },
+      );
     });
   });
 }

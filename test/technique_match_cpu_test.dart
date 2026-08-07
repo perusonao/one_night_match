@@ -1090,6 +1090,155 @@ void main() {
     );
   });
 
+  group('STEP7.1: 実プレイJSON再現（黒蝶ジャック vs 火神アカリCPU, 33ターンDRAW）', () {
+    // 添付JSON（one-night-match-technique-wrestler_jack_vs_wrestler_akari_
+    // 1786110543476-20260807-225227.json、Human vs CPU NormalをUI経路
+    // 〈TechniqueMatchScreen(vsCpu:true)〉で実プレイした試合ログ）の
+    // cpuTracesより。Turn3時点でCPUアカリの手札に、
+    // 紅蓮ニーストライク（eligible:true, score10）とアームホイップ
+    // （eligible:true, score0）が存在するにもかかわらず、記録された
+    // trace.chosen.actionはpassTurn（reasonCode: noPlayableAttack）だった
+    // （HPは114/125＝91%で、Phase 8.5A-2で撤去済みのshouldRetreat条件
+    // 〈HP比40%以下〉には該当しない）。
+    //
+    // ここではJSONのTurn3の状態（手札・エネルギープール・remainingSpeed）を
+    // 可能な限りそのまま`TechniqueMatchCpu.step`へ渡し、現在のソースで
+    // 同じ矛盾が起きるかを確認する（CPU単体側）。
+    TechniqueMatchState turn3AkariState() {
+      final base = TechniqueMatchEngine.start(
+        wrestlerAId: 'wrestler_jack',
+        wrestlerAName: '黒蝶ジャック',
+        wrestlerAMaxHp: 100,
+        deckA: findTechniquePhase7AModelDeck('wrestler_jack')!,
+        wrestlerBId: 'wrestler_akari',
+        wrestlerBName: '火神アカリ',
+        wrestlerBMaxHp: 125,
+        deckB: findTechniquePhase7AModelDeck('wrestler_akari')!,
+        random: Random(42),
+      );
+      return base.copyWith(
+        turnNumber: 3,
+        activePlayerIndex: 1,
+        energySetThisTurn: true,
+        playerB: base.playerB.copyWith(
+          hp: 114,
+          hand: const [
+            TechniqueDeckEntry(
+              instanceId: 't1',
+              cardId: 'td_p6_akari_sig_kneestrike',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 't2',
+              cardId: 'td_p7a_akari_normal_armwhip',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 't3',
+              cardId: 'td_energy_throwMove',
+              cardType: TechniqueDeckCardType.energy,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 't4',
+              cardId: 'td_energy_strike',
+              cardType: TechniqueDeckCardType.energy,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 't5',
+              cardId: 'td_kickout_special_1',
+              cardType: TechniqueDeckCardType.kickOut,
+            ),
+          ],
+          energyPool: const {MoveAttribute.strike: 2, MoveAttribute.throwMove: 1},
+        ),
+      );
+    }
+
+    test(
+      'CPU単体: 実プレイJSON Turn3のアカリ手札状態を再現しても、'
+      'eligible技が2枚あればpassTurnしない（本ラウンドの比較対象。'
+      'TechniqueMatchScreenのUI実行経路側はtechnique_match_screen_test.dart'
+      'のSTEP7.1テストで検証する）',
+      () {
+        final catalog = buildProvisionalTechniqueDeckCatalog();
+        final state = turn3AkariState();
+
+        final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+        expect(result.trace, isNotNull);
+        expect(result.trace!.legalMoveCount, 2);
+        expect(result.trace!.decisionType, isNot('passTurn'));
+        expect(result.trace!.decisionType, 'declareAttack');
+        // スコア10（紅蓮ニーストライク）> スコア0（アームホイップ）。
+        expect(result.trace!.chosen.cardId, 'td_p6_akari_sig_kneestrike');
+      },
+    );
+
+    // 添付JSONのTurn11: CPUアカリが返技成功後（rallyAttackerIndex=B、
+    // remainingSpeed=10）、レッドフレアキック（フィニッシャー、eligible:
+    // true, score33）・ランニングニー（score6）・ミドルキック（score6）・
+    // ソウルハイキック（score10）等の合法追撃候補が存在するにもかかわらず
+    // chosen.action=endRallyだった。フィニッシャー成立条件（HEAT等）の
+    // 再現は不要な複雑さを避けるため、通常技3枚のみで再現する。
+    test(
+      'CPU単体: 実プレイJSON Turn11相当（返技成功後のラリー継続）を再現しても、'
+      'eligible追撃技が複数あればendRallyしない',
+      () {
+        final catalog = buildProvisionalTechniqueDeckCatalog();
+        final base = TechniqueMatchEngine.start(
+          wrestlerAId: 'wrestler_jack',
+          wrestlerAName: '黒蝶ジャック',
+          wrestlerAMaxHp: 100,
+          deckA: findTechniquePhase7AModelDeck('wrestler_jack')!,
+          wrestlerBId: 'wrestler_akari',
+          wrestlerBName: '火神アカリ',
+          wrestlerBMaxHp: 125,
+          deckB: findTechniquePhase7AModelDeck('wrestler_akari')!,
+          random: Random(42),
+        );
+        final state = base.copyWith(
+          turnNumber: 11,
+          activePlayerIndex: 1,
+          energySetThisTurn: true,
+          rallyAttackerIndex: 1,
+          rallyChain: 1,
+          rallyRemainingSpeed: 10,
+          playerB: base.playerB.copyWith(
+            hp: 114,
+            hand: const [
+              TechniqueDeckEntry(
+                instanceId: 'r1',
+                cardId: 'td_kickout_special_1',
+                cardType: TechniqueDeckCardType.kickOut,
+              ),
+              TechniqueDeckEntry(
+                instanceId: 'r2',
+                cardId: 'td_p7a_akari_normal_runningknee',
+                cardType: TechniqueDeckCardType.technique,
+              ),
+              TechniqueDeckEntry(
+                instanceId: 'r3',
+                cardId: 'td_p7a_akari_normal_middlekick',
+                cardType: TechniqueDeckCardType.technique,
+              ),
+              TechniqueDeckEntry(
+                instanceId: 'r4',
+                cardId: 'td_p7a_akari_sig_soulhighkick',
+                cardType: TechniqueDeckCardType.technique,
+              ),
+            ],
+            energyPool: const {MoveAttribute.strike: 3, MoveAttribute.throwMove: 3},
+          ),
+        );
+
+        final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+        expect(result.trace, isNotNull);
+        expect(result.trace!.legalMoveCount, greaterThan(0));
+        expect(result.trace!.decisionType, isNot('endRally'));
+        expect(result.trace!.decisionType, 'declareAttack');
+      },
+    );
+  });
+
   group('TechniqueCpuDecisionTrace', () {
     test('toJsonが期待するキーを持つ', () {
       const trace = TechniqueCpuDecisionTrace(
