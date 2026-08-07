@@ -278,6 +278,14 @@ class TechniqueMatchCpu {
     final defender = state.playerAt(1 - attackerIndex);
     final recentNames = _recentOwnMoveNames(state, attackerIndex);
 
+    // 【Phase 8.5A-2】診断用スナップショット（TechniqueCpuDecisionTrace
+    // 参照）。CPU攻撃停止バグの原因特定に使った情報をそのままログへ残す。
+    final remainingSpeed = state.rallyRemainingSpeed ?? attacker.comboSpeed;
+    final handCardIds = attacker.hand.map((e) => e.cardId).toList();
+    final energyPoolSnapshot = {
+      for (final entry in attacker.energyPool.entries) entry.key.name: entry.value,
+    };
+
     final candidates = <TechniqueCpuCandidate>[];
     TechniqueDeckEntry? bestEntry;
     TechniqueDeckTechniqueCard? bestCard;
@@ -337,16 +345,16 @@ class TechniqueMatchCpu {
     // ソフトな減点だけでスコアが0以下になることがあり、絶対しきい値で
     // 判定すると「唯一の選択肢なのに何もしない」まま手番を空費し続ける
     // （山札・捨て札が両方尽きて手番だけが進む）不具合になるため。
-    // 低HP時の撤退（休息優先）だけは例外的に扱う。
-    final hpRatio = attacker.maxHp == 0 ? 1.0 : attacker.hp / attacker.maxHp;
-    const decisiveScoreThreshold = 15;
-    final shouldRetreat = isFreshTurn &&
-        attacker.posture == WrestlerPosture.stand &&
-        attacker.hp < attacker.maxHp &&
-        hpRatio <= 0.4 &&
-        (bestEntry == null || bestScore < decisiveScoreThreshold);
-
-    if (bestEntry != null && bestCard != null && !shouldRetreat) {
+    //
+    // 【Phase 8.5A-2】かつてはここに「低HP時は決定的な技（スコア15点
+    // 以上）以外なら休息を優先する」撤退ロジック（shouldRetreat）が
+    // あったが、Phase 8.5Aで休息システムを廃止した際に更新し忘れており、
+    // 「合法技はあるのに何もせずpassTurnする」重大なバグになっていた
+    // （HPが一度40%を切ると休息が無いため二度と回復せず、以降ずっと
+    // 自発攻撃不能になる。実プレイ・シード固定の再現テストの両方で確認
+    // 済み）。Normal CPUでは「合法手があれば必ず使う」を最優先するため、
+    // このロジックは撤去した（戦術的な様子見は将来のCPUレベルで検討）。
+    if (bestEntry != null && bestCard != null) {
       final rejected = candidates
           .where((c) => c.eligible && c.cardId != bestEntry!.cardId)
           .map(
@@ -373,6 +381,11 @@ class TechniqueMatchCpu {
           reason: 'スコア$bestScore点で最も評価が高い技を選択した',
         ),
         rejected: rejected,
+        rallyAttackerIndex: state.rallyAttackerIndex,
+        remainingSpeed: remainingSpeed,
+        comboSpeed: attacker.comboSpeed,
+        handCardIds: handCardIds,
+        energyPool: energyPoolSnapshot,
       );
       return TechniqueCpuStepResult(state: result.state, trace: trace);
     }
@@ -396,6 +409,11 @@ class TechniqueMatchCpu {
           action: 'endRally',
           reason: '追撃に値するスコアの技が無いためラリーを終了した',
         ),
+        rallyAttackerIndex: state.rallyAttackerIndex,
+        remainingSpeed: remainingSpeed,
+        comboSpeed: attacker.comboSpeed,
+        handCardIds: handCardIds,
+        energyPool: energyPoolSnapshot,
       );
       return TechniqueCpuStepResult(state: newState, trace: trace);
     }
@@ -418,6 +436,11 @@ class TechniqueMatchCpu {
         action: 'passTurn',
         reason: '使用可能な技が無いためターンを自動終了した',
       ),
+      rallyAttackerIndex: state.rallyAttackerIndex,
+      remainingSpeed: remainingSpeed,
+      comboSpeed: attacker.comboSpeed,
+      handCardIds: handCardIds,
+      energyPool: energyPoolSnapshot,
     );
     return TechniqueCpuStepResult(state: passed, trace: trace);
   }
@@ -454,6 +477,12 @@ class TechniqueMatchCpu {
     // エネルギー効率: コストが高いほど減点（同威力ならコストが低い技を優先）。
     final totalCost = card.attackEnergyCost.values.fold<int>(0, (a, b) => a + b);
     if (totalCost > 0) add('エネルギーコスト', -(totalCost * 2));
+
+    // 【Phase 8.5A-2】Speedコストが高いほど軽く減点する。1ターンに複数技を
+    // 使えるComboSpeed Rules下では、同程度の威力ならSpeedが軽い技を優先
+    // した方が同じラリーでもう1発繋げられる可能性が上がるため。大幅な
+    // バランス変更にならないよう、係数は控えめ（-1×(speed-1)）にとどめる。
+    if (card.speed > 1) add('Speedコスト', -(card.speed - 1));
 
     // ダウンさせられる。
     final causesNewDown = card.causesDown && !opponentDownLike;

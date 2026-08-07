@@ -79,6 +79,36 @@ void main() {
         heatDelta: 10,
         hasFinisherEffect: true,
       ),
+      // Phase 8.5A-2: Combo Speed関連テスト用。
+      TechniqueDeckTechniqueCard(
+        id: 'costly_strike',
+        name: '高コスト打撃',
+        category: TechniqueCardCategory.normal,
+        attribute: MoveAttribute.strike,
+        attackEnergyCost: {MoveAttribute.strike: 3},
+        power: 4,
+        heatDelta: 2,
+      ),
+      TechniqueDeckTechniqueCard(
+        id: 'speed_light',
+        name: '軽量技',
+        category: TechniqueCardCategory.normal,
+        attribute: MoveAttribute.strike,
+        attackEnergyCost: {MoveAttribute.strike: 1},
+        power: 5,
+        heatDelta: 2,
+        speed: 2,
+      ),
+      TechniqueDeckTechniqueCard(
+        id: 'speed_heavy',
+        name: '重量技',
+        category: TechniqueCardCategory.normal,
+        attribute: MoveAttribute.strike,
+        attackEnergyCost: {MoveAttribute.strike: 1},
+        power: 6,
+        heatDelta: 2,
+        speed: 7,
+      ),
     ],
     energies: [
       TechniqueEnergyCard(id: 'e_strike', attribute: MoveAttribute.strike, name: '打エネルギー'),
@@ -539,6 +569,250 @@ void main() {
       expect(finisherRate, lessThanOrEqualTo(1));
       expect(usedCardNames, isNotEmpty);
       expect(winsByWrestler.values.fold<int>(0, (a, b) => a + b), totalGames - drawCount);
+    });
+  });
+
+  group('Phase 8.5A-2: CPU攻撃停止バグの修正確認', () {
+    test('低HP（40%以下）でもスコアの低い合法技があればpassTurnせず使用する'
+        '（旧shouldRetreatロジックの回帰テスト）', () {
+      // 実プレイで発覚したバグの再現条件: HPが40%以下、最も良い技でも
+      // スコアが低い（15点未満）。休息廃止前は「休息を優先して様子見」の
+      // つもりだったロジックが、休息が無くなった後は単に何もしない
+      // （passTurn）バグになっていた。
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['weak_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['weak_strike', 'e_strike']),
+        handSize: 2,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        activePlayerIndex: 1,
+        playerB: state.playerB.copyWith(
+          hp: 20, // 20% HP。旧shouldRetreatの閾値（40%）を大きく下回る。
+          energyPool: const {MoveAttribute.strike: 1},
+        ),
+        energySetThisTurn: true,
+      );
+      final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+      expect(result.trace!.decisionType, 'declareAttack');
+      expect(result.trace!.chosen.cardId, 'weak_strike');
+    });
+
+    test('唯一の合法技のスコアが負でも使用する（多様性ペナルティ等で全滅させない）', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['weak_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['costly_strike']),
+        handSize: 1,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        activePlayerIndex: 1,
+        playerB: state.playerB.copyWith(
+          energyPool: const {MoveAttribute.strike: 3},
+        ),
+        energySetThisTurn: true,
+      );
+      final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+      // costly_strikeのスコアは 4（威力） - 3*2（コスト） = -2 と負になるが、
+      // 唯一の合法技なので必ず使用されるべき。
+      expect(result.trace!.decisionType, 'declareAttack');
+      expect(result.trace!.chosen.cardId, 'costly_strike');
+    });
+
+    test('本当に使用可能な技が無い場合のみpassTurnする', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['weak_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['costly_strike']),
+        handSize: 1,
+        random: Random(1),
+      );
+      // エネルギーが無いため costly_strike は使用不可。
+      state = state.copyWith(activePlayerIndex: 1, energySetThisTurn: true);
+      final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+      expect(result.trace!.decisionType, 'passTurn');
+      expect(result.state.activePlayerIndex, 0);
+    });
+  });
+
+  group('Phase 8.5A-2: Combo Speed対応（CPU）', () {
+    test('残りSpeedが足りる限り1ターンで複数技を使用する', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['weak_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['speed_light', 'speed_light']),
+        handSize: 2,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        activePlayerIndex: 1,
+        playerB: state.playerB.copyWith(
+          energyPool: const {MoveAttribute.strike: 2},
+        ),
+        energySetThisTurn: true,
+      );
+      final first = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+      expect(first.trace!.decisionType, 'declareAttack');
+      expect(first.state.rallyRemainingSpeed, 8); // 10 - speed(2)
+
+      final second = TechniqueMatchCpu.step(first.state, catalog, random: Random(1));
+      // Aは返技候補を持たないため、resolveHitを経てラリーが継続する。
+      expect(second.trace!.decisionType, 'counterAttack');
+      expect(second.trace!.chosen.action, 'acceptHit');
+      expect(second.state.rallyAttackerIndex, 1); // ラリー継続、Bのまま。
+
+      final third = TechniqueMatchCpu.step(second.state, catalog, random: Random(1));
+      expect(third.trace!.decisionType, 'declareAttack');
+      expect(third.trace!.chosen.cardId, 'speed_light');
+      expect(third.state.rallyRemainingSpeed, 6); // 8 - speed(2)
+    });
+
+    test('残りSpeedが技のSpeedコストに満たない場合は候補から除外される', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['weak_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['speed_heavy']),
+        handSize: 1,
+        random: Random(1),
+      );
+      state = state.copyWith(
+        activePlayerIndex: 1,
+        rallyAttackerIndex: 1,
+        rallyChain: 1,
+        rallyRemainingSpeed: 3, // speed_heavy（Speed7）には不足。
+        playerB: state.playerB.copyWith(
+          energyPool: const {MoveAttribute.strike: 1},
+        ),
+      );
+      final result = TechniqueMatchCpu.step(state, catalog, random: Random(1));
+      expect(result.trace!.decisionType, 'endRally');
+      final candidate = result.trace!.candidates.single;
+      expect(candidate.eligible, isFalse);
+      expect(candidate.ineligibleReason, contains('Speed'));
+    });
+  });
+
+  group('Phase 8.5A-2: 返技成功後のCPU攻守交代', () {
+    test('CPUが返技成功後、新しい攻撃側としてComboSpeed全回復のうえ攻撃を継続する', () {
+      final catalog = microCatalog();
+      var state = TechniqueMatchEngine.start(
+        wrestlerAId: 'w1',
+        wrestlerAName: 'A',
+        wrestlerAMaxHp: 100,
+        deckA: deckOf('w1', ['strong_strike']),
+        wrestlerBId: 'w2',
+        wrestlerBName: 'B',
+        wrestlerBMaxHp: 100,
+        deckB: deckOf('w2', ['weak_strike', 'weak_strike']),
+        handSize: 2,
+        random: Random(1),
+      );
+      // Aがstrong_strikeを宣言。Bは返技候補（weak_strike、返技コストstrike1）
+      // ＋返技用エネルギーを持つ。
+      state = state.copyWith(
+        playerA: state.playerA.copyWith(
+          energyPool: const {MoveAttribute.strike: 1},
+        ),
+        playerB: state.playerB.copyWith(
+          energyPool: const {MoveAttribute.strike: 2},
+        ),
+      );
+      final declared = TechniqueMatchEngine.declareAttack(
+        state,
+        state.playerA.hand.first,
+        catalog,
+      ).state;
+      expect(declared.pendingAttack, isNotNull);
+
+      final counterResult = TechniqueMatchCpu.step(declared, catalog, random: Random(1));
+      expect(counterResult.trace!.decisionType, 'counterAttack');
+      expect(counterResult.trace!.chosen.action, 'counterAttack');
+      expect(counterResult.state.rallyAttackerIndex, 1); // Bが新しい攻撃側。
+      expect(
+        counterResult.state.rallyRemainingSpeed,
+        counterResult.state.playerB.comboSpeed,
+      ); // ComboSpeedが全回復している。
+
+      final followUp = TechniqueMatchCpu.step(counterResult.state, catalog, random: Random(1));
+      expect(followUp.trace!.decisionType, 'declareAttack');
+      expect(followUp.trace!.chosen.cardId, 'weak_strike');
+    });
+  });
+
+  group('Phase 8.5A-2: 回帰ケース（アカリ対ミサキCPU）', () {
+    test('固定シードの複数試合で、ミサキCPUの自発攻撃回数が0にならない', () {
+      final catalog = buildProvisionalTechniqueDeckCatalog();
+      final deckA = findTechniquePhase7AModelDeck('wrestler_akari')!;
+      final deckB = findTechniquePhase7AModelDeck('wrestler_misaki')!;
+
+      var zeroAttackGames = 0;
+      var totalMisakiAttacks = 0;
+      const gameCount = 12;
+      for (var seed = 0; seed < gameCount; seed++) {
+        final initial = TechniqueMatchEngine.start(
+          wrestlerAId: 'wrestler_akari',
+          wrestlerAName: '火神アカリ',
+          wrestlerAMaxHp: 125,
+          deckA: deckA,
+          wrestlerBId: 'wrestler_misaki',
+          wrestlerBName: '豪田ミサキ',
+          wrestlerBMaxHp: 82,
+          deckB: deckB,
+          random: Random(seed),
+        );
+        final result = TechniqueMatchCpu.playFullMatch(
+          initial,
+          catalog,
+          random: Random(seed * 1000 + 1),
+        );
+        final misakiAttacks = result.traces
+            .where(
+              (t) =>
+                  t.playerIndex == 1 &&
+                  (t.decisionType == 'declareAttack' ||
+                      t.decisionType == 'declareFinisher'),
+            )
+            .length;
+        totalMisakiAttacks += misakiAttacks;
+        if (misakiAttacks == 0) zeroAttackGames++;
+        expect(result.hitStepLimit, isFalse);
+      }
+      // 実プレイJSONで発覚したバグ（ミサキの自発攻撃0回）が、固定シード
+      // 12試合のいずれでも再発しないことを確認する。
+      expect(zeroAttackGames, 0);
+      expect(totalMisakiAttacks, greaterThan(0));
     });
   });
 

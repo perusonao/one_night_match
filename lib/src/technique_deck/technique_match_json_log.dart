@@ -16,6 +16,7 @@
 /// （不明な場合はnull）である。
 library;
 
+import 'technique_cpu_decision_trace.dart';
 import 'technique_deck_deck.dart';
 import 'technique_deck_models.dart' show WrestlerPosture;
 import 'technique_match_state.dart';
@@ -167,8 +168,25 @@ class TechniqueMatchJsonLog {
     required List<TechniqueMatchPlayerSummary> players,
     required List<TechniqueDeckDefinition> decks,
     required List<TechniqueMatchTurnEntry> turns,
+    List<TechniqueCpuDecisionTrace> cpuTraces = const [],
   }) {
     final winnerId = state.winnerIndex != null ? players[state.winnerIndex!].playerId : null;
+    // 【Phase 8.5A-2】決着した技のcardIdを、勝者が最後に宣言した
+    // declareAttack／declareFinisherのターン記録から逆引きする（従来は
+    // 常にnullだった）。フォール／ギブアップ／フィニッシャーいずれの決着
+    // でも、直前の宣言エントリが決着技そのものになる。
+    String? finishingCardId;
+    if (state.winnerIndex != null) {
+      final winnerWrestlerId = state.playerAt(state.winnerIndex!).wrestlerId;
+      for (final turn in turns.reversed) {
+        if (turn.actorId == winnerWrestlerId &&
+            (turn.action == 'declareAttack' || turn.action == 'declareFinisher') &&
+            turn.cardId != null) {
+          finishingCardId = turn.cardId;
+          break;
+        }
+      }
+    }
     return {
       'game': {
         'gameId': gameId,
@@ -182,7 +200,7 @@ class TechniqueMatchJsonLog {
         'finishedAt': finishedAt.toIso8601String(),
         'winnerId': winnerId,
         'finishReason': state.isDraw ? 'draw' : (state.winReason ?? ''),
-        'finishingCardId': null,
+        'finishingCardId': finishingCardId,
         'turns': state.turnNumber,
         'elapsedSeconds': elapsedSeconds,
         'timeOverCount': timeOverCount,
@@ -202,6 +220,10 @@ class TechniqueMatchJsonLog {
           )
           .toList(),
       'turns': turns.map((t) => t.toJson()).toList(),
+      // 【Phase 8.5A-2】CPUの意思決定ログ（候補技・スコア・不採用理由・
+      // 選択理由・ラリー/ComboSpeedのスナップショット等）。CPUが関与しない
+      // 対戦（人間同士）では常に空配列。
+      'cpuTraces': cpuTraces.map((t) => t.toJson()).toList(),
       'summary': {
         'rawLog': state.log,
       },

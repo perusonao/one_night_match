@@ -86,6 +86,14 @@ class TechniqueCpuRejectedCandidate {
 }
 
 /// CPUの1意思決定ポイント分の思考ログ。
+///
+/// 【Phase 8.5A-2】CPU攻撃停止バグ（合法技があるのにpassTurnし続ける）の
+/// 調査で、既存の`candidates`/`chosen`だけでは「その時点でラリー・
+/// ComboSpeed・手札・エネルギーがどんな状態だったか」を後から追えず
+/// 原因特定に手間取ったため、`_decideRallyAction`（技を使う／ラリーを
+/// 終える／ターンを自動終了する、の意思決定点）に限定して診断用の
+/// スナップショットフィールドを追加した（最低限の項目のみ。既存フィールド
+/// と重複するturn/playerIndex/decisionType/chosenは流用する）。
 class TechniqueCpuDecisionTrace {
   const TechniqueCpuDecisionTrace({
     required this.turnNumber,
@@ -95,6 +103,11 @@ class TechniqueCpuDecisionTrace {
     this.candidates = const [],
     required this.chosen,
     this.rejected = const [],
+    this.rallyAttackerIndex,
+    this.remainingSpeed,
+    this.comboSpeed,
+    this.handCardIds,
+    this.energyPool,
   });
 
   final int turnNumber;
@@ -106,14 +119,22 @@ class TechniqueCpuDecisionTrace {
   /// 場合はここに追加する）。
   final String cpuLevel;
 
-  /// 'setEnergy' | 'declareAttack' | 'restOrEndTurn' | 'endRally' |
-  /// 'counterAttack' | 'escapeChoice' | 'cancelFinisher' |
+  /// 'setEnergy' | 'declareAttack' | 'declareFinisher' | 'passTurn' |
+  /// 'endRally' | 'counterAttack' | 'escapeChoice' | 'cancelFinisher' |
   /// 'finisherEscapeChoice'
   final String decisionType;
 
   final List<TechniqueCpuCandidate> candidates;
   final TechniqueCpuChosenAction chosen;
   final List<TechniqueCpuRejectedCandidate> rejected;
+
+  /// `_decideRallyAction`診断用スナップショット（Phase 8.5A-2）。
+  /// この意思決定点以外（setEnergy・counterAttack等）ではnullのまま。
+  final int? rallyAttackerIndex;
+  final int? remainingSpeed;
+  final int? comboSpeed;
+  final List<String>? handCardIds;
+  final Map<String, int>? energyPool;
 
   Map<String, dynamic> toJson() => {
     'turnNumber': turnNumber,
@@ -123,6 +144,11 @@ class TechniqueCpuDecisionTrace {
     'candidates': candidates.map((c) => c.toJson()).toList(),
     'chosen': chosen.toJson(),
     'rejected': rejected.map((r) => r.toJson()).toList(),
+    if (rallyAttackerIndex != null) 'rallyAttackerIndex': rallyAttackerIndex,
+    if (remainingSpeed != null) 'remainingSpeed': remainingSpeed,
+    if (comboSpeed != null) 'comboSpeed': comboSpeed,
+    if (handCardIds != null) 'handCardIds': handCardIds,
+    if (energyPool != null) 'energyPool': energyPool,
   };
 
   @override

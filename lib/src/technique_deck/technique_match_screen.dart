@@ -525,7 +525,7 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final json = TechniqueMatchJsonLog.build(
       gameId: _gameId.isEmpty ? 'unknown' : _gameId,
       schemaVersion: '1.0.0',
-      gameVersion: 'phase8.2',
+      gameVersion: 'phase8.5a2',
       rulesVersion: 'technique-deck-rules',
       opponentType: vsCpu ? 'cpu' : 'human',
       cpuDifficulty: vsCpu ? cpuLevel.name : null,
@@ -539,6 +539,12 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       players: _buildPlayerSummaries(state),
       decks: decks,
       turns: _turnEntries,
+      // 【Phase 8.5A-2】CPUの意思決定ログ（候補技・スコア・不採用理由・
+      // ラリー/ComboSpeedのスナップショット等）を試合ログへ含める。
+      // 従来はデバッグUI（直近5件のみ表示）でしか見られず、JSONログには
+      // 一切出力されていなかった（今回のCPU攻撃停止バグの解析が難航した
+      // 一因）。
+      cpuTraces: _cpuTraces,
     );
     final content = const JsonEncoder.withIndent('  ').convert(json);
     final now = DateTime.now();
