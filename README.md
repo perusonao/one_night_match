@@ -16,6 +16,23 @@ For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
 
+## Technique Match Development
+
+Technique Matchの開発状況・次に何をすべきかは、以下のドキュメントを
+入口として参照する（詳細な仕様はここではなく各ドキュメントに記載する）。
+
+- **開発TODO / 次のアクション**:
+  [`docs/design/technique_match_todo.md`](docs/design/technique_match_todo.md)
+  — 新しいセッションはまずここを確認する
+- **現行ルール**:
+  [`docs/rules/technique_deck_rules.md`](docs/rules/technique_deck_rules.md)
+- **未決定事項**:
+  [`docs/design/technique_deck_open_questions.md`](docs/design/technique_deck_open_questions.md)
+- **技データ（設計・レビュー用Excel）**:
+  [`docs/data/one_night_match_techniques.xlsx`](docs/data/one_night_match_techniques.xlsx)
+- **ルール変更履歴**:
+  [`docs/history/technique_deck_rule_history.md`](docs/history/technique_deck_rule_history.md)
+
 ## Web deploy
 
 - **GitHub Pages（本番）**: `./deploy_web.sh` — `flutter build web --release`
