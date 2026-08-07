@@ -13,6 +13,7 @@ import 'level_match/level_match_simulator_screen.dart';
 import 'technique_deck/technique_deck_builder_screen.dart';
 import 'technique_deck/technique_match_screen.dart';
 import 'technique_deck/technique_match_setup_screen.dart';
+import 'app_build_info.dart';
 
 const _pink = Color(0xffff477e);
 const _gold = Color(0xffffc857);
@@ -139,6 +140,11 @@ class TitleScreen extends StatelessWidget {
                       onPressed: () => _showRules(context),
                     ),
                     TextButton.icon(
+                      icon: const Icon(Icons.new_releases_outlined),
+                      label: const Text('更新内容'),
+                      onPressed: () => _showChangelog(context),
+                    ),
+                    TextButton.icon(
                       icon: const Icon(Icons.analytics_outlined),
                       label: const Text('Debug分析'),
                       onPressed: () => Navigator.push(
@@ -147,6 +153,14 @@ class TitleScreen extends StatelessWidget {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 10),
+                // 【Phase 8.5A-2 ⑩】アプリ全体のバージョンを、ゲーム開始ボタン
+                // を邪魔しない位置（最下部）に常時・控えめに表示する。値は
+                // AppBuildInfoが唯一の定義元。
+                Text(
+                  'Ver. ${AppBuildInfo.version}',
+                  style: const TextStyle(color: Colors.white38, fontSize: 12),
                 ),
               ],
             ),
@@ -176,6 +190,42 @@ class TitleScreen extends StatelessWidget {
             _Rule('3', 'ダメージ', '返せないと、最後の技から防御を引いたダメージを受けます。'),
             _Rule('4', 'フォール', 'ダメージ後にフォール。カードかHPでキックアウトできます。'),
             _Rule('HEAT', '観客を沸かせる', '属性有利、長いラリー、キックアウトでHEAT上昇。勝敗とは別の評価です。'),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  // 【Phase 8.5A-2 ⑩】直近の改修履歴（最新3〜5件）をモーダルで表示する。
+  // 内容はAppBuildInfo.changelogが唯一の定義元。
+  void _showChangelog(BuildContext context) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    builder: (_) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '更新内容（現在 Ver. ${AppBuildInfo.version}）',
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            for (final entry in AppBuildInfo.changelog) ...[
+              Text(
+                'Ver. ${entry.version}',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              for (final item in entry.items)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2, left: 4),
+                  child: Text('・$item'),
+                ),
+              const SizedBox(height: 12),
+            ],
           ],
         ),
       ),

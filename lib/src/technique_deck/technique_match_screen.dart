@@ -16,10 +16,12 @@ import 'technique_deck_generator.dart';
 import 'technique_deck_model_decks.dart';
 import 'technique_deck_models.dart';
 import 'technique_deck_storage.dart';
+import 'technique_cpu_presentation_timing.dart';
 import 'technique_match_cpu.dart';
 import 'technique_match_json_log.dart';
 import 'technique_match_state.dart';
 import 'technique_wrestler_portraits.dart';
+import '../app_build_info.dart';
 
 /// Technique Deck Rules Phase 3〜7: 最初のプレイアブル画面「Technique Match」。
 ///
@@ -79,6 +81,7 @@ class TechniqueMatchScreen extends StatefulWidget {
     this.catalog,
     this.vsCpu = false,
     this.cpuLevel = TechniqueCpuLevel.normal,
+    this.cpuPresentationSpeed = TechniqueCpuPresentationSpeed.normal,
     this.initialWrestlerAId,
     this.initialWrestlerBId,
     this.debugMode = false,
@@ -87,6 +90,11 @@ class TechniqueMatchScreen extends StatefulWidget {
   final LocalWrestlerRepository? wrestlerRepository;
   final TechniqueDeckRepository? deckRepository;
   final TechniqueDeckCardCatalog? catalog;
+
+  /// 【Phase 8.5A-2 ⑪】CPUの行動を画面上でどれだけの速さで見せるか。
+  /// CPUの意思決定（`TechniqueMatchCpu`）や難易度には一切影響しない、
+  /// 純粋にUI層の演出速度設定。
+  final TechniqueCpuPresentationSpeed cpuPresentationSpeed;
 
   /// 【ゲームサイクル整理ラウンド 優先度7】trueならPlayer B（レスラーB）を
   /// Normal CPUが自動操作する。既定値はfalse（従来どおりの2人対戦
@@ -166,8 +174,23 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   late bool vsCpu = widget.vsCpu;
   final TechniqueCpuLevel cpuLevel = TechniqueCpuLevel.normal;
   late bool debugMode = widget.debugMode;
-  static const Duration _cpuThinkDelay = Duration(milliseconds: 500);
+  late TechniqueCpuPresentationSpeed cpuPresentationSpeed = widget.cpuPresentationSpeed;
   Timer? _cpuTimer;
+  // 【Phase 8.5A-2 ⑪】CPUが行動した「結果」（技名等）を見せたまま次の
+  // ステップへ進むまでの静止時間用タイマー。_cpuTimer（着手前の「考えて
+  // いる」演出）とは別物で、両方とも_scheduleNextStepの冒頭で必ずキャンセル
+  // してから張り直す（多重実行防止）。
+  Timer? _cpuHoldTimer;
+  // CPU思考中／CPU行動結果インジケーターに表示する文言。nullの間はデフォルト
+  // 文言（「（CPU）思考中…」）にフォールバックする。
+  String? _cpuStatusText;
+  // 【Phase 8.5A-2 ⑪】trueの間は、matchState上の手番が既に次（人間側や
+  // 次のCPUアクション）へ進んでいても、直前のCPU行動結果テキストを見せ
+  // 続ける（`_battleView`のactingIsCpu判定に使う）。CPUのアクション
+  // （passTurn・endRally等）はエンジン内部で手番の切り替えまで一体で
+  // 行われるため、matchStateの手番情報だけでは「結果を見せている最中」を
+  // 判定できない。
+  bool _cpuHoldingResult = false;
   // 【Phase 8.5A】使用可能な技が無いフレッシュターンの無言自動終了を、
   // _scheduleNextStep→_applyResult→_scheduleNextStepの同期再帰にせず
   // イベントループを1周挟んで実行するためのタイマー（CPUの着手ディレイと
@@ -210,9 +233,15 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   @override
   void dispose() {
     _cpuTimer?.cancel();
+    _cpuHoldTimer?.cancel();
     _passTimer?.cancel();
     super.dispose();
   }
+
+  /// 【Phase 8.5A-2 ⑪】CPU演出速度設定（ゆっくり/標準/高速）を反映した
+  /// 待ち時間を返す。CPU対CPUのシミュレーション（`playFullMatch`）は
+  /// この画面のコードを一切経由しないため、常に即時実行のまま保たれる。
+  Duration _scaledCpuDuration(Duration base) => cpuPresentationSpeed.scale(base);
 
   Future<(TechniqueDeckDefinition, String)> _resolveDeck(
     WrestlerDefinition wrestler,
@@ -259,6 +288,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     _turnEntries.clear();
     _cpuTraces.clear();
     _consecutivePassTurns = 0;
+    _cpuStatusText = null;
+    _cpuHoldingResult = false;
     _matchStartedAt = DateTime.now();
     _matchFinishedAt = null;
     _gameId = '${a.id}_vs_${b.id}_${_matchStartedAt!.millisecondsSinceEpoch}';
@@ -370,6 +401,8 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   void _scheduleNextStep() {
     _cpuTimer?.cancel();
     _cpuTimer = null;
+    _cpuHoldTimer?.cancel();
+    _cpuHoldTimer = null;
     _passTimer?.cancel();
     _passTimer = null;
     final state = matchState;
@@ -378,7 +411,14 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     }
     final actingIndex = TechniqueMatchCpu.actingPlayerIndex(state);
     if (_isCpu(actingIndex)) {
-      _cpuTimer = Timer(_cpuThinkDelay, _runCpuStep);
+      // 【Phase 8.5A-2 ⑪】着手前に「技を選んでいます…」を表示してから、
+      // 演出速度で調整した「考える」時間だけ待つ。
+      final cpuPlayer = state.playerAt(actingIndex);
+      setState(() => _cpuStatusText = '${cpuPlayer.wrestlerName}が技を選んでいます…');
+      _cpuTimer = Timer(
+        _scaledCpuDuration(TechniqueCpuPresentationTiming.think),
+        _runCpuStep,
+      );
       return;
     }
     // 技エネルギーをまだセットしていない、かつセットできるエネルギーカードが
@@ -431,10 +471,67 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     }
   }
 
+  /// 【Phase 8.5A-2 ⑪】CPUの1アクションの種類ごとに、行動結果を見せたまま
+  /// 静止する時間。`playFullMatch`（シミュレーション用の一括実行）はこの
+  /// 画面のコードを経由しないため、ここでの待ち時間は一切影響しない。
+  Duration _cpuHoldDurationFor(String action) => switch (action) {
+    'setEnergy' => TechniqueCpuPresentationTiming.energySet,
+    'declareAttack' => TechniqueCpuPresentationTiming.attackDeclared,
+    'declareFinisher' => TechniqueCpuPresentationTiming.finisherDeclared,
+    'counterAttack' || 'cancelFinisher' => TechniqueCpuPresentationTiming.counterUsed,
+    'acceptHit' || 'endRally' => TechniqueCpuPresentationTiming.hitResolved,
+    'escapeWithCard' ||
+    'escapeWithHp' ||
+    'escapeFinisherWithCard' => TechniqueCpuPresentationTiming.kickOutOrRopeBreak,
+    'concede' => TechniqueCpuPresentationTiming.fallOrSubmissionStart,
+    'acceptFinisher' || 'concedeFinisher' => TechniqueCpuPresentationTiming.finisherResolved,
+    'passTurn' => TechniqueCpuPresentationTiming.passTurn,
+    _ => TechniqueCpuPresentationTiming.hitResolved,
+  };
+
+  /// 【Phase 8.5A-2 ⑪】行動後に見せる短い状況テキスト（例:
+  /// 「豪田ミサキが「パワーボム」を使用！」「豪田ミサキが「スパイン
+  /// バスター」で返した！」）。
+  String _cpuResultStatusText(String wrestlerName, String action, String? cardName) {
+    switch (action) {
+      case 'declareAttack':
+      case 'declareFinisher':
+        return cardName != null
+            ? '$wrestlerNameが「$cardName」を使用！'
+            : '$wrestlerNameが技を使用！';
+      case 'counterAttack':
+      case 'cancelFinisher':
+        return cardName != null
+            ? '$wrestlerNameが「$cardName」で返した！'
+            : '$wrestlerNameが返した！';
+      case 'acceptHit':
+        return '$wrestlerNameが技を受けた';
+      case 'endRally':
+        return '$wrestlerNameがラリーを終えた';
+      case 'escapeWithCard':
+      case 'escapeWithHp':
+      case 'escapeFinisherWithCard':
+        return '$wrestlerNameが切り返した！';
+      case 'concede':
+      case 'concedeFinisher':
+        return '$wrestlerNameがギブアップ…';
+      case 'acceptFinisher':
+        return '$wrestlerNameがフィニッシャーを受けた';
+      case 'setEnergy':
+        return '$wrestlerNameがエネルギーをセットした';
+      case 'passTurn':
+        return '$wrestlerNameは行動できず手番を終えた';
+      default:
+        return '$wrestlerNameが行動した';
+    }
+  }
+
   Future<void> _runCpuStep() async {
     if (!mounted) return;
     final before = matchState;
     if (before == null || before.isOver) return;
+    final actingIndex = TechniqueMatchCpu.actingPlayerIndex(before);
+    final cpuPlayer = before.playerAt(actingIndex);
     final result = TechniqueMatchCpu.step(
       before,
       catalog,
@@ -445,15 +542,34 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
       _cpuTraces.add(result.trace!);
       if (_cpuTraces.length > 300) _cpuTraces.removeAt(0);
     }
-    setState(() => matchState = result.state);
+    final action = result.trace?.chosen.action ?? 'cpuStep';
+    final cardName = result.trace?.chosen.cardName;
+    if (!mounted) return;
+    // 【Phase 8.5A-2 ⑪】passTurn／endRally等、CPUのアクション自体に手番の
+    // 切り替えまで含まれる場合、matchState.activePlayerIndexは既に次の
+    // 手番（人間側含む）を指してしまう。行動結果の表示中は_cpuHoldingResult
+    // で明示的に「CPU行動結果を見せている最中」を保持し、_battleViewが
+    // 誤って人間側の操作UIへ切り替わらないようにする。
+    setState(() {
+      matchState = result.state;
+      _cpuStatusText = _cpuResultStatusText(cpuPlayer.wrestlerName, action, cardName);
+      _cpuHoldingResult = !result.state.isOver;
+    });
     _recordTurnEntry(
       before: before,
       after: result.state,
-      action: result.trace?.chosen.action ?? 'cpuStep',
+      action: action,
       cardId: result.trace?.chosen.cardId,
-      cardName: result.trace?.chosen.cardName,
+      cardName: cardName,
     );
-    _scheduleNextStep();
+    // 【Phase 8.5A-2 ⑪】試合が終了した場合は、結果表示（勝敗バナー）に
+    // 切り替わるため、これ以上CPUの行動をスケジュールしない。
+    if (result.state.isOver) return;
+    _cpuHoldTimer = Timer(_scaledCpuDuration(_cpuHoldDurationFor(action)), () {
+      if (!mounted) return;
+      setState(() => _cpuHoldingResult = false);
+      _scheduleNextStep();
+    });
   }
 
   // ============================================================
@@ -522,17 +638,29 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     final decks = [?_deckA, ?_deckB];
     final startedAt = _matchStartedAt ?? DateTime.now();
     final finishedAt = _matchFinishedAt ?? DateTime.now();
+    final realElapsedSeconds = finishedAt.difference(startedAt).inSeconds;
     final json = TechniqueMatchJsonLog.build(
       gameId: _gameId.isEmpty ? 'unknown' : _gameId,
       schemaVersion: '1.0.0',
-      gameVersion: 'phase8.5a2',
+      // 【Phase 8.5A-2 ⑩】画面表示（TitleScreenの「更新内容」等）とJSONログ
+      // が食い違わないよう、AppBuildInfoを唯一の定義元として参照する
+      // （かつては'phase8.2'のまま固定リテラルが残っており、新ルールが
+      // 反映されたJSONか判別できないバグがあった）。
+      gameVersion: AppBuildInfo.gameVersionId,
+      appVersion: AppBuildInfo.version,
+      buildLabel: AppBuildInfo.buildLabel,
       rulesVersion: 'technique-deck-rules',
       opponentType: vsCpu ? 'cpu' : 'human',
       cpuDifficulty: vsCpu ? cpuLevel.name : null,
       startedAt: startedAt,
       finishedAt: finishedAt,
       state: state,
-      elapsedSeconds: finishedAt.difference(startedAt).inSeconds,
+      elapsedSeconds: realElapsedSeconds,
+      elapsedRealSeconds: realElapsedSeconds,
+      // 【Phase 8.5A-2 ⑫】ターン数×30秒の演出上の換算値。実時間タイマーの
+      // 復活ではない。
+      matchTimeSeconds: state.turnNumber * 30,
+      matchTimeDisplay: formatMatchTime(state.turnNumber),
       // 【Phase 8.5A】1ターン30秒タイマー（TIME OVER）を廃止したため常に0
       // （JSONログのスキーマ自体は無改修）。
       timeOverCount: 0,
@@ -1717,8 +1845,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         !state.isOver;
     // 【優先度7】CPU対戦時、次に行動すべきがCPUであれば手札・操作ボタンは
     // 表示せず、「CPU思考中…」インジケーターに差し替える（CPUの手札は
-    // 人間に見せない）。
-    final actingIsCpu = !state.isOver && _isCpu(TechniqueMatchCpu.actingPlayerIndex(state));
+    // 人間に見せない）。【Phase 8.5A-2 ⑪】_cpuHoldingResultがtrueの間は
+    // matchState上の手番が既に切り替わっていてもインジケーター側を優先し、
+    // 行動結果メッセージを見せ続ける。
+    final actingIsCpu = !state.isOver &&
+        (_cpuHoldingResult || _isCpu(TechniqueMatchCpu.actingPlayerIndex(state)));
 
     // 優先度1（縦1画面化）: 相手→リング→自分→STEP→手札→操作ボタンの
     // コア部分をスクロールなしで収めることを目標に、各要素の余白・
@@ -1727,6 +1858,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     return ListView(
       padding: EdgeInsets.all(isNarrow ? 6 : 8),
       children: [
+        // 【Phase 8.5A-2 ⑫】試合時間（ターン数×30秒の換算表示）を、旧
+        // 30秒ターンタイマーを復活させることなく常時最上部へ表示する。
+        // 「TURN N」は補助情報として併記する。
+        _matchTimeHeader(state),
+        const SizedBox(height: 6),
         if (state.winnerIndex != null) ...[
           _winBanner(state),
           const SizedBox(height: 6),
@@ -1752,12 +1888,39 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     );
   }
 
+  /// 【Phase 8.5A-2 ⑫】試合時間（ターン数×30秒の換算表示）を「TURN N」
+  /// より優先して常時表示する。実時間の30秒タイマー（TIME OVER）を復活
+  /// させるものではなく、あくまで演出上の換算値であることに注意。
+  Widget _matchTimeHeader(TechniqueMatchState state) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(Icons.timer_outlined, size: 16, color: Colors.white70),
+        const SizedBox(width: 6),
+        Text(
+          '試合時間 ${formatMatchTime(state.turnNumber)}',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          'TURN ${state.turnNumber}',
+          style: const TextStyle(fontSize: 11, color: Colors.white54),
+        ),
+      ],
+    ),
+  );
+
   /// 【優先度7】CPUが自動進行している間、人間には操作UIの代わりに簡潔な
   /// 「CPU思考中…」表示のみを見せる（CPUの手札は表示しない）。
   Widget _cpuThinkingIndicator(TechniqueMatchState state) {
     final actingIndex = TechniqueMatchCpu.actingPlayerIndex(state);
     final cpuPlayer = state.playerAt(actingIndex);
+    // 【Phase 8.5A-2 ⑪】着手前は「〜が技を選んでいます…」、行動後は
+    // 「〜が「カード名」を使用！」等の具体的な状況テキストへ差し替わる
+    // （_cpuStatusText）。未設定時のみデフォルト文言にフォールバックする。
     return Card(
+      key: const Key('techniqueCpuStatusIndicator'),
       color: _panelBg,
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
@@ -1770,9 +1933,11 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
             const SizedBox(width: 10),
-            Text(
-              '${cpuPlayer.wrestlerName}（CPU）思考中…',
-              style: const TextStyle(fontSize: 12, color: Colors.white70),
+            Expanded(
+              child: Text(
+                _cpuStatusText ?? '${cpuPlayer.wrestlerName}（CPU）思考中…',
+                style: const TextStyle(fontSize: 12, color: Colors.white70),
+              ),
             ),
           ],
         ),
@@ -1786,23 +1951,60 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
   String _displayWinReason(String reason) =>
       reason == 'ギブアップ勝利' ? 'SUBMISSION WIN' : reason;
 
+  /// 【Phase 8.5A-2 ⑫】結果表示（勝敗／引き分け）に「試合時間 M:SS /
+  /// Nターン」を主表示、実際の経過プレイ時間（`_matchStartedAt`〜
+  /// `_matchFinishedAt`）を「実プレイ時間 M:SS」として副次的に併記する。
+  Widget _matchTimeSummaryLine(TechniqueMatchState state, {required Color color}) {
+    final startedAt = _matchStartedAt;
+    final finishedAt = _matchFinishedAt;
+    final realSeconds = (startedAt != null && finishedAt != null)
+        ? finishedAt.difference(startedAt).inSeconds
+        : null;
+    final realLabel = realSeconds == null
+        ? null
+        : '${realSeconds ~/ 60}:${(realSeconds % 60).toString().padLeft(2, '0')}';
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Wrap(
+        spacing: 12,
+        children: [
+          Text(
+            '試合時間 ${formatMatchTime(state.turnNumber)} / ${state.turnNumber}ターン',
+            style: TextStyle(fontSize: 12, color: color.withValues(alpha: 0.85)),
+          ),
+          if (realLabel != null)
+            Text(
+              '実プレイ時間 $realLabel',
+              style: const TextStyle(fontSize: 11, color: Colors.white54),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _winBanner(TechniqueMatchState state) {
     final winner = state.playerAt(state.winnerIndex!);
     return Card(
       color: _gold.withValues(alpha: 0.18),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.emoji_events, color: _gold),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '${winner.wrestlerName}の勝利！'
-                '（${_displayWinReason(state.winReason ?? "決着")}）',
-                style: const TextStyle(fontWeight: FontWeight.bold, color: _gold),
-              ),
+            Row(
+              children: [
+                const Icon(Icons.emoji_events, color: _gold),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${winner.wrestlerName}の勝利！'
+                    '（${_displayWinReason(state.winReason ?? "決着")}）',
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: _gold),
+                  ),
+                ),
+              ],
             ),
+            _matchTimeSummaryLine(state, color: _gold),
           ],
         ),
       ),
@@ -1813,19 +2015,25 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
     color: Colors.white24,
     child: Padding(
       padding: const EdgeInsets.all(12),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.hourglass_disabled, color: Colors.white70),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '引き分け（${state.winReason ?? "時間切れ"}）',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.white70,
+          Row(
+            children: [
+              const Icon(Icons.hourglass_disabled, color: Colors.white70),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '引き分け（${state.winReason ?? "時間切れ"}）',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white70,
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
+          _matchTimeSummaryLine(state, color: Colors.white70),
         ],
       ),
     ),
@@ -2646,7 +2854,10 @@ class _TechniqueMatchScreenState extends State<TechniqueMatchScreen> {
         children: [
           stat('ラリー数', '${state.rallyChain}'),
           stat('ターン数', '${state.turnNumber}'),
-          stat('残り時間', '―'),
+          // 【Phase 8.5A-2 ⑫】以前はTechnique Deck Rules側が未実装のため
+          // 常に「―」を表示するダミーだったが、ターン数からの換算表示
+          // （試合時間）に置き換えた。実時間タイマーの復活ではない。
+          stat('試合時間', formatMatchTime(state.turnNumber)),
         ],
       ),
     );

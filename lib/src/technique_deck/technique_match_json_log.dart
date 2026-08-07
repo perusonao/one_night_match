@@ -151,6 +151,19 @@ class TechniqueMatchPlayerSummary {
 
 String _postureLabel(WrestlerPosture posture) => posture.name;
 
+/// 【Phase 8.5A-2 ⑫】ターン数を「試合時間」表示へ変換する。
+///
+/// 実時間のタイマーを復活させるものではなく、`turnCount * 30`秒という
+/// 完全に見た目上の換算（1ターン=30秒相当という演出上の目安）。画面表示
+/// （Technique Matchの試合画面・結果画面）とJSONログの`matchTimeDisplay`
+/// で同じ関数を使い、表記が食い違わないようにする。
+String formatMatchTime(int turnCount) {
+  final totalSeconds = turnCount * 30;
+  final minutes = totalSeconds ~/ 60;
+  final seconds = totalSeconds % 60;
+  return '$minutes:${seconds.toString().padLeft(2, '0')}';
+}
+
 /// [TechniqueMatchScreen]から呼び出される、JSON全体の組み立て。
 class TechniqueMatchJsonLog {
   static Map<String, dynamic> build({
@@ -169,6 +182,17 @@ class TechniqueMatchJsonLog {
     required List<TechniqueDeckDefinition> decks,
     required List<TechniqueMatchTurnEntry> turns,
     List<TechniqueCpuDecisionTrace> cpuTraces = const [],
+    // 【Phase 8.5A-2 ⑩】画面表示のバージョンとJSONログを常に一致させる
+    // ため、呼び出し側（TechniqueMatchScreen）からAppBuildInfoの値を
+    // そのまま渡す。省略時はgameVersionと同じ値を使う（後方互換）。
+    String? appVersion,
+    String? buildLabel,
+    // 【Phase 8.5A-2 ⑫】ターン数から換算した試合内時間（実時間の
+    // タイマーではなく、演出上の目安表示用）。elapsedSecondsは実プレイ
+    // 時間として引き続き使う（意味を変えず、命名だけ明確化する）。
+    int? matchTimeSeconds,
+    String? matchTimeDisplay,
+    int? elapsedRealSeconds,
   }) {
     final winnerId = state.winnerIndex != null ? players[state.winnerIndex!].playerId : null;
     // 【Phase 8.5A-2】決着した技のcardIdを、勝者が最後に宣言した
@@ -192,6 +216,8 @@ class TechniqueMatchJsonLog {
         'gameId': gameId,
         'schemaVersion': schemaVersion,
         'gameVersion': gameVersion,
+        'appVersion': appVersion ?? gameVersion,
+        'buildLabel': buildLabel,
         'rulesVersion': rulesVersion,
         'mode': 'techniqueMatch',
         'opponentType': opponentType,
@@ -202,7 +228,14 @@ class TechniqueMatchJsonLog {
         'finishReason': state.isDraw ? 'draw' : (state.winReason ?? ''),
         'finishingCardId': finishingCardId,
         'turns': state.turnNumber,
+        // 【Phase 8.5A-2 ⑫】elapsedSecondsは既存フィールド名を維持したまま
+        // （後方互換）、意味の重複を避けるためelapsedRealSecondsも併記する
+        // （同じ値。実プレイの経過秒数）。matchTimeSeconds/matchTimeDisplay
+        // は「ターン数×30秒」の演出上の換算値で、実時間タイマーではない。
         'elapsedSeconds': elapsedSeconds,
+        'elapsedRealSeconds': elapsedRealSeconds ?? elapsedSeconds,
+        'matchTimeSeconds': matchTimeSeconds ?? state.turnNumber * 30,
+        'matchTimeDisplay': matchTimeDisplay ?? formatMatchTime(state.turnNumber),
         'timeOverCount': timeOverCount,
         'deckReshuffleCount': state.playerA.reshuffleCount + state.playerB.reshuffleCount,
       },

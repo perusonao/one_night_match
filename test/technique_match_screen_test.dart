@@ -8,6 +8,7 @@ import 'package:one_night_match/src/technique_deck/technique_deck_defaults.dart'
     show buildProvisionalTechniqueDeckCatalog;
 import 'package:one_night_match/src/technique_deck/technique_deck_models.dart';
 import 'package:one_night_match/src/technique_deck/technique_deck_storage.dart';
+import 'package:one_night_match/src/technique_deck/technique_cpu_presentation_timing.dart';
 import 'package:one_night_match/src/technique_deck/technique_match_screen.dart';
 import 'package:one_night_match/src/technique_deck/technique_match_state.dart';
 import 'package:one_night_match/src/wrestler_editor/defaults.dart'
@@ -432,6 +433,60 @@ void main() {
     });
   });
 
+  group('TechniqueMatchScreen: 試合時間表示（Phase 8.5A-2 ⑫）', () {
+    testWidgets('試合開始直後は「試合時間 0:30」がTURN表示より優先して常時表示される', (tester) async {
+      final repo = LocalTechniqueDeckRepository();
+      await startWithFixedDeck(tester, repo, const [
+        TechniqueDeckEntry(
+          instanceId: 'e1',
+          cardId: 'normal_1',
+          cardType: TechniqueDeckCardType.technique,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 'e2',
+          cardId: 'energy_strike',
+          cardType: TechniqueDeckCardType.energy,
+        ),
+      ]);
+
+      // 1ターン目 = 30秒換算。実時間タイマー（旧30秒ターンタイマー）の
+      // 復活ではなく、あくまでターン数からの換算表示であることを確認する。
+      expect(find.textContaining('試合時間 0:30'), findsOneWidget);
+      expect(find.textContaining('TURN 1'), findsOneWidget);
+
+      final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
+      final TechniqueMatchState current = screenState.matchState;
+      expect(current.turnNumber, 1);
+    });
+
+    testWidgets('ターン数が進むと試合時間表示もturnNumber*30秒で更新される', (tester) async {
+      final repo = LocalTechniqueDeckRepository();
+      await startWithFixedDeck(tester, repo, const [
+        TechniqueDeckEntry(
+          instanceId: 'e1',
+          cardId: 'normal_1',
+          cardType: TechniqueDeckCardType.technique,
+        ),
+        TechniqueDeckEntry(
+          instanceId: 'e2',
+          cardId: 'energy_strike',
+          cardType: TechniqueDeckCardType.energy,
+        ),
+      ]);
+      final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
+      final TechniqueMatchState current = screenState.matchState as TechniqueMatchState;
+      // turnNumberを直接21へ書き換え、画面表示がformatMatchTime(21)="10:30"
+      // と一致することだけを確認する（エンジンのターン進行ロジック自体は
+      // 対象外。表示側の換算式のみを検証する）。setState経由で反映させる。
+      screenState.setState(() {
+        screenState.matchState = current.copyWith(turnNumber: 21);
+      });
+      await tester.pump();
+      expect(find.textContaining('試合時間 10:30'), findsOneWidget);
+      expect(find.textContaining('TURN 21'), findsOneWidget);
+    });
+  });
+
   group('TechniqueMatchScreen: Phase 6 フォール・ギブアップ回避', () {
     TechniqueDeckCardCatalog fallCatalog() => const TechniqueDeckCardCatalog(
       techniques: [
@@ -823,6 +878,7 @@ void main() {
       WidgetTester tester, {
       TechniqueDeckRepository? deckRepository,
       TechniqueDeckCardCatalog? catalog,
+      TechniqueCpuPresentationSpeed cpuPresentationSpeed = TechniqueCpuPresentationSpeed.normal,
     }) async {
       await tester.binding.setSurfaceSize(const Size(800, 3000));
       await tester.pumpWidget(
@@ -831,6 +887,7 @@ void main() {
             catalog: catalog ?? buildProvisionalTechniqueDeckCatalog(),
             vsCpu: true,
             deckRepository: deckRepository,
+            cpuPresentationSpeed: cpuPresentationSpeed,
           ),
         ),
       );
@@ -842,8 +899,8 @@ void main() {
       await tester.tap(find.text('試合開始'));
       await tester.pumpAndSettle();
 
-      // 最初はAの手番（人間）。CPU思考中表示は出ない。
-      expect(find.textContaining('CPU）思考中'), findsNothing);
+      // 最初はAの手番（人間）。CPU思考中／行動状況インジケーターは出ない。
+      expect(find.byKey(const Key('techniqueCpuStatusIndicator')), findsNothing);
       final dynamic screenState = tester.state(find.byType(TechniqueMatchScreen));
       final TechniqueMatchState state = screenState.matchState;
       expect(state.activePlayerIndex, 0);
@@ -896,17 +953,97 @@ void main() {
       await tester.tap(find.text('ラリーを終了する'));
       await tester.pump();
 
-      // Bの手番になった直後は「CPU思考中」表示のみで、手札は表示されない
-      // （CPUの手札は人間に見せない）。
-      expect(find.textContaining('CPU）思考中'), findsOneWidget);
+      // Bの手番になった直後は思考中インジケーター表示のみで、手札は表示
+      // されない（CPUの手札は人間に見せない）。
+      expect(find.byKey(const Key('techniqueCpuStatusIndicator')), findsOneWidget);
 
-      // CPUの思考ディレイ（500ms）経過後、CPUが自動的に行動する
+      // 【Phase 8.5A-2 ⑪】CPUの思考ディレイ（標準速度で600ms）＋行動後の
+      // 静止時間（passTurnで500ms）が経過すると、CPUが自動的に行動する
       // （有効な技が無いため無言でターンを終了し、Aの手番に戻る）。
-      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump(const Duration(milliseconds: 700));
       await tester.pumpAndSettle();
 
       await expandLog(tester);
       expect(find.textContaining('の手番'), findsWidgets);
+    });
+
+    // 【Phase 8.5A-2 ⑪】CPU演出速度は「見せ方」だけを変える設定であり、
+    // CPUの意思決定・強さには影響しない。ここでは同じ局面（有効な技が無く
+    // passTurnになるケース）を使い、高速(fast)なら標準(normal)より短い
+    // 経過時間で手番が完了することだけを確認する。
+    Future<void> reachCpuTurn(WidgetTester tester, {required TechniqueCpuPresentationSpeed speed}) async {
+      final repo = LocalTechniqueDeckRepository();
+      await pumpCpuScreen(
+        tester,
+        deckRepository: repo,
+        catalog: testCatalog(),
+        cpuPresentationSpeed: speed,
+      );
+      final state = tester.state(find.byType(TechniqueMatchScreen));
+      // ignore: avoid_dynamic_calls
+      final wrestlerAId = (state as dynamic).wrestlerA.id as String;
+      await repo.save(
+        TechniqueDeckSaveRecord(
+          deckId: 'cpu_speed_test_deck',
+          name: 'CPU演出速度テスト用デッキ',
+          wrestlerId: wrestlerAId,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          entries: const [
+            TechniqueDeckEntry(
+              instanceId: 'e1',
+              cardId: 'normal_1',
+              cardType: TechniqueDeckCardType.technique,
+            ),
+            TechniqueDeckEntry(
+              instanceId: 'e2',
+              cardId: 'energy_strike',
+              cardType: TechniqueDeckCardType.energy,
+            ),
+          ],
+        ),
+      );
+      await tester.tap(find.text('試合開始'));
+      await tester.pumpAndSettle();
+      await selectAndConfirm(tester, '打エネルギー', 'セットする');
+      await tester.tap(find.text('通常技A').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('使用する'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ラリーを終了する'));
+      await tester.pump();
+    }
+
+    testWidgets('CPU演出速度「高速」は「標準」より短い経過時間でCPUの手番が完了する', (tester) async {
+      // 高速(0.5倍): think 600ms*0.5=300ms + passTurnの静止 500ms*0.5=250ms
+      // = 合計550ms。600ms待てば完了しているはず。
+      await reachCpuTurn(tester, speed: TechniqueCpuPresentationSpeed.fast);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.byKey(const Key('techniqueCpuStatusIndicator')), findsNothing);
+    });
+
+    testWidgets('CPU演出速度「標準」は同じ600msではまだCPUの手番の途中', (tester) async {
+      // 標準(1.0倍): think 600ms + passTurnの静止 500ms = 合計1100ms。
+      // 600ms時点ではまだ静止（結果表示）待ちの途中のはず。
+      await reachCpuTurn(tester, speed: TechniqueCpuPresentationSpeed.normal);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.byKey(const Key('techniqueCpuStatusIndicator')), findsOneWidget);
+      // 残りの静止時間も進めれば完了する（後始末としてpumpAndSettleする）。
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('CPUの遅延コールバック待機中にウィジェットが破棄されても例外にならない', (tester) async {
+      await reachCpuTurn(tester, speed: TechniqueCpuPresentationSpeed.normal);
+      // CPUの思考中インジケーターが出ている（=まだ_cpuTimer/_cpuHoldTimerが
+      // 保留中の）状態で、ウィジェットツリーを丸ごと差し替える（Navigator.pop
+      // 相当のdisposeを模擬）。
+      expect(find.byKey(const Key('techniqueCpuStatusIndicator')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(tester.takeException(), isNull);
+      // dispose済みでも保留中のタイマーが発火しうる時間まで進めるが、
+      // mountedチェックにより例外や不正なsetStateは起きないはず。
+      await tester.pump(const Duration(seconds: 2));
+      expect(tester.takeException(), isNull);
     });
   });
 }

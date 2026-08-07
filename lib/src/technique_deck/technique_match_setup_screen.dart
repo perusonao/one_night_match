@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../wrestler_editor/models.dart' show WrestlerDefinition;
 import '../wrestler_editor/repository.dart';
+import 'technique_cpu_presentation_timing.dart';
 import 'technique_deck_model_decks.dart';
 import 'technique_deck_storage.dart';
 import 'technique_match_cpu.dart';
@@ -42,6 +43,9 @@ class _TechniqueMatchSetupScreenState extends State<TechniqueMatchSetupScreen> {
   WrestlerDefinition? cpuWrestler;
   _OpponentMode mode = _OpponentMode.cpu; // 標準はCPU対戦。
   _CpuWrestlerChoice cpuChoice = _CpuWrestlerChoice.random;
+  // 【Phase 8.5A-2 ⑪】CPUの行動演出（見せ方）の速度のみを変える設定。
+  // CPUの意思決定ロジック・難易度には一切影響しない。
+  TechniqueCpuPresentationSpeed cpuPresentationSpeed = TechniqueCpuPresentationSpeed.normal;
   String? myDeckNote;
 
   @override
@@ -99,6 +103,7 @@ class _TechniqueMatchSetupScreenState extends State<TechniqueMatchSetupScreen> {
           wrestlerRepository: wrestlerRepository,
           vsCpu: mode == _OpponentMode.cpu,
           cpuLevel: TechniqueCpuLevel.normal,
+          cpuPresentationSpeed: cpuPresentationSpeed,
           initialWrestlerAId: self.id,
           initialWrestlerBId: opponent.id,
         ),
@@ -198,6 +203,25 @@ class _TechniqueMatchSetupScreenState extends State<TechniqueMatchSetupScreen> {
                   // 将来Hard/Expert等を追加する場合はここへ選択肢を足す
                   // （TechniqueCpuLevel enumを拡張する構造にしてある）。
                   const Chip(label: Text('Normal（唯一の実装レベル）')),
+                  const SizedBox(height: 20),
+                  const Text(
+                    '⑥ CPU演出速度',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'CPUの行動を見せる速さだけを変えます（強さは変わりません）',
+                    style: TextStyle(fontSize: 11, color: Colors.white54),
+                  ),
+                  const SizedBox(height: 8),
+                  SegmentedButton<TechniqueCpuPresentationSpeed>(
+                    segments: [
+                      for (final speed in TechniqueCpuPresentationSpeed.values)
+                        ButtonSegment(value: speed, label: Text(speed.label)),
+                    ],
+                    selected: {cpuPresentationSpeed},
+                    onSelectionChanged: (s) => setState(() => cpuPresentationSpeed = s.first),
+                  ),
                 ] else ...[
                   const Text(
                     '④ 対戦相手のレスラー（同じ画面で操作します）',
