@@ -1,14 +1,16 @@
-/// Combat Ver.1 Phase 1テスト共通フィクスチャ。
+/// Combat Ver.1 Phase 1〜2テスト共通フィクスチャ。
 ///
 /// 正式レスラー／技データ（Phase 10予定、docs/combat_rules_v1.md 21・22章）
-/// ではなく、Core Skeletonのループ検証専用の最小データを提供する
+/// ではなく、Core Skeleton／Deck・Handループ検証専用の最小データを提供する
 /// （docs/design/combat_v1_phase1_design.md 9章の方針）。
 /// `_test.dart`という命名ではないため、`flutter test`からは直接テスト
-/// スイートとして実行されず、他の3ファイルから共有ヘルパーとしてimportする。
+/// スイートとして実行されず、他のテストファイルから共有ヘルパーとして
+/// importする。
 library;
 
 import 'package:one_night_match/src/combat_v1/combat_v1_counter.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_deck.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_deck_validation.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_energy.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
@@ -44,6 +46,10 @@ const CombatV1Wrestler fixtureWrestlerB = CombatV1Wrestler(
 );
 
 /// テスト用技カタログ（NORMAL/SIGNATURE/FINISHERを一通りカバー）。
+///
+/// NORMALは6種類（同名上限3枚 × 6種類 = 18枚）用意する。フィクスチャデッキ
+/// （[fixtureDeck]）が同名カード上限（docs/combat_rules_v1.md 3章）ちょうど
+/// で30枚構成を満たせるようにするための種類数（Phase 2で追加）。
 const Map<String, CombatV1Technique> fixtureTechniques = {
   'fx_normal_strike': CombatV1Technique(
     id: 'fx_normal_strike',
@@ -87,6 +93,24 @@ const Map<String, CombatV1Technique> fixtureTechniques = {
     damage: 15,
     heatGain: 15,
   ),
+  'fx_normal_strike_alt': CombatV1Technique(
+    id: 'fx_normal_strike_alt',
+    name: 'テスト打撃技2',
+    category: CombatV1CardCategory.normal,
+    attribute: CombatV1EnergyAttribute.strike,
+    energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 1}),
+    damage: 10,
+    heatGain: 10,
+  ),
+  'fx_normal_throw_alt': CombatV1Technique(
+    id: 'fx_normal_throw_alt',
+    name: 'テスト投げ技2',
+    category: CombatV1CardCategory.normal,
+    attribute: CombatV1EnergyAttribute.throwing,
+    energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.throwing: 1}),
+    damage: 10,
+    heatGain: 10,
+  ),
   'fx_signature_a': CombatV1Technique(
     id: 'fx_signature_a',
     name: 'テスト固有技A',
@@ -129,7 +153,10 @@ const Map<String, CombatV1Technique> fixtureTechniques = {
   ),
 };
 
-/// テスト用COUNTERカタログ（Phase 1では未使用、デッキ構成検証のみに使う）。
+/// テスト用COUNTERカタログ（Phase 1〜2ではCOUNTERの戦闘処理は未実装。
+/// デッキ構成検証・Deck/Hand/Draw/Discard/Reshuffleでの物理カードとしての
+/// 取り扱いの検証にのみ使う）。3種類用意する（同名上限2枚 × 3種類 = 6枚、
+/// Phase 2で1種類追加）。
 const Map<String, CombatV1Counter> fixtureCounters = {
   'fx_counter_a': CombatV1Counter(
     id: 'fx_counter_a',
@@ -141,14 +168,30 @@ const Map<String, CombatV1Counter> fixtureCounters = {
     name: 'テストカウンターB',
     attribute: CombatV1EnergyAttribute.throwing,
   ),
+  'fx_counter_c': CombatV1Counter(
+    id: 'fx_counter_c',
+    name: 'テストカウンターC',
+    attribute: CombatV1EnergyAttribute.aerial,
+  ),
 };
 
-/// 30枚のテスト用デッキ（NORMAL18/SIGNATURE4/FINISHER2/COUNTER6）を生成する。
-CombatV1DeckDefinition fixtureDeck(String wrestlerId) {
+/// [fixtureTechniques]・[fixtureCounters]を横断参照するテスト用カタログ
+/// （Deck validation用、docs/combat_rules_v1.md 4章）。
+const CombatV1CardCatalog fixtureCatalog = CombatV1CardCatalog(
+  techniques: fixtureTechniques,
+  counters: fixtureCounters,
+);
+
+/// カード内訳の指定から物理カード（[CombatV1DeckEntry]）のリストを生成する
+/// （instanceIdはユニーク）。テストで様々な（正しい／不正な）デッキを
+/// 組み立てるための共通ヘルパー（docs/combat_rules_v1.md 3・4章）。
+List<CombatV1DeckEntry> buildDeckEntries(
+  String wrestlerId,
+  List<(String cardId, CombatV1CardCategory category, int count)> spec,
+) {
   final entries = <CombatV1DeckEntry>[];
   var seq = 0;
-
-  void add(String cardId, CombatV1CardCategory category, int count) {
+  for (final (cardId, category, count) in spec) {
     for (var i = 0; i < count; i++) {
       entries.add(
         CombatV1DeckEntry(
@@ -159,17 +202,31 @@ CombatV1DeckDefinition fixtureDeck(String wrestlerId) {
       );
     }
   }
-
-  add('fx_normal_strike', CombatV1CardCategory.normal, 6);
-  add('fx_normal_throw_down', CombatV1CardCategory.normal, 6);
-  add('fx_normal_ground', CombatV1CardCategory.normal, 3);
-  add('fx_normal_combo_cost', CombatV1CardCategory.normal, 3);
-  add('fx_signature_a', CombatV1CardCategory.signature, 2);
-  add('fx_signature_b', CombatV1CardCategory.signature, 2);
-  add('fx_finisher_a', CombatV1CardCategory.finisher, 1);
-  add('fx_finisher_b', CombatV1CardCategory.finisher, 1);
-  add('fx_counter_a', CombatV1CardCategory.counter, 3);
-  add('fx_counter_b', CombatV1CardCategory.counter, 3);
-
-  return CombatV1DeckDefinition(wrestlerId: wrestlerId, entries: entries);
+  return entries;
 }
+
+/// フィクスチャデッキの標準カード内訳（NORMAL18/SIGNATURE4/FINISHER2/
+/// COUNTER6、同名カード上限ちょうどに収まる構成、docs/combat_rules_v1.md
+/// 3章）。
+const List<(String, CombatV1CardCategory, int)> fixtureDeckSpec = [
+  ('fx_normal_strike', CombatV1CardCategory.normal, 3),
+  ('fx_normal_throw_down', CombatV1CardCategory.normal, 3),
+  ('fx_normal_ground', CombatV1CardCategory.normal, 3),
+  ('fx_normal_combo_cost', CombatV1CardCategory.normal, 3),
+  ('fx_normal_strike_alt', CombatV1CardCategory.normal, 3),
+  ('fx_normal_throw_alt', CombatV1CardCategory.normal, 3),
+  ('fx_signature_a', CombatV1CardCategory.signature, 2),
+  ('fx_signature_b', CombatV1CardCategory.signature, 2),
+  ('fx_finisher_a', CombatV1CardCategory.finisher, 1),
+  ('fx_finisher_b', CombatV1CardCategory.finisher, 1),
+  ('fx_counter_a', CombatV1CardCategory.counter, 2),
+  ('fx_counter_b', CombatV1CardCategory.counter, 2),
+  ('fx_counter_c', CombatV1CardCategory.counter, 2),
+];
+
+/// 30枚の正式なテスト用デッキ（NORMAL18/SIGNATURE4/FINISHER2/COUNTER6）を
+/// 生成する。[validateDeck]・[fixtureRules]に対して常にvalidである。
+CombatV1DeckDefinition fixtureDeck(String wrestlerId) => CombatV1DeckDefinition(
+  wrestlerId: wrestlerId,
+  entries: buildDeckEntries(wrestlerId, fixtureDeckSpec),
+);
