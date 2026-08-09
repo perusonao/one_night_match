@@ -22,6 +22,7 @@
 | D | HP初期値の扱い | 全レスラー共通固定150（Phase1ではレスラーごとの上書きを行わない）で確定 | `combat_rules_v1.md` 2・14章 |
 | E | KOC/PINカードをPhase1のPlayerStateに含めるか | 含める（初期化のみ、ロジックはPhase5）で確定 | `combat_rules_v1.md` 8・9章 |
 | F | FinisherTypeの表現方法 | `directPin`/`submissionHold`からの導出ではなく、独立enum`CombatV1FinisherType`で確定 | `combat_rules_v1.md` 13章 |
+| G | `finisherType`と`directPin`/`submissionHold`の優先順位ルール | `category == finisher`の場合は`finisherType`が決着方式を決定し、`directPin`/`submissionHold`は参照しない。`category != finisher`（NORMAL/SIGNATURE）の場合は`directPin`/`submissionHold`のみが意味を持ち、`finisherType`は`null`とする、で確定 | `combat_rules_v1.md` 13章、`combat_v1_phase1_design.md` 2.4章 |
 
 ---
 
@@ -35,17 +36,7 @@ Phase 1のCore Skeleton実装は、現在のSSOT（`combat_rules_v1.md`）と技
 
 ## 後続Phaseまで保留可能な項目
 
-### 1. `finisherType`と`directPin`/`submissionHold`の優先順位ルール
-
-- 関連章: `combat_rules_v1.md` 13章、`combat_v1_phase1_design.md` 2.4章
-- 内容: `category == finisher`のカードでは`finisherType`が決着方式を決定し、`directPin`/`submissionHold`は
-  参照しない、という優先順位ルールを本設計セッションの中で暫定的に定めた（ユーザー指示には優先順位の
-  明示までは含まれていなかったため、設計上の解釈として採用）。
-- 影響: Phase1では技モデルにフィールドを保持するのみで判定に使わないため、Phase1の実装には影響しない。
-- 解決が必要な時期: **Phase 9（FINISHER実装）着手前**。矛盾する値（例: `finisherType=submission`だが
-  `submissionHold=false`）を許容するか、データ投入時にバリデーションで防ぐかも含めて確認が必要。
-
-### 2. PINカード「共有4枚」の管理構造
+### 1. PINカード「共有4枚」の管理構造
 
 - 関連章: `combat_rules_v1.md` 8.1章
 - 内容: Phase1では`CombatV1PlayerState.pinCardsHeld`を各プレイヤーが独立して持つ単純な`int`として
@@ -53,7 +44,7 @@ Phase 1のCore Skeleton実装は、現在のSSOT（`combat_rules_v1.md`）と技
   成り立つべきという不変条件）を`CombatV1MatchState`側で検証・保証する仕組みを持たせるかどうかは未検討。
 - 解決が必要な時期: **Phase 5（PIN/KOC実装）着手前**。
 
-### 3. ジャックのデッキ配分（SIGNATURE/FINISHER/COUNTER内訳）
+### 2. ジャックのデッキ配分（SIGNATURE/FINISHER/COUNTER内訳）
 
 - 関連章: `combat_rules_v1.md` 21章
 - 内容: 一次資料（docx）にはアカリ・レイナ・ミサキの3人について
@@ -62,35 +53,35 @@ Phase 1のCore Skeleton実装は、現在のSSOT（`combat_rules_v1.md`）と技
   推測で補完していない。
 - 解決が必要な時期: **Phase 10（4レスラー正式デッキ実装）着手前**。
 
-### 4. アカリ・レイナの技データ（全12技の詳細数値）
+### 3. アカリ・レイナの技データ（全12技の詳細数値）
 
 - 関連章: `combat_rules_v1.md` 22章
 - 内容: 一次資料に記載がなく、本セッションでも意図的に確定させていない（ユーザー指示により推測補完を
   行っていない）。
 - 解決が必要な時期: **Phase 10着手前**。ユーザーからの追加仕様提供待ち。
 
-### 5. 技系統（TechniqueFamily）の正式taxonomy
+### 4. 技系統（TechniqueFamily）の正式taxonomy
 
 - 関連章: `combat_rules_v1.md` 23章
 - 内容: COUNTER成立判定に使う「技系統」の正式な分類（例: バックドロップ系、スープレックス系等）は
   未確定。Phase1では`familyId: String?`という暫定構造のみ用意する。
 - 解決が必要な時期: **Phase 4（COUNTER実装）着手前**。
 
-### 6. COUNTER時の＊(ワイルド)ENERGY使用ポリシー
+### 5. COUNTER時の＊(ワイルド)ENERGY使用ポリシー
 
 - 関連章: `combat_rules_v1.md` 5.1章、7章
 - 内容: TECHNIQUE支払い時のワイルド解決方式（B番の通り確定済み）とは別に、COUNTER支払い時に＊を
   同様に使ってよいか、レート・条件が異なるかは未確定。ユーザー方針により意図的に保留されている。
 - 解決が必要な時期: **Phase 4（COUNTER実装）着手前**。
 
-### 7. `CombatV1MatchState`への集計系フィールドの要否
+### 6. `CombatV1MatchState`への集計系フィールドの要否
 
 - 関連章: `combat_v1_phase1_design.md` 2.6章
 - 内容: `winner`/`isOver`はPhase1では追加しないことを確定した。ただしPhase5〜9のどのタイミングで、
   どのような形（`winnerIndex: int?`、`winReason: String?`等）で追加するかは各Phase着手時に個別判断する。
 - 解決が必要な時期: 各該当Phase（5・6・9のいずれか）着手時。
 
-### 8. Legacy Engine Removal Gate通過後の資産移植範囲の詳細
+### 7. Legacy Engine Removal Gate通過後の資産移植範囲の詳細
 
 - 関連章: `combat_rules_v1.md` 27.3章
 - 内容: 「Playtest Analytics、Simulatorの設計、Report、Diagnosticsなど再利用価値のある資産を削除前に
