@@ -85,10 +85,11 @@ CombatV1EnergyPaymentResult resolveEnergyPayment({
     }
 
     final usableFromAttribute = available > 0 ? available : 0;
-    if (usableFromAttribute > 0) {
-      updatedSpent[attribute] =
-          (updatedSpent[attribute] ?? 0) + usableFromAttribute;
-    }
+    // usableFromAttributeが0でも明示的にキーを設定する（コストに含まれる
+    // 属性は常にupdatedSpentへ反映し、「未設定=0」と「明示的に0」を
+    // 区別しない呼び出し側の実装との整合を保つ）。
+    updatedSpent[attribute] =
+        (updatedSpent[attribute] ?? 0) + usableFromAttribute;
     totalShortfall += required - usableFromAttribute;
   }
 
