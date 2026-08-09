@@ -14,6 +14,14 @@ class CombatV1EnergyPool {
   final Map<CombatV1EnergyAttribute, int> amounts;
 
   int amountFor(CombatV1EnergyAttribute attribute) => amounts[attribute] ?? 0;
+
+  /// 静的データvalidation（Phase 3、docs/combat_rules_v1.md 5章）:
+  /// 負数のENERGY量を持っていないか。
+  ///
+  /// `Map`の中身を検証するため、const constructorのassertには入れられない
+  /// （上記コンストラクタのコメント参照）。呼び出し側（Wrestler登録時・
+  /// テスト等）が必要な箇所で個別に呼び出す読み取り専用チェックとする。
+  bool get isValid => amounts.values.every((amount) => amount >= 0);
 }
 
 /// TECHNIQUE/COUNTERが要求するENERGYコスト（「技が要求するENERGY」）。
@@ -36,6 +44,19 @@ class CombatV1EnergyCost {
   int amountFor(CombatV1EnergyAttribute attribute) => amounts[attribute] ?? 0;
 
   static const CombatV1EnergyCost zero = CombatV1EnergyCost({});
+
+  /// 静的データvalidation（Phase 3、docs/combat_rules_v1.md 5.1・7章）:
+  /// 負数のCostを持たず、かつwildを要求Costとして持たないか。
+  ///
+  /// ＊(wild)は支払い側（Pool）が不足分を補うためだけのリソースであり、
+  /// 技のCostとして要求することはできない方針（docs/combat_rules_v1.md 5.1章）。
+  /// `Map`の中身を検証するため、const constructorのassertには入れられない
+  /// （上記コンストラクタのコメント参照）。
+  bool get isValid => amounts.entries.every(
+    (entry) =>
+        entry.value >= 0 &&
+        !(entry.key == CombatV1EnergyAttribute.wild && entry.value > 0),
+  );
 }
 
 /// ENERGY支払い判定の結果。

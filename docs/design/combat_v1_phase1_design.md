@@ -317,3 +317,73 @@ KOC/PINカードは初期化のみが対象（消費・判定はPhase5）。COUN
 `playtest_analytics/`はいずれも無変更）。`pubspec.yaml`も新規依存追加不要。
 
 **注**: 上記はいずれもPhase 0（今回）では作成しない。Phase 1着手の指示を受けてから作成する。
+
+---
+
+## 11. Phase 3での更新（技術設計の差分）
+
+Phase 3（TECHNIQUE Core完成 + COUNTER受け入れ準備）で、本書のPhase 1設計から以下を更新した。
+ゲームルール自体（`combat_rules_v1.md`）の変更ではなく、実装内部の技術設計の差分である。
+
+### 11.1 `CombatV1Engine`のAPIを`Map<String, CombatV1Technique>`から`CombatV1CardCatalog`へ移行
+
+`playTechnique`/`checkTechniqueLegality`/`hasAnyPlayableTechnique`の`techniques:`引数
+（`Map<String, CombatV1Technique>`）を、Phase 2で導入済みの`CombatV1CardCatalog`
+（`combat_v1_deck_validation.dart`）を受け取る`catalog:`引数へ統一した。
+
+理由: entry.categoryとカード定義categoryの整合性確認・COUNTERカードの誤用検出には、
+TECHNIQUEだけでなくCOUNTER側のカタログも横断参照する必要があるため
+（`CombatV1CardCatalog.categoryOf`が両方を見る）。Deck validationに続き、Engine実行時の
+legality判定でも「カード参照の正式な横断入口」をCatalogに一本化した。
+
+### 11.2 `CombatV1ActionCheck`に`reasonCode`を追加
+
+`CombatV1TechniqueLegalityReasonCode`（`legal`/`wrongPhase`/`cardNotInHand`/
+`missingCatalogEntry`/`notTechnique`/`categoryMismatch`/`counterCannotAttack`/
+`finisherNotImplemented`/`opponentStateMismatch`/`invalidTechniqueData`/
+`insufficientEnergy`）を追加し、`CombatV1ActionCheck`の第3引数（デフォルト`legal`）とした。
+`legal`/`reason`（人間可読文字列）は既存のまま維持し、後方互換を保っている。UI/CPU/Simulatorが
+`reason`文字列を解析しなくてよいようにするための構造化情報。
+
+### 11.3 `playTechnique`の内部分離（Phase 4 COUNTER挿入点）
+
+`playTechnique`を内部で以下の2段階に分離した。
+
+1. `_prepareTechniqueUse`: `checkTechniqueLegality`を呼び、legalityを検証したうえで
+   ENERGY支払いを確定する（`_PreparedTechniqueUse`を返す）。不正なら
+   `CombatV1IllegalActionException`を送出し、この時点では`state`を一切変更しない。
+2. `_resolveSuccessfulTechnique`: `_PreparedTechniqueUse`を受け取り、SSOTで確定した順序
+   （ENERGY消費→DMG適用→HP 0 clamp→shared HEAT加算→相手状態変化→使用カードdiscard→
+   1 draw）で効果を適用する。失敗しない（例外を送出しない）。
+
+Phase 3では`playTechnique`がこの2つを間を置かず連続して呼ぶだけだが、Phase 4で
+COUNTERを実装する際は、`_prepareTechniqueUse`の結果（`_PreparedTechniqueUse`）を
+`counterResponsePending`の間保持しておき、COUNTER不成立なら`_resolveSuccessfulTechnique`
+へ、COUNTER成立なら無効化パスへ渡す、という拡張を想定している。Phase 3では
+`CombatV1PendingTechnique`・`counterResponsePending`フェーズ・`declareTechnique`公開APIは
+作らない（`_PreparedTechniqueUse`は非公開のprivateクラス）。
+
+### 11.4 静的データvalidationの追加
+
+immutableモデルのコンストラクタには重いruntime validationを追加せず（`Map`の中身を検証する
+`assert`はconst constructorと相性が悪いため、既存のコメント方針を踏襲）、代わりに以下の
+読み取り専用APIを追加した。
+
+- `CombatV1EnergyPool.isValid`／`CombatV1EnergyCost.isValid`（`combat_v1_energy.dart`）:
+  負数の禁止、および`CombatV1EnergyCost`は追加でwildを要求Costとして持たないことを検証する。
+- `CombatV1Technique.isStaticDataValid`（`combat_v1_technique.dart`）: `energyCost.isValid`を
+  参照する。`checkTechniqueLegality`が`invalidTechniqueData`reasonCodeの判定に使う。
+- `validatePlayerStateInvariants`（新規`combat_v1_state_invariants.dart`）: `spentEnergy`が
+  `energyPool`を超えていないかを検証する読み取り専用ヘルパー。Engine本体のCommand APIには
+  自動配線せず、CPU/Simulator/テストがオプトインで呼び出す想定。
+
+### 11.5 FINISHER/COUNTERの拒否
+
+`checkTechniqueLegality`は、FINISHERを`finisherNotImplemented`、COUNTERカードを
+`counterCannotAttack`として明示的に拒否する（Phase 9・Phase 4まで本処理を実装しない）。
+`entry.category`とカード定義の`category`が一致しない場合も`categoryMismatch`として拒否する
+（Deck validationと同じ不変条件を、Engine実行時にも防御的に再確認する）。
+
+### 11.6 新規ファイル
+
+`combat_v1_state_invariants.dart`（`lib/src/combat_v1/`）を追加した。

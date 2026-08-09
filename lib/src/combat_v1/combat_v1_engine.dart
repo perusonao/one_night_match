@@ -36,14 +36,70 @@ class CombatV1IllegalActionException implements Exception {
   String toString() => 'CombatV1IllegalActionException: $message';
 }
 
+/// [CombatV1Engine.checkTechniqueLegality]が返す機械判定用の理由コード
+/// （Phase 3、docs/combat_rules_v1.md 4・6章）。
+///
+/// UI／CPU／Simulatorが`reason`（人間可読文字列）を文字列解析しなくて済む
+/// ようにするための構造化情報。`legal`な場合は常に[legal]を返す。
+enum CombatV1TechniqueLegalityReasonCode {
+  /// 使用可能（`CombatV1ActionCheck.legal == true`の場合の既定値）。
+  legal,
+
+  /// `phase == action`ではない。
+  wrongPhase,
+
+  /// 指定instanceIdがactive playerのhandに存在しない。
+  cardNotInHand,
+
+  /// cardIdがCatalogに存在しない。
+  missingCatalogEntry,
+
+  /// カタログ上に存在するがTechnique定義ではない（防御的フォールバック。
+  /// 通常は[counterCannotAttack]がこのケースより先に検出される）。
+  notTechnique,
+
+  /// `DeckEntry.category`とTechnique定義の`category`が一致しない
+  /// （docs/combat_rules_v1.md 4章のDeck validationと同じ不変条件を、
+  /// Engine実行時にも防御的に確認する）。
+  categoryMismatch,
+
+  /// COUNTERカードはTECHNIQUEとして使用できない（docs/combat_rules_v1.md
+  /// 7章。COUNTER本処理はPhase 4）。
+  counterCannotAttack,
+
+  /// FINISHERは通常TECHNIQUEとして使用できない（FINISHER本処理はPhase 9、
+  /// docs/combat_rules_v1.md 13章）。
+  finisherNotImplemented,
+
+  /// 相手の状態（`requiredOpponentState`）が使用条件を満たさない。
+  opponentStateMismatch,
+
+  /// Technique定義の静的データが不正（[CombatV1Technique.isStaticDataValid]
+  /// がfalse）。
+  invalidTechniqueData,
+
+  /// ENERGYが不足している（ワイルド補完込みで支払い不可）。
+  insufficientEnergy,
+}
+
 /// [CombatV1Engine.checkTechniqueLegality] 等、読み取り専用の判定APIの結果。
 ///
-/// `game.dart`の`CardAvailability(usable, reason)`と同型の軽量パターン。
+/// `game.dart`の`CardAvailability(usable, reason)`と同型の軽量パターンに、
+/// Phase 3で[reasonCode]（構造化理由コード）を追加した。
 class CombatV1ActionCheck {
-  const CombatV1ActionCheck(this.legal, this.reason);
+  const CombatV1ActionCheck(
+    this.legal,
+    this.reason, [
+    this.reasonCode = CombatV1TechniqueLegalityReasonCode.legal,
+  ]);
 
   final bool legal;
+
+  /// 人間可読な説明（ログ・簡易UI用）。
   final String reason;
+
+  /// 機械判定用の理由コード（Phase 3で追加、UI/CPU/Simulator用）。
+  final CombatV1TechniqueLegalityReasonCode reasonCode;
 }
 
 /// Combat Ver.1 Engine。
@@ -215,29 +271,49 @@ class CombatV1Engine {
   }
 
   /// TECHNIQUEを使用する（docs/combat_rules_v1.md 4・6章）。
-  /// `phase == action`でのみ許可。ENERGY支払い→DMG適用（HP0クランプ）→
-  /// 共有HEAT加算→相手posture更新→使用カード捨て札化→1ドロー、を行う。
-  /// `phase`は`action`のまま（同一ターン内でさらにTECHNIQUEを使用できる）。
+  /// `phase == action`でのみ許可。`phase`は`action`のまま
+  /// （同一ターン内でさらにTECHNIQUEを使用できる）。
+  ///
+  /// 内部では「宣言可能性の検証＋ENERGY支払い確定」（[_prepareTechniqueUse]）
+  /// と「成功時の効果適用」（[_resolveSuccessfulTechnique]）に処理を分離して
+  /// いる。Phase 3ではこの間を置かず連続して呼び出すだけだが、Phase 4で
+  /// COUNTERを実装する際、両者の間に`counterResponsePending`
+  /// （宣言→COUNTER応答→解決）を挟めるようにするための内部境界である
+  /// （外部APIとしての`playTechnique`の即時成功解決という挙動自体はPhase 3の
+  /// 間は変わらない）。
   static CombatV1MatchState playTechnique(
     CombatV1MatchState state,
     String instanceId, {
-    required Map<String, CombatV1Technique> techniques,
+    required CombatV1CardCatalog catalog,
     Random? random,
   }) {
-    final check = checkTechniqueLegality(
+    final prepared = _prepareTechniqueUse(state, instanceId, catalog: catalog);
+    return _resolveSuccessfulTechnique(
       state,
-      instanceId,
-      techniques: techniques,
+      prepared,
+      random: random ?? Random(),
     );
+  }
+
+  /// TECHNIQUE宣言の準備: legalityを検証し、ENERGY支払いを確定する。
+  ///
+  /// 不正なら[CombatV1IllegalActionException]を送出する（fail-fast）。
+  /// このメソッドが例外を投げずに戻った時点では、[state]はまだ一切
+  /// 変更されていない（読み取りと純粋な計算のみを行うため、失敗時の
+  /// atomicityはこの関数自体が状態を変更しないことで保証される）。
+  static _PreparedTechniqueUse _prepareTechniqueUse(
+    CombatV1MatchState state,
+    String instanceId, {
+    required CombatV1CardCatalog catalog,
+  }) {
+    final check = checkTechniqueLegality(state, instanceId, catalog: catalog);
     if (!check.legal) {
       throw CombatV1IllegalActionException(check.reason);
     }
 
-    final rng = random ?? Random();
     final attacker = state.active;
-    final defender = state.opponent;
     final entry = _findInHand(attacker, instanceId)!;
-    final technique = techniques[entry.cardId]!;
+    final technique = catalog.techniques[entry.cardId]!;
 
     final payment = resolveEnergyPayment(
       pool: attacker.energyPool,
@@ -251,38 +327,79 @@ class CombatV1Engine {
       throw CombatV1IllegalActionException(payment.failureReason!);
     }
 
-    final handAfterUse = List<CombatV1DeckEntry>.from(attacker.hand)
-      ..remove(entry);
-    final attackerAfterUse = attacker.copyWith(
-      hand: handAfterUse,
-      discardPile: [...attacker.discardPile, entry],
-      spentEnergy: payment.updatedSpent,
-      techniquesUsedThisTurn: attacker.techniquesUsedThisTurn + 1,
+    return _PreparedTechniqueUse(
+      entry: entry,
+      technique: technique,
+      updatedSpentEnergy: payment.updatedSpent!,
+    );
+  }
+
+  /// TECHNIQUE成功時のresolution（docs/combat_rules_v1.md 11章で確定した
+  /// 処理順）:
+  ///
+  /// 1. ENERGY消費
+  /// 2. DMG適用
+  /// 3. HP 0 clamp
+  /// 4. shared HEAT加算
+  /// 5. 相手状態変化
+  /// 6. 使用カードをhandからdiscard
+  /// 7. 1 draw
+  ///
+  /// [_prepareTechniqueUse]でlegality・ENERGY支払いは確定済みのため、この
+  /// メソッドは失敗しない（例外を送出しない）。Phase
+  /// 4でCOUNTERが成立した場合はこのメソッド自体を呼ばず無効化する想定で、
+  /// [_prepareTechniqueUse]とは独立して呼び出せるようにしてある。
+  static CombatV1MatchState _resolveSuccessfulTechnique(
+    CombatV1MatchState state,
+    _PreparedTechniqueUse prepared, {
+    required Random random,
+  }) {
+    final technique = prepared.technique;
+    final attackerName = state.active.wrestlerName;
+
+    // 1. ENERGY消費
+    var next = state.withActive(
+      state.active.copyWith(spentEnergy: prepared.updatedSpentEnergy),
     );
 
+    // 2. DMG適用 + 3. HP 0 clamp
     // 注: int.clamp()はnumを返しintに暗黙変換できないため、min/maxで実装する。
-    final newDefenderHp = max(0, min(defender.hp - technique.damage, defender.maxHp));
-    final newDefenderPosture =
-        technique.resultOpponentState ?? defender.posture;
-    final defenderAfterHit = defender.copyWith(
-      hp: newDefenderHp,
-      posture: newDefenderPosture,
+    final hpAfterDamage = max(
+      0,
+      min(next.opponent.hp - technique.damage, next.opponent.maxHp),
+    );
+    next = next.withOpponent(next.opponent.copyWith(hp: hpAfterDamage));
+
+    // 4. shared HEAT加算
+    next = next.copyWith(sharedHeat: next.sharedHeat + technique.heatGain);
+
+    // 5. 相手状態変化（nullなら状態変化なし）
+    if (technique.resultOpponentState != null) {
+      next = next.withOpponent(
+        next.opponent.copyWith(posture: technique.resultOpponentState),
+      );
+    }
+
+    // 6. 使用カードをhandからdiscard
+    final handAfterUse = List<CombatV1DeckEntry>.from(next.active.hand)
+      ..remove(prepared.entry);
+    next = next.withActive(
+      next.active.copyWith(
+        hand: handAfterUse,
+        discardPile: [...next.active.discardPile, prepared.entry],
+        techniquesUsedThisTurn: next.active.techniquesUsedThisTurn + 1,
+      ),
+    );
+    next = next.copyWith(
+      log: [
+        ...next.log,
+        '$attackerNameが${technique.name}を使用'
+            '（DMG${technique.damage}、HEAT+${technique.heatGain}）',
+      ],
     );
 
-    var next = state
-        .withActive(attackerAfterUse)
-        .withOpponent(defenderAfterHit)
-        .copyWith(
-          sharedHeat: state.sharedHeat + technique.heatGain,
-          log: [
-            ...state.log,
-            '${attacker.wrestlerName}が${technique.name}を使用'
-                '（DMG${technique.damage}、HEAT+${technique.heatGain}）',
-          ],
-        );
-
-    // TECHNIQUE使用後の1ドロー（docs/combat_rules_v1.md 16.1章）。
-    final (drawnAttacker, drawLogs) = _drawOne(next.active, rng);
+    // 7. 1 draw（docs/combat_rules_v1.md 16.1章）
+    final (drawnAttacker, drawLogs) = _drawOne(next.active, random);
     next = next.withActive(drawnAttacker).copyWith(
       log: [...next.log, ...drawLogs],
     );
@@ -312,36 +429,104 @@ class CombatV1Engine {
   }
 
   // ---- 読み取り専用の判定API ----
-  // 例外を出さず、legal/reasonの組で結果を返す
-  // （docs/design/combat_v1_phase1_design.md 4章）。
+  // 例外を出さず、legal/reason/reasonCodeの組で結果を返す
+  // （docs/design/combat_v1_phase1_design.md 4章、Phase 3でreasonCodeを追加）。
 
+  /// TECHNIQUE使用のlegalityを判定する（Phase 3で正式化、
+  /// docs/combat_rules_v1.md 4・6・7・13章）。
+  ///
+  /// 少なくとも以下を順に判定する:
+  /// 1. `phase == action`
+  /// 2. 指定instanceIdがactive playerのhandに存在するか
+  /// 3. cardIdが[catalog]に存在するか
+  /// 4. COUNTERカードではないか（COUNTERはTECHNIQUEとして使用不可、7章）
+  /// 5. カード定義がTechniqueであるか（防御的フォールバック）
+  /// 6. `entry.category`とTechnique定義の`category`が一致するか
+  /// 7. FINISHERではないか（FINISHER本処理はPhase 9、13章）
+  /// 8. Technique定義の静的データが有効か（[CombatV1Technique.isStaticDataValid]）
+  /// 9. `requiredOpponentState`を満たすか
+  /// 10. ENERGYを支払えるか（ワイルド補完込み、5.1章）
+  ///
+  /// [CombatV1CardCatalog]を横断参照の正式な入口として使う（Phase
+  /// 2で導入、`combat_v1_deck_validation.dart`）。TECHNIQUE/COUNTER双方の
+  /// カタログを持つため、COUNTERカードの誤用や、cardIdがCOUNTERとして
+  /// 定義されているのに`entry.category`がnormal/signatureを騙るような
+  /// 不整合エントリも検出できる。
   static CombatV1ActionCheck checkTechniqueLegality(
     CombatV1MatchState state,
     String instanceId, {
-    required Map<String, CombatV1Technique> techniques,
+    required CombatV1CardCatalog catalog,
   }) {
     if (state.phase != CombatV1MatchPhase.action) {
       return CombatV1ActionCheck(
         false,
         'actionフェーズではありません（現在: ${state.phase.name}）',
+        CombatV1TechniqueLegalityReasonCode.wrongPhase,
       );
     }
 
     final attacker = state.active;
     final entry = _findInHand(attacker, instanceId);
     if (entry == null) {
-      return const CombatV1ActionCheck(false, '指定されたカードは手札にありません');
-    }
-    if (entry.category == CombatV1CardCategory.counter) {
       return const CombatV1ActionCheck(
         false,
-        'COUNTERカードはTECHNIQUEとして使用できません',
+        '指定されたカードは手札にありません',
+        CombatV1TechniqueLegalityReasonCode.cardNotInHand,
       );
     }
 
-    final technique = techniques[entry.cardId];
+    final definedCategory = catalog.categoryOf(entry.cardId);
+    if (definedCategory == null) {
+      return CombatV1ActionCheck(
+        false,
+        '技カタログに見つかりません: ${entry.cardId}',
+        CombatV1TechniqueLegalityReasonCode.missingCatalogEntry,
+      );
+    }
+    if (definedCategory == CombatV1CardCategory.counter) {
+      return const CombatV1ActionCheck(
+        false,
+        'COUNTERカードはTECHNIQUEとして使用できません',
+        CombatV1TechniqueLegalityReasonCode.counterCannotAttack,
+      );
+    }
+
+    final technique = catalog.techniques[entry.cardId];
     if (technique == null) {
-      return const CombatV1ActionCheck(false, '技カタログに見つかりません');
+      // definedCategoryがcounter以外かつcatalogに存在する以上、通常は
+      // 到達しない（catalog.techniques/countersが正しく分離されていれば）。
+      // カタログ自体の不整合に対する防御的フォールバック。
+      return const CombatV1ActionCheck(
+        false,
+        'カード定義がTECHNIQUEではありません',
+        CombatV1TechniqueLegalityReasonCode.notTechnique,
+      );
+    }
+
+    if (entry.category != definedCategory) {
+      return CombatV1ActionCheck(
+        false,
+        '${entry.cardId}のカテゴリが一致しません'
+        '（DeckEntry: ${entry.category.name}、カード定義: '
+        '${definedCategory.name}）',
+        CombatV1TechniqueLegalityReasonCode.categoryMismatch,
+      );
+    }
+
+    if (technique.category == CombatV1CardCategory.finisher) {
+      return const CombatV1ActionCheck(
+        false,
+        'FINISHERはまだ実装されていません（Phase 9で実装予定）',
+        CombatV1TechniqueLegalityReasonCode.finisherNotImplemented,
+      );
+    }
+
+    if (!technique.isStaticDataValid) {
+      return const CombatV1ActionCheck(
+        false,
+        '技の静的データが不正です（ENERGY COSTに負数またはwildが含まれています）',
+        CombatV1TechniqueLegalityReasonCode.invalidTechniqueData,
+      );
     }
 
     final required = technique.requiredOpponentState;
@@ -350,6 +535,7 @@ class CombatV1Engine {
         false,
         '相手の状態（${state.opponent.posture.name}）が使用条件'
         '（${required.name}）を満たしません',
+        CombatV1TechniqueLegalityReasonCode.opponentStateMismatch,
       );
     }
 
@@ -360,7 +546,11 @@ class CombatV1Engine {
       allowWildSubstitution: true,
     );
     if (!payment.isSuccess) {
-      return CombatV1ActionCheck(false, payment.failureReason!);
+      return CombatV1ActionCheck(
+        false,
+        payment.failureReason!,
+        CombatV1TechniqueLegalityReasonCode.insufficientEnergy,
+      );
     }
 
     return const CombatV1ActionCheck(true, '使用できます');
@@ -371,14 +561,14 @@ class CombatV1Engine {
   /// （呼び出し側の判断材料としてのみ提供する）。
   static bool hasAnyPlayableTechnique(
     CombatV1MatchState state, {
-    required Map<String, CombatV1Technique> techniques,
+    required CombatV1CardCatalog catalog,
   }) {
     if (state.phase != CombatV1MatchPhase.action) return false;
     for (final entry in state.active.hand) {
       final check = checkTechniqueLegality(
         state,
         entry.instanceId,
-        techniques: techniques,
+        catalog: catalog,
       );
       if (check.legal) return true;
     }
@@ -394,4 +584,23 @@ class CombatV1Engine {
     }
     return null;
   }
+}
+
+/// [CombatV1Engine._prepareTechniqueUse]の結果。TECHNIQUE宣言のlegality検証
+/// とENERGY支払い確定は済んでいるが、まだ効果は適用されていない状態を表す。
+///
+/// Phase 4でCOUNTERを実装する際、この値を`counterResponsePending`の間
+/// 保持しておき、COUNTER不成立なら[CombatV1Engine._resolveSuccessfulTechnique]
+/// へ、COUNTER成立なら無効化パスへ渡す、という拡張を想定している
+/// （Phase 3では作らない。docs/design/combat_v1_phase1_design.md 8章）。
+class _PreparedTechniqueUse {
+  const _PreparedTechniqueUse({
+    required this.entry,
+    required this.technique,
+    required this.updatedSpentEnergy,
+  });
+
+  final CombatV1DeckEntry entry;
+  final CombatV1Technique technique;
+  final Map<CombatV1EnergyAttribute, int> updatedSpentEnergy;
 }
