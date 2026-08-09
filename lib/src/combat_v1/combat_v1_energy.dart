@@ -19,16 +19,17 @@ class CombatV1EnergyPool {
 /// TECHNIQUE/COUNTERが要求するENERGYコスト（「技が要求するENERGY」）。
 ///
 /// [CombatV1EnergyPool] とは別モデルにする（ユーザー要求、
-/// docs/combat_rules_v1.md 5章）。wildはコスト側には現れない
+/// docs/combat_rules_v1.md 5章）。wildはコスト側には現れない前提とする
 /// （具体属性の不足分を補う支払い側専用の概念のため、コストとして要求
 /// することはできない）。
+///
+/// 注: この不変条件はコンストラクタでは検証しない。`Map`の添字アクセス
+/// （`amounts[...]`）はDartのconst式として評価できないため、const
+/// コンストラクタの`assert`に含めると`const CombatV1EnergyCost(...)`を
+/// 使う全箇所がコンパイルエラーになる（技カタログを`const`で定義できなく
+/// なるため）。技データ側の作成規約として扱う。
 class CombatV1EnergyCost {
-  const CombatV1EnergyCost(this.amounts)
-    : assert(
-        amounts[CombatV1EnergyAttribute.wild] == null ||
-            amounts[CombatV1EnergyAttribute.wild] == 0,
-        '技のCOSTにwildは指定できません（wildは支払い側のみで使用されます）',
-      );
+  const CombatV1EnergyCost(this.amounts);
 
   final Map<CombatV1EnergyAttribute, int> amounts;
 
