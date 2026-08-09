@@ -8,9 +8,13 @@
 //   ため、フィクスチャデッキの実際のシャッフル結果に依存せず決定的に書ける）。
 // - TECHNIQUEのCOST支払い・DMG・HEAT・状態遷移など「特定の技を使う」検証は、
 //   `buildActionState`で手札の中身を直接指定した状態を組み立ててから
-//   `playTechnique`を呼ぶ（シャッフル結果に依存しない決定的なテストにする
+//   `declareTechnique`を呼ぶ（シャッフル結果に依存しない決定的なテストにする
 //   ため）。CombatV1PlayerState/CombatV1MatchStateはイミュータブルな値
-//   オブジェクトであり、この直接構築は正当な使い方である。
+//   オブジェクトであり、この直接構築は正当な使い方である。Phase
+//   4では`declareTechnique`は宣言のみを行うため、Phase
+//   3の即時解決と同じ結果を検証したいテストは
+//   `declareAndResolveTechnique`（`combat_v1_test_fixtures.dart`、宣言直後に
+//   `declineCounter`を呼ぶだけの薄いラッパー）を使う。
 
 import 'dart:math';
 
@@ -234,7 +238,7 @@ void main() {
       );
     });
 
-    test('actionフェーズ以外でplayTechnique/endTurnを呼ぶとCombatV1IllegalActionExceptionを投げる', () {
+    test('actionフェーズ以外でdeclareTechnique/endTurnを呼ぶとCombatV1IllegalActionExceptionを投げる', () {
       final state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
         deckA: fixtureDeck('fx_wrestler_a'),
@@ -246,7 +250,7 @@ void main() {
       ); // phase == discard
 
       expect(
-        () => CombatV1Engine.playTechnique(
+        () => CombatV1Engine.declareTechnique(
           state,
           'dummy',
           catalog: fixtureCatalog,
@@ -260,7 +264,7 @@ void main() {
     });
   });
 
-  group('playTechnique — TECHNIQUE使用', () {
+  group('declareTechnique — TECHNIQUE宣言→解決', () {
     test('ENERGY COSTを支払い、支払い済みENERGYへ反映する', () {
       final entry = const CombatV1DeckEntry(
         instanceId: 'a1',
@@ -269,7 +273,7 @@ void main() {
       );
       final state = buildActionState(handA: [entry]);
 
-      final next = CombatV1Engine.playTechnique(
+      final next = declareAndResolveTechnique(
         state,
         'a1',
         catalog: fixtureCatalog,
@@ -286,7 +290,7 @@ void main() {
       );
       final state = buildActionState(handA: [entry], hpB: 150, sharedHeat: 0);
 
-      final next = CombatV1Engine.playTechnique(
+      final next = declareAndResolveTechnique(
         state,
         'a1',
         catalog: fixtureCatalog,
@@ -309,7 +313,7 @@ void main() {
       );
       final state = buildActionState(handA: [entry], drawPileA: [drawCard]);
 
-      final next = CombatV1Engine.playTechnique(
+      final next = declareAndResolveTechnique(
         state,
         'a1',
         catalog: fixtureCatalog,
@@ -334,7 +338,7 @@ void main() {
       );
       final state = buildActionState(handA: [entry], hpB: 15);
 
-      final next = CombatV1Engine.playTechnique(
+      final next = declareAndResolveTechnique(
         state,
         'a1',
         catalog: fixtureCatalog,
@@ -364,7 +368,7 @@ void main() {
       // fixtureWrestlerAの打ENERGYは3なので、打1コストの技を複数回使える。
       final state = buildActionState(handA: [first, second]);
 
-      var next = CombatV1Engine.playTechnique(
+      var next = declareAndResolveTechnique(
         state,
         'a1',
         catalog: fixtureCatalog,
@@ -372,7 +376,7 @@ void main() {
       expect(next.phase, CombatV1MatchPhase.action); // ターンは終了しない
       expect(next.playerB.hp, 140);
 
-      next = CombatV1Engine.playTechnique(
+      next = declareAndResolveTechnique(
         next,
         'a2',
         catalog: fixtureCatalog,
@@ -396,7 +400,7 @@ void main() {
         spentA: const {CombatV1EnergyAttribute.strike: 2},
       );
 
-      final next = CombatV1Engine.playTechnique(
+      final next = declareAndResolveTechnique(
         state,
         'a1',
         catalog: fixtureCatalog,
@@ -422,7 +426,7 @@ void main() {
         },
       );
 
-      final next = CombatV1Engine.playTechnique(
+      final next = declareAndResolveTechnique(
         state,
         'a1',
         catalog: fixtureCatalog,
@@ -431,7 +435,7 @@ void main() {
       expect(next.playerA.spentEnergy[CombatV1EnergyAttribute.wild], 2);
     });
 
-    test('ENERGYが不足していれば使用できない（checkTechniqueLegalityとplayTechnique両方）', () {
+    test('ENERGYが不足していれば使用できない（checkTechniqueLegalityとdeclareTechnique両方）', () {
       final expensive = const CombatV1DeckEntry(
         instanceId: 'a1',
         cardId: 'fx_overpriced',
@@ -450,6 +454,7 @@ void main() {
             }),
             damage: 10,
             heatGain: 10,
+            family: CombatV1TechniqueFamily.kick,
           ),
         },
         counters: fixtureCounters,
@@ -468,7 +473,7 @@ void main() {
       );
 
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', catalog: catalog),
+        () => CombatV1Engine.declareTechnique(state, 'a1', catalog: catalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
     });
@@ -485,7 +490,7 @@ void main() {
       );
 
       expect(
-        () => CombatV1Engine.playTechnique(
+        () => CombatV1Engine.declareTechnique(
           state,
           'not_in_hand',
           catalog: fixtureCatalog,
@@ -513,7 +518,7 @@ void main() {
       expect(check.legal, isFalse);
 
       expect(
-        () => CombatV1Engine.playTechnique(
+        () => CombatV1Engine.declareTechnique(
           state,
           'a1',
           catalog: fixtureCatalog,

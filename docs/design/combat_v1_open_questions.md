@@ -34,6 +34,18 @@ Phase 1のCore Skeleton実装は、現在のSSOT（`combat_rules_v1.md`）と技
 
 ---
 
+## Phase 4時点で解決した項目（Phase 4セッションで確定）
+
+以下は前回（Phase 0）時点で「Phase 4着手前に決める必要がある」としていたが、Phase 4セッションで
+明示的に確定した。
+
+| # | 項目 | 確定内容 | 関連章 |
+|---|---|---|---|
+| H | 技系統（TechniqueFamily）の正式taxonomy | 30 family（STRIKE8／AERIAL3／THROW8／SUBMISSION9／FOUL2）と、それをまとめる技系統グループ（TechniqueFamilyGroup、5 group）を確定。familyはgroupを保持せず`family.group`で導出する方式で確定 | `combat_rules_v1.md` 23章 |
+| I | COUNTER時の＊(ワイルド)ENERGY使用ポリシー | `CombatV1RulesConfig.counterAllowsWildSubstitution`（既定値`false`）として確定。TECHNIQUE支払いとは独立したポリシーとして扱い、既存の`resolveEnergyPayment`をそのまま再利用する | `combat_rules_v1.md` 5.2章 |
+
+---
+
 ## 後続Phaseまで保留可能な項目
 
 ### 1. PINカード「共有4枚」の管理構造
@@ -62,17 +74,11 @@ Phase 1のCore Skeleton実装は、現在のSSOT（`combat_rules_v1.md`）と技
 
 ### 4. 技系統（TechniqueFamily）の正式taxonomy
 
-- 関連章: `combat_rules_v1.md` 23章
-- 内容: COUNTER成立判定に使う「技系統」の正式な分類（例: バックドロップ系、スープレックス系等）は
-  未確定。Phase1では`familyId: String?`という暫定構造のみ用意する。
-- 解決が必要な時期: **Phase 4（COUNTER実装）着手前**。
+**Phase 4で解決済み（H番）。上記「Phase 4時点で解決した項目」参照。**
 
 ### 5. COUNTER時の＊(ワイルド)ENERGY使用ポリシー
 
-- 関連章: `combat_rules_v1.md` 5.1章、7章
-- 内容: TECHNIQUE支払い時のワイルド解決方式（B番の通り確定済み）とは別に、COUNTER支払い時に＊を
-  同様に使ってよいか、レート・条件が異なるかは未確定。ユーザー方針により意図的に保留されている。
-- 解決が必要な時期: **Phase 4（COUNTER実装）着手前**。
+**Phase 4で解決済み（I番）。上記「Phase 4時点で解決した項目」参照。**
 
 ### 6. `CombatV1MatchState`への集計系フィールドの要否
 

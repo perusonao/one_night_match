@@ -78,7 +78,7 @@ CombatV1MatchState _buildState({
 
 /// [count]枚のダミー物理カードを生成する（カード内容そのものはこの
 /// ファイルのテストの関心事ではないため、カタログに存在しないcardIdでも
-/// よい。実際に使用（playTechnique）しないカード専用）。
+/// よい。実際に使用（declareTechnique）しないカード専用）。
 List<CombatV1DeckEntry> _dummyCards(String prefix, int count) => [
   for (var i = 0; i < count; i++)
     CombatV1DeckEntry(
@@ -190,7 +190,7 @@ void main() {
       );
       expect(state.playerA.hand.length, 5);
 
-      final next = CombatV1Engine.playTechnique(
+      final next = declareAndResolveTechnique(
         state,
         't1',
         catalog: fixtureCatalog,
@@ -218,7 +218,7 @@ void main() {
         drawPileA: _dummyCards('d', 5),
       );
 
-      var next = CombatV1Engine.playTechnique(
+      var next = declareAndResolveTechnique(
         state,
         't1',
         catalog: fixtureCatalog,
@@ -226,7 +226,7 @@ void main() {
       );
       expect(next.playerA.hand.length, 5);
 
-      next = CombatV1Engine.playTechnique(
+      next = declareAndResolveTechnique(
         next,
         't2',
         catalog: fixtureCatalog,
@@ -254,7 +254,7 @@ void main() {
       expect(check.legal, isFalse);
 
       expect(
-        () => CombatV1Engine.playTechnique(state, 't1', catalog: fixtureCatalog),
+        () => declareAndResolveTechnique(state, 't1', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
     });
@@ -452,7 +452,7 @@ void main() {
       );
       expect(_totalCardsFor(state.playerA), 30);
 
-      final next = CombatV1Engine.playTechnique(
+      final next = declareAndResolveTechnique(
         state,
         't1',
         catalog: fixtureCatalog,
@@ -480,7 +480,7 @@ void main() {
       );
       expect(_totalCardsFor(state.playerA), 30);
 
-      var next = CombatV1Engine.playTechnique(
+      var next = declareAndResolveTechnique(
         state,
         't1',
         catalog: fixtureCatalog,
@@ -488,7 +488,7 @@ void main() {
       );
       expect(_totalCardsFor(next.playerA), 30);
 
-      next = CombatV1Engine.playTechnique(
+      next = declareAndResolveTechnique(
         next,
         't2',
         catalog: fixtureCatalog,

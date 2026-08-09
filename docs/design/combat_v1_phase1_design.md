@@ -387,3 +387,88 @@ immutableモデルのコンストラクタには重いruntime validationを追�
 ### 11.6 新規ファイル
 
 `combat_v1_state_invariants.dart`（`lib/src/combat_v1/`）を追加した。
+
+---
+
+## 12. Phase 4での更新（技術設計の差分）
+
+Phase 4（COUNTER）で、本書のPhase 1〜3設計から以下を更新した。ゲームルール自体
+（`combat_rules_v1.md`）の変更点は同書7章・23章を参照。ここでは実装内部の技術設計の差分を記す。
+
+### 12.1 新規ファイル
+
+`lib/src/combat_v1/`直下に以下を追加した（§1で想定していた`combat_v1_counter_rules.dart`の
+役割をほぼそのまま踏襲）。
+
+- `combat_v1_pending_attack.dart`: `CombatV1PendingAttack`（public immutable Domain model）。
+- `combat_v1_counter_rules.dart`: family/groupマッチング（`techniqueFamilyMatchesCounter`）・
+  動的ENERGY COST算出（`counterSyntheticCost`）の純粋関数群。
+- `combat_v1_catalog_validation.dart`: `validateCatalog`（Technique/Counter Definitionの
+  整合性検証）。`combat_v1_deck_validation.dart`の`validateDeck`（デッキ構成検証）とは責務を
+  分離した別ファイル。
+
+### 12.2 `CombatV1Technique.familyId: String?` → `family: CombatV1TechniqueFamily`（必須）
+
+Phase 1で「後から正式なTechniqueFamilyへ移行できるようにする」としていた予約フィールドを、
+Phase 4で正式taxonomy確定にあわせて型付きenum・必須フィールドへ移行した。旧String
+ID互換レイヤーは設けていない。既存Phase 1〜3フィクスチャ・ローカルテスト技はすべて`family`を
+明示的に追加した。
+
+### 12.3 `CombatV1Counter`のフィールド拡張
+
+Phase 1の`counterableFamilyIds: List<String>`（空リスト既定）を、`counterableFamilies:
+List<CombatV1TechniqueFamily>`・`counterableGroups: List<CombatV1TechniqueFamilyGroup>`
+の2フィールドへ置き換えた。あえて`Set`ではなく`List`のままにしている
+（`combat_v1_counter.dart`のクラスコメント参照——`Set`にすると重複が構造的に不可能になり、
+Catalog validationの`counterDuplicateFamily`/`counterDuplicateGroup`エラー種別が到達不能に
+なってしまうため）。
+
+### 12.4 `CombatV1MatchPhase`への`counterResponsePending`追加
+
+Phase 1〜3では`setup`/`discard`/`action`/`turnEnd`の4値だったが、Phase
+4で`counterResponsePending`を追加した。`declareTechnique`（Phase
+3の`playTechnique`から改称）はこのフェーズへ入るだけで即座には解決しない。
+
+### 12.5 `playTechnique`→`declareTechnique`への改称、即時解決の廃止
+
+Phase 3までの`playTechnique`は宣言と同時に即座に成功解決していたが（Phase
+3設計時点で§11.3に「Phase4挿入点」として予告していた通り）、Phase
+4では宣言（`declareTechnique`）と解決（[playCounter]/[declineCounter]）を完全に分離した。
+Phase 3のprivate`_PreparedTechniqueUse`は`_prepareTechniqueUse`の戻り値として維持しつつ、
+新たにprivate`_commitTechniqueDeclaration`（宣言のコミット）と`_resolvePendingAttack`
+（pending攻撃の成立解決、Phase 3の`_resolveSuccessfulTechnique`を`CombatV1PendingAttack`
+ベースへ書き換えたもの）を追加した。
+
+`playTechnique`という名前のAPIは削除した（互換レイヤーは設けない）。Phase
+1〜3の全テストは、宣言後に`declineCounter`を呼んで解決させる薄いテスト専用ヘルパー
+`declareAndResolveTechnique`（`test/combat_v1/combat_v1_test_fixtures.dart`）を介して
+Phase 3当時の「宣言→即時解決」という結果に相当する状態を得るよう更新した。
+
+### 12.6 `CombatV1ActionCheck`/`CombatV1CounterActionCheck`のfactory化
+
+Phase 3レビュー指摘（M2）を受け、`CombatV1ActionCheck`の位置引数コンストラクタ
+（`legal`/`reason`/`reasonCode`を独立して渡せた）を廃止し、`.success(reason)`/
+`.failure(reason, reasonCode)`の名前付きコンストラクタのみを公開する設計へ変更した。
+`failure`側は`assert(reasonCode != legal)`で矛盾した組み合わせの構築を防ぐ。新規追加した
+`CombatV1CounterActionCheck`（COUNTER legality用）も同じ設計で最初から実装した。
+
+### 12.7 `notTechnique`reasonCodeの削除
+
+Phase 3レビュー指摘（M3）を受け、`checkTechniqueLegality`内の到達不能だった
+`notTechnique`分岐（`CombatV1TechniqueLegalityReasonCode.notTechnique`）を削除した。
+`catalog.categoryOf`の実装上、`counter`以外の非null categoryを返した時点で
+`catalog.techniques[cardId]`は必ず非nullであることが構造的に保証されるため、この分岐は
+到達不能だった（`combat_v1_engine.dart`のコメント参照）。
+
+### 12.8 `validatePlayerStateInvariants`の拡張
+
+Phase 3レビュー指摘（M1）を受け、`CombatV1PlayerStateInvariantErrorCode`へ
+`negativeSpentEnergy`（spentEnergyが負数）・`invalidEnergyPool`
+（energyPool自体が`CombatV1EnergyPool.isValid`でない）の2種を追加した。
+
+### 12.9 `CombatV1MatchState.pendingAttack`と`clearPendingAttack()`
+
+`CombatV1MatchState`へ`pendingAttack: CombatV1PendingAttack?`フィールドを追加した。既存の
+`copyWith`パターンでは「明示的にnullへ戻す」ことと「省略（既存値維持）」を区別できないため、
+`pendingAttack`のクリア専用に`clearPendingAttack()`メソッドを追加した（`copyWith`の
+`pendingAttack`引数は非nullの差し替えにのみ使う）。

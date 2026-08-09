@@ -79,7 +79,7 @@ CombatV1MatchState _buildState({
   );
 }
 
-/// playTechnique失敗時のatomicity検証用スナップショット
+/// declareTechnique失敗時のatomicity検証用スナップショット
 /// （docs/combat_rules_v1.md、■12 atomicity）。
 class _StateSnapshot {
   _StateSnapshot(CombatV1MatchState s)
@@ -162,6 +162,7 @@ const CombatV1Technique _fxRequireStand = CombatV1Technique(
   damage: 10,
   heatGain: 10,
   requiredOpponentState: CombatV1WrestlerPosture.stand,
+  family: CombatV1TechniqueFamily.knee,
 );
 
 /// ENERGY COSTにwildを直接指定した不正な静的データ（Phase 3で拒否対象、
@@ -177,6 +178,7 @@ const CombatV1Technique _fxInvalidWildCost = CombatV1Technique(
   }),
   damage: 10,
   heatGain: 10,
+  family: CombatV1TechniqueFamily.kick,
 );
 
 /// ENERGY COSTに負数を直接指定した不正な静的データ。
@@ -188,12 +190,16 @@ const CombatV1Technique _fxInvalidNegativeCost = CombatV1Technique(
   energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: -1}),
   damage: 10,
   heatGain: 10,
+  family: CombatV1TechniqueFamily.knee,
 );
 
 /// ROUGH属性のテスト専用技（フィクスチャ標準カタログにはROUGH技が無いため
 /// このファイル内でのみ使う）。Phase 3ではROUGHも通常のNORMAL技として解決
 /// されるだけであることを示す（docs/combat_rules_v1.md 15章、Phase 8特殊
 /// 処理は未実装）。
+/// attribute=rough・family=choke（SSOT「23.4章 CHOKEはattribute横断」の
+/// 具体例。同じCHOKE familyでもattribute=joint（絞め技）とattribute=rough
+/// （反則的な首絞め）の両方が存在しうる）。
 const CombatV1Technique _fxRoughNormal = CombatV1Technique(
   id: 'fx_rough_normal',
   name: 'テストラフ技',
@@ -202,6 +208,7 @@ const CombatV1Technique _fxRoughNormal = CombatV1Technique(
   energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.rough: 1}),
   damage: 10,
   heatGain: 20,
+  family: CombatV1TechniqueFamily.choke,
 );
 
 /// [fixtureCatalog]にこのファイル専用のローカル技を加えたカタログ。
@@ -382,7 +389,7 @@ void main() {
         CombatV1TechniqueLegalityReasonCode.finisherNotImplemented,
       );
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog),
+        () => declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
     });
@@ -663,7 +670,7 @@ void main() {
       );
       final state = _buildState(handA: [entry], techniquesUsedA: 0);
 
-      final next = CombatV1Engine.playTechnique(
+      final next = declareAndResolveTechnique(
         state,
         'a1',
         catalog: fixtureCatalog,
@@ -685,7 +692,7 @@ void main() {
         handA: [entry],
         postureB: CombatV1WrestlerPosture.stand,
       );
-      final next = CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog);
+      final next = declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog);
       expect(next.playerB.posture, CombatV1WrestlerPosture.stand);
     });
 
@@ -699,7 +706,7 @@ void main() {
         handA: [entry],
         postureB: CombatV1WrestlerPosture.stand,
       );
-      final next = CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog);
+      final next = declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog);
       expect(next.playerB.posture, CombatV1WrestlerPosture.down);
     });
 
@@ -713,7 +720,7 @@ void main() {
         handA: [entry],
         postureB: CombatV1WrestlerPosture.down,
       );
-      final next = CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog);
+      final next = declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog);
       expect(next.playerB.posture, CombatV1WrestlerPosture.down);
     });
   });
@@ -740,11 +747,11 @@ void main() {
       // fixtureWrestlerAの打ENERGYは3なので、打1コストの技をちょうど3回使える。
       var state = _buildState(handA: entries);
 
-      state = CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog, random: Random(1));
+      state = declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog, random: Random(1));
       expect(state.phase, CombatV1MatchPhase.action);
-      state = CombatV1Engine.playTechnique(state, 'a2', catalog: fixtureCatalog, random: Random(2));
+      state = declareAndResolveTechnique(state, 'a2', catalog: fixtureCatalog, random: Random(2));
       expect(state.phase, CombatV1MatchPhase.action);
-      state = CombatV1Engine.playTechnique(state, 'a3', catalog: fixtureCatalog, random: Random(3));
+      state = declareAndResolveTechnique(state, 'a3', catalog: fixtureCatalog, random: Random(3));
 
       expect(state.playerA.techniquesUsedThisTurn, 3);
       expect(state.playerA.availableEnergyFor(CombatV1EnergyAttribute.strike), 0);
@@ -772,11 +779,11 @@ void main() {
         isFalse,
       );
 
-      state = CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog, random: Random(1));
+      state = declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog, random: Random(1));
       expect(state.playerB.posture, CombatV1WrestlerPosture.down);
 
       // DOWN化後は2技目が使用可能になり、同一ターンで使用できる。
-      state = CombatV1Engine.playTechnique(state, 'a2', catalog: fixtureCatalog, random: Random(2));
+      state = declareAndResolveTechnique(state, 'a2', catalog: fixtureCatalog, random: Random(2));
       expect(state.phase, CombatV1MatchPhase.action);
       expect(state.playerA.techniquesUsedThisTurn, 2);
     });
@@ -793,7 +800,7 @@ void main() {
         category: CombatV1CardCategory.normal,
       );
       // drawnTechniqueの後にダミーを1枚残しておく（drawPileがa2を引いた直後に
-      // 空にならないようにするため。2枚目のplayTechnique時に山札が空だと
+      // 空にならないようにするため。2枚目のdeclareAndResolveTechnique時に山札が空だと
       // 捨て札の再構築が発生し、直前にdiscardしたa2自体が再構築対象に混ざって
       // しまい、このテストの本来の関心事（drawしたカードを同ターンに使える
       // こと）と無関係な副作用でdiscardPileの検証が揺れてしまうため）。
@@ -807,10 +814,10 @@ void main() {
         drawPileA: [drawnTechnique, filler],
       );
 
-      state = CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog, random: Random(1));
+      state = declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog, random: Random(1));
       expect(state.playerA.hand.any((e) => e.instanceId == 'a2'), isTrue);
 
-      state = CombatV1Engine.playTechnique(state, 'a2', catalog: fixtureCatalog, random: Random(2));
+      state = declareAndResolveTechnique(state, 'a2', catalog: fixtureCatalog, random: Random(2));
       expect(state.playerA.discardPile.any((e) => e.instanceId == 'a2'), isTrue);
     });
 
@@ -924,7 +931,7 @@ void main() {
       );
       final snapshot = _StateSnapshot(state);
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog),
+        () => declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
       snapshot.expectUnchanged(state);
@@ -934,7 +941,7 @@ void main() {
       final state = _buildState(handA: const []);
       final snapshot = _StateSnapshot(state);
       expect(
-        () => CombatV1Engine.playTechnique(state, 'not_in_hand', catalog: fixtureCatalog),
+        () => declareAndResolveTechnique(state, 'not_in_hand', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
       snapshot.expectUnchanged(state);
@@ -952,7 +959,7 @@ void main() {
       );
       final snapshot = _StateSnapshot(state);
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog),
+        () => declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
       snapshot.expectUnchanged(state);
@@ -970,7 +977,7 @@ void main() {
       );
       final snapshot = _StateSnapshot(state);
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog),
+        () => declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
       snapshot.expectUnchanged(state);
@@ -988,7 +995,7 @@ void main() {
       );
       final snapshot = _StateSnapshot(state);
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog),
+        () => declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
       snapshot.expectUnchanged(state);
@@ -1006,7 +1013,7 @@ void main() {
       );
       final snapshot = _StateSnapshot(state);
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog),
+        () => declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
       snapshot.expectUnchanged(state);
@@ -1028,7 +1035,7 @@ void main() {
       );
       final snapshot = _StateSnapshot(state);
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog),
+        () => declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
       snapshot.expectUnchanged(state);
@@ -1047,7 +1054,7 @@ void main() {
       );
       final snapshot = _StateSnapshot(state);
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', catalog: fixtureCatalog),
+        () => declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
       snapshot.expectUnchanged(state);
@@ -1066,7 +1073,7 @@ void main() {
       final catalog = _catalogWith({'fx_invalid_wild_cost': _fxInvalidWildCost});
       final snapshot = _StateSnapshot(state);
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', catalog: catalog),
+        () => declareAndResolveTechnique(state, 'a1', catalog: catalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
       snapshot.expectUnchanged(state);
@@ -1088,7 +1095,7 @@ void main() {
       final catalog = _catalogWith({'fx_rough_normal': _fxRoughNormal});
       var state = _buildState(handA: [rough, followUp], hpB: 150, sharedHeat: 0);
 
-      state = CombatV1Engine.playTechnique(state, 'a1', catalog: catalog, random: Random(1));
+      state = declareAndResolveTechnique(state, 'a1', catalog: catalog, random: Random(1));
       // 通常のDMG/HEAT適用のみで、PIN不可等の特殊フラグは存在しない
       // （CombatV1PlayerState/CombatV1MatchStateにROUGH専用フィールドが
       // 無いことがモデル上の裏付けになる）。
@@ -1097,7 +1104,7 @@ void main() {
 
       // ROUGH技を使用したターンでも、次のTECHNIQUEが制限されない
       // （Phase 8の「次ターンTECHNIQUE最大1枚」はまだ存在しない）。
-      state = CombatV1Engine.playTechnique(state, 'a2', catalog: catalog, random: Random(2));
+      state = declareAndResolveTechnique(state, 'a2', catalog: catalog, random: Random(2));
       expect(state.playerA.techniquesUsedThisTurn, 2);
     });
 
@@ -1122,12 +1129,15 @@ void main() {
       expect(state.playerA.pinCardsHeld, pinCardsBefore);
     });
 
-    test('60. COUNTER応答（counterResponsePending相当）はまだ存在しない', () {
-      // Phase 3ではCombatV1MatchPhaseにCOUNTER応答待ちフェーズを追加しない
-      // （Phase 4予定、docs/design/combat_v1_phase1_design.md 8章）。
+    test('60. COUNTER応答（counterResponsePending）はPhase 4で追加された', () {
+      // Phase 3時点ではCombatV1MatchPhaseにCOUNTER応答待ちフェーズが無い
+      // ことを検証していたが、Phase 4でSSOT通りに追加された
+      // （docs/combat_rules_v1.md 7.1章）。宣言→応答待ち→
+      // COUNTER/decline解決の詳細なState Machineテストは
+      // combat_v1_pending_state_machine_test.dart（Phase 4）を参照。
       expect(
         CombatV1MatchPhase.values.map((p) => p.name),
-        isNot(contains('counterResponsePending')),
+        contains('counterResponsePending'),
       );
     });
 
@@ -1145,7 +1155,7 @@ void main() {
       ];
       var state = _buildState(handA: entries);
       for (var i = 1; i <= 5; i++) {
-        state = CombatV1Engine.playTechnique(
+        state = declareAndResolveTechnique(
           state,
           'a$i',
           catalog: fixtureCatalog,
@@ -1161,6 +1171,76 @@ void main() {
       // 使用不可となる。
       expect(
         CombatV1Engine.hasAnyPlayableTechnique(state, catalog: fixtureCatalog),
+        isFalse,
+      );
+    });
+  });
+
+  group('hasAnyPlayableTechnique — regression強化（33、Phase 3レビュー指摘対応）', () {
+    test('COUNTERだけのhandはfalse', () {
+      final state = _buildState(
+        handA: [
+          const CombatV1DeckEntry(
+            instanceId: 'a1',
+            cardId: 'fx_counter_a',
+            category: CombatV1CardCategory.counter,
+          ),
+        ],
+      );
+      expect(
+        CombatV1Engine.hasAnyPlayableTechnique(state, catalog: fixtureCatalog),
+        isFalse,
+      );
+    });
+
+    test('FINISHERだけのhandはfalse', () {
+      final state = _buildState(
+        handA: [
+          const CombatV1DeckEntry(
+            instanceId: 'a1',
+            cardId: 'fx_finisher_a',
+            category: CombatV1CardCategory.finisher,
+          ),
+        ],
+      );
+      expect(
+        CombatV1Engine.hasAnyPlayableTechnique(state, catalog: fixtureCatalog),
+        isFalse,
+      );
+    });
+
+    test('相手state不一致の技だけのhandはfalse', () {
+      final state = _buildState(
+        handA: [
+          const CombatV1DeckEntry(
+            instanceId: 'a1',
+            cardId: 'fx_normal_ground', // requiredOpponentState == down
+            category: CombatV1CardCategory.normal,
+          ),
+        ],
+        postureB: CombatV1WrestlerPosture.stand,
+      );
+      expect(
+        CombatV1Engine.hasAnyPlayableTechnique(state, catalog: fixtureCatalog),
+        isFalse,
+      );
+    });
+
+    test('静的データが不正な技だけのhandはfalse', () {
+      final state = _buildState(
+        handA: [
+          const CombatV1DeckEntry(
+            instanceId: 'a1',
+            cardId: 'fx_invalid_wild_cost',
+            category: CombatV1CardCategory.normal,
+          ),
+        ],
+      );
+      expect(
+        CombatV1Engine.hasAnyPlayableTechnique(
+          state,
+          catalog: _catalogWith({'fx_invalid_wild_cost': _fxInvalidWildCost}),
+        ),
         isFalse,
       );
     });

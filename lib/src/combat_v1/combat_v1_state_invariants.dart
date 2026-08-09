@@ -19,6 +19,16 @@ enum CombatV1PlayerStateInvariantErrorCode {
   /// spentEnergy（今サイクルの使用済みENERGY）が、対応する属性の
   /// energyPool（保有ENERGY）を超えている。
   spentExceedsPool,
+
+  /// spentEnergyの値が負数（Phase 4、Phase 3 Codexレビュー指摘「10-1」）。
+  /// defenderが自ターン外にCOUNTER ENERGYを消費するようになるため、
+  /// spentEnergyの不正な負値を検出できることがPhase 4以降より重要になる。
+  negativeSpentEnergy,
+
+  /// [CombatV1PlayerState.energyPool]自体が[CombatV1EnergyPool.isValid]
+  /// でない（負数のENERGY量を含む、Phase 4、Phase 3 Codexレビュー指摘
+  /// 「10-1」）。
+  invalidEnergyPool,
 }
 
 /// [validatePlayerStateInvariants]の1件のエラー。
@@ -46,15 +56,39 @@ class CombatV1PlayerStateInvariantResult {
   bool get isValid => errors.isEmpty;
 }
 
-/// [player]の`spentEnergy`が各属性の`energyPool`を超えていないか検証する
-/// （docs/combat_rules_v1.md 5章）。
+/// [player]の`spentEnergy`/`energyPool`が不変条件を満たしているか検証する
+/// （docs/combat_rules_v1.md 5章、Phase 4でnegativeSpentEnergy/
+/// invalidEnergyPoolを追加）。
 CombatV1PlayerStateInvariantResult validatePlayerStateInvariants(
   CombatV1PlayerState player,
 ) {
   final errors = <CombatV1PlayerStateInvariantError>[];
 
+  if (!player.energyPool.isValid) {
+    errors.add(
+      CombatV1PlayerStateInvariantError(
+        code: CombatV1PlayerStateInvariantErrorCode.invalidEnergyPool,
+        message: '${player.wrestlerName}のenergyPoolに負数のENERGY量が'
+            '含まれています',
+      ),
+    );
+  }
+
   for (final attribute in CombatV1EnergyAttribute.values) {
     final spent = player.spentEnergy[attribute] ?? 0;
+
+    if (spent < 0) {
+      errors.add(
+        CombatV1PlayerStateInvariantError(
+          code: CombatV1PlayerStateInvariantErrorCode.negativeSpentEnergy,
+          message:
+              '${player.wrestlerName}の${attribute.displayLabel}ENERGYの'
+              'spentEnergyが負数です（spent:$spent）',
+        ),
+      );
+      continue;
+    }
+
     final pool = player.energyPool.amountFor(attribute);
     if (spent > pool) {
       errors.add(

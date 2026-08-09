@@ -22,6 +22,7 @@ class CombatV1RulesConfig {
     this.signatureSameNameLimit = 2,
     this.finisherSameNameLimit = 1,
     this.counterSameNameLimit = 2,
+    this.counterAllowsWildSubstitution = false,
   });
 
   /// 全レスラー共通の初期HP（docs/combat_rules_v1.md 2・14章）。
@@ -50,6 +51,15 @@ class CombatV1RulesConfig {
 
   /// COUNTERの同名カード上限（docs/combat_rules_v1.md 3章）。
   final int counterSameNameLimit;
+
+  /// COUNTER支払い（synthetic cost）で＊(wild)ENERGYによる補完を許可するか
+  /// （docs/combat_rules_v1.md 5.2章「COUNTERでの＊(ワイルド)ENERGYの
+  /// 扱い」、Phase
+  /// 4で確定）。既定値`false`——通常TECHNIQUE支払いとは異なるポリシーで
+  /// あることが今回のPhase 4の確定事項（既定でCOUNTER側はwild補完不可）。
+  /// `resolveEnergyPayment`の`allowWildSubstitution`引数へそのまま渡す
+  /// （`combat_v1_energy.dart`）。
+  final bool counterAllowsWildSubstitution;
 
   /// [category]の同名カード上限（docs/combat_rules_v1.md 3章）。
   /// Deck validation（[../combat_v1_deck_validation.dart]）が参照する
