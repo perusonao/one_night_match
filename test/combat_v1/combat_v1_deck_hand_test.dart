@@ -193,7 +193,7 @@ void main() {
       final next = CombatV1Engine.playTechnique(
         state,
         't1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
         random: Random(1),
       );
 
@@ -221,7 +221,7 @@ void main() {
       var next = CombatV1Engine.playTechnique(
         state,
         't1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
         random: Random(1),
       );
       expect(next.playerA.hand.length, 5);
@@ -229,7 +229,7 @@ void main() {
       next = CombatV1Engine.playTechnique(
         next,
         't2',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
         random: Random(2),
       );
       expect(next.playerA.hand.length, 5);
@@ -249,12 +249,12 @@ void main() {
       final check = CombatV1Engine.checkTechniqueLegality(
         state,
         't1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
       );
       expect(check.legal, isFalse);
 
       expect(
-        () => CombatV1Engine.playTechnique(state, 't1', techniques: fixtureTechniques),
+        () => CombatV1Engine.playTechnique(state, 't1', catalog: fixtureCatalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
     });
@@ -455,7 +455,7 @@ void main() {
       final next = CombatV1Engine.playTechnique(
         state,
         't1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
         random: Random(1),
       );
 
@@ -483,7 +483,7 @@ void main() {
       var next = CombatV1Engine.playTechnique(
         state,
         't1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
         random: Random(1),
       );
       expect(_totalCardsFor(next.playerA), 30);
@@ -491,7 +491,7 @@ void main() {
       next = CombatV1Engine.playTechnique(
         next,
         't2',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
         random: Random(2),
       );
       expect(_totalCardsFor(next.playerA), 30);

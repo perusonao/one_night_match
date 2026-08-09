@@ -16,6 +16,7 @@ import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_deck.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_deck_validation.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_energy.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_engine.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
@@ -248,7 +249,7 @@ void main() {
         () => CombatV1Engine.playTechnique(
           state,
           'dummy',
-          techniques: fixtureTechniques,
+          catalog: fixtureCatalog,
         ),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
@@ -271,7 +272,7 @@ void main() {
       final next = CombatV1Engine.playTechnique(
         state,
         'a1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
       );
 
       expect(next.playerA.spentEnergy[CombatV1EnergyAttribute.strike], 1);
@@ -288,7 +289,7 @@ void main() {
       final next = CombatV1Engine.playTechnique(
         state,
         'a1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
       );
 
       expect(next.playerB.hp, 140);
@@ -311,7 +312,7 @@ void main() {
       final next = CombatV1Engine.playTechnique(
         state,
         'a1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
         random: Random(1),
       );
 
@@ -336,7 +337,7 @@ void main() {
       final next = CombatV1Engine.playTechnique(
         state,
         'a1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
       );
 
       expect(next.playerB.hp, 0); // 15 - 20 は -5 だが 0 でクランプされる
@@ -366,7 +367,7 @@ void main() {
       var next = CombatV1Engine.playTechnique(
         state,
         'a1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
       );
       expect(next.phase, CombatV1MatchPhase.action); // ターンは終了しない
       expect(next.playerB.hp, 140);
@@ -374,7 +375,7 @@ void main() {
       next = CombatV1Engine.playTechnique(
         next,
         'a2',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
       );
       expect(next.phase, CombatV1MatchPhase.action);
       expect(next.playerB.hp, 130); // ダメージが累積する
@@ -398,7 +399,7 @@ void main() {
       final next = CombatV1Engine.playTechnique(
         state,
         'a1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
       );
 
       expect(next.playerA.spentEnergy[CombatV1EnergyAttribute.strike], 3); // 3使用済み(残り0)
@@ -424,7 +425,7 @@ void main() {
       final next = CombatV1Engine.playTechnique(
         state,
         'a1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
       );
 
       expect(next.playerA.spentEnergy[CombatV1EnergyAttribute.wild], 2);
@@ -436,29 +437,38 @@ void main() {
         cardId: 'fx_overpriced',
         category: CombatV1CardCategory.normal,
       );
-      final techniques = {
-        ...fixtureTechniques,
-        'fx_overpriced': const CombatV1Technique(
-          id: 'fx_overpriced',
-          name: 'テスト超高コスト技',
-          category: CombatV1CardCategory.normal,
-          attribute: CombatV1EnergyAttribute.strike,
-          energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 99}),
-          damage: 10,
-          heatGain: 10,
-        ),
-      };
+      final catalog = CombatV1CardCatalog(
+        techniques: {
+          ...fixtureTechniques,
+          'fx_overpriced': const CombatV1Technique(
+            id: 'fx_overpriced',
+            name: 'テスト超高コスト技',
+            category: CombatV1CardCategory.normal,
+            attribute: CombatV1EnergyAttribute.strike,
+            energyCost: CombatV1EnergyCost({
+              CombatV1EnergyAttribute.strike: 99,
+            }),
+            damage: 10,
+            heatGain: 10,
+          ),
+        },
+        counters: fixtureCounters,
+      );
       final state = buildActionState(handA: [expensive]);
 
       final check = CombatV1Engine.checkTechniqueLegality(
         state,
         'a1',
-        techniques: techniques,
+        catalog: catalog,
       );
       expect(check.legal, isFalse);
+      expect(
+        check.reasonCode,
+        CombatV1TechniqueLegalityReasonCode.insufficientEnergy,
+      );
 
       expect(
-        () => CombatV1Engine.playTechnique(state, 'a1', techniques: techniques),
+        () => CombatV1Engine.playTechnique(state, 'a1', catalog: catalog),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
     });
@@ -478,7 +488,7 @@ void main() {
         () => CombatV1Engine.playTechnique(
           state,
           'not_in_hand',
-          techniques: fixtureTechniques,
+          catalog: fixtureCatalog,
         ),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
@@ -498,7 +508,7 @@ void main() {
       final check = CombatV1Engine.checkTechniqueLegality(
         state,
         'a1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
       );
       expect(check.legal, isFalse);
 
@@ -506,7 +516,7 @@ void main() {
         () => CombatV1Engine.playTechnique(
           state,
           'a1',
-          techniques: fixtureTechniques,
+          catalog: fixtureCatalog,
         ),
         throwsA(isA<CombatV1IllegalActionException>()),
       );
@@ -520,7 +530,7 @@ void main() {
         CombatV1Engine.checkTechniqueLegality(
           downState,
           'a1',
-          techniques: fixtureTechniques,
+          catalog: fixtureCatalog,
         ).legal,
         isTrue,
       );
@@ -537,7 +547,7 @@ void main() {
       final check = CombatV1Engine.checkTechniqueLegality(
         state,
         'a1',
-        techniques: fixtureTechniques,
+        catalog: fixtureCatalog,
       );
       expect(check.legal, isFalse);
     });

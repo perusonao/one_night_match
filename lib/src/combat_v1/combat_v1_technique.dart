@@ -78,4 +78,12 @@ class CombatV1Technique {
   /// （docs/combat_rules_v1.md 13章）。FINISHER決着ロジック自体はPhase 9まで
   /// 実装しない（Phase 1では値を保持するのみ）。
   final CombatV1FinisherType? finisherType;
+
+  /// 静的データvalidation（Phase 3、docs/combat_rules_v1.md 6章）:
+  /// [energyCost]が有効か（負数を含まない、wildを要求していない）。
+  ///
+  /// [CombatV1Engine.checkTechniqueLegality]が
+  /// `invalidTechniqueData`reasonCodeの判定に使う
+  /// （lib/src/combat_v1/combat_v1_engine.dart）。
+  bool get isStaticDataValid => energyCost.isValid;
 }
