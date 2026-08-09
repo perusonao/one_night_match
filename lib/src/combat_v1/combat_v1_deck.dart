@@ -56,11 +56,18 @@ class CombatV1DeckComposition {
 
   int get total => normalCount + signatureCount + finisherCount + counterCount;
 
+  /// [category]に対応する規定枚数。
+  int countFor(CombatV1CardCategory category) => switch (category) {
+    CombatV1CardCategory.normal => normalCount,
+    CombatV1CardCategory.signature => signatureCount,
+    CombatV1CardCategory.finisher => finisherCount,
+    CombatV1CardCategory.counter => counterCount,
+  };
+
   /// [definition] がこの構成と一致するか（枚数のみ検証、カード内容は問わない）。
   bool matches(CombatV1DeckDefinition definition) =>
       definition.size == total &&
-      definition.countOf(CombatV1CardCategory.normal) == normalCount &&
-      definition.countOf(CombatV1CardCategory.signature) == signatureCount &&
-      definition.countOf(CombatV1CardCategory.finisher) == finisherCount &&
-      definition.countOf(CombatV1CardCategory.counter) == counterCount;
+      CombatV1CardCategory.values.every(
+        (category) => definition.countOf(category) == countFor(category),
+      );
 }

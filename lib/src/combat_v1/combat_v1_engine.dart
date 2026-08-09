@@ -14,6 +14,7 @@ library;
 import 'dart:math';
 
 import 'combat_v1_deck.dart';
+import 'combat_v1_deck_validation.dart';
 import 'combat_v1_energy.dart';
 import 'combat_v1_enums.dart';
 import 'combat_v1_match_state.dart';
@@ -49,35 +50,21 @@ class CombatV1ActionCheck {
 class CombatV1Engine {
   /// 試合を開始する。
   ///
-  /// 両者のデッキが[rules]の`deckComposition`に一致することを検証したうえで
-  /// シャッフルし、初期手札を配り、先攻（playerA）のターン開始処理
-  /// （ENERGY全回復・1ドロー）まで行った状態を返す（`phase == discard`）。
+  /// 両者のデッキを[catalog]・[rules]に基づいて検証（[validateDeck]、
+  /// docs/combat_rules_v1.md 4章）したうえでシャッフルし、初期手札を配り、
+  /// 先攻（playerA）のターン開始処理（ENERGY全回復・1ドロー）まで行った状態
+  /// を返す（`phase == discard`）。不正なデッキではMatchを開始できない。
   static CombatV1MatchState start({
     required CombatV1Wrestler wrestlerA,
     required CombatV1DeckDefinition deckA,
     required CombatV1Wrestler wrestlerB,
     required CombatV1DeckDefinition deckB,
     required CombatV1RulesConfig rules,
+    required CombatV1CardCatalog catalog,
     Random? random,
   }) {
-    if (!rules.deckComposition.matches(deckA)) {
-      throw CombatV1IllegalActionException(
-        '${wrestlerA.name}のデッキがデッキ構成'
-        '（NORMAL${rules.deckComposition.normalCount}/'
-        'SIGNATURE${rules.deckComposition.signatureCount}/'
-        'FINISHER${rules.deckComposition.finisherCount}/'
-        'COUNTER${rules.deckComposition.counterCount}）に一致しません',
-      );
-    }
-    if (!rules.deckComposition.matches(deckB)) {
-      throw CombatV1IllegalActionException(
-        '${wrestlerB.name}のデッキがデッキ構成'
-        '（NORMAL${rules.deckComposition.normalCount}/'
-        'SIGNATURE${rules.deckComposition.signatureCount}/'
-        'FINISHER${rules.deckComposition.finisherCount}/'
-        'COUNTER${rules.deckComposition.counterCount}）に一致しません',
-      );
-    }
+    _validateDeckOrThrow(wrestlerA.name, deckA, catalog: catalog, rules: rules);
+    _validateDeckOrThrow(wrestlerB.name, deckB, catalog: catalog, rules: rules);
 
     final rng = random ?? Random();
 
@@ -98,6 +85,24 @@ class CombatV1Engine {
     );
 
     return _startTurn(state, rng);
+  }
+
+  /// [deck]を[validateDeck]で検証し、不正なら
+  /// [CombatV1IllegalActionException]を送出する（docs/combat_rules_v1.md
+  /// 4章）。複数のエラーがある場合はすべてメッセージへまとめる。
+  static void _validateDeckOrThrow(
+    String wrestlerName,
+    CombatV1DeckDefinition deck, {
+    required CombatV1CardCatalog catalog,
+    required CombatV1RulesConfig rules,
+  }) {
+    final result = validateDeck(deck, catalog: catalog, rules: rules);
+    if (!result.isValid) {
+      throw CombatV1IllegalActionException(
+        '$wrestlerNameのデッキが不正です: '
+        '${result.errors.map((e) => e.message).join(' / ')}',
+      );
+    }
   }
 
   static CombatV1PlayerState _initPlayer(

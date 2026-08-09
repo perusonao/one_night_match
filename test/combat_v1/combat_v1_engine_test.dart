@@ -82,6 +82,7 @@ void main() {
         wrestlerB: fixtureWrestlerB,
         deckB: fixtureDeck('fx_wrestler_b'),
         rules: fixtureRules,
+        catalog: fixtureCatalog,
         random: Random(1),
       );
     });
@@ -150,6 +151,7 @@ void main() {
           wrestlerB: fixtureWrestlerB,
           deckB: fixtureDeck('fx_wrestler_b'),
           rules: fixtureRules,
+          catalog: fixtureCatalog,
           random: Random(1),
         ),
         throwsA(isA<CombatV1IllegalActionException>()),
@@ -165,6 +167,7 @@ void main() {
         wrestlerB: fixtureWrestlerB,
         deckB: fixtureDeck('fx_wrestler_b'),
         rules: fixtureRules,
+        catalog: fixtureCatalog,
         random: Random(1),
       );
       final handSizeBefore = state.playerA.hand.length;
@@ -189,6 +192,7 @@ void main() {
         wrestlerB: fixtureWrestlerB,
         deckB: fixtureDeck('fx_wrestler_b'),
         rules: fixtureRules,
+        catalog: fixtureCatalog,
         random: Random(1),
       );
 
@@ -236,6 +240,7 @@ void main() {
         wrestlerB: fixtureWrestlerB,
         deckB: fixtureDeck('fx_wrestler_b'),
         rules: fixtureRules,
+        catalog: fixtureCatalog,
         random: Random(1),
       ); // phase == discard
 
@@ -549,6 +554,10 @@ void main() {
       const smallRules = CombatV1RulesConfig(
         startingHandSize: 2,
         deckComposition: smallComposition,
+        // このテストは同名カード1種のみで山札を構成する
+        // （山札再構築の検証に本質的でない同名上限の影響を避けるため、
+        // Phase 2で追加されたNORMAL同名上限（既定3枚）を超えて許容する）。
+        normalSameNameLimit: 5,
       );
 
       CombatV1DeckDefinition smallDeck(String wrestlerId) => CombatV1DeckDefinition(
@@ -569,6 +578,7 @@ void main() {
         wrestlerB: fixtureWrestlerB,
         deckB: smallDeck('small_b'),
         rules: smallRules,
+        catalog: fixtureCatalog,
         random: Random(7),
       );
 
