@@ -87,14 +87,23 @@ void main() {
     });
   });
 
-  group('C/D. mismatch: 別レスラーのProduction Deckを渡すとEngine.startが拒否する', () {
-    test('C. Misaki wrestler + Jack Production Deck → CombatV1IllegalActionException', () {
+  group('C. mismatch: 別レスラーのProduction Deckを渡すとEngine.startが拒否する（片側のみ・両側同時を網羅）', () {
+    // Codexレビュー指摘（Minor）: 旧「両者同時に取り違えても拒否される」テストは、
+    // 実際にはplayerB（wrestlerB: jackWrestler, deckB: buildJackDeck(...)）が
+    // 正しい組み合わせのままで、playerA側のみがmismatchしていた
+    // （テスト名と実体が一致していなかった）。加えて、旧C/Dテストは名前上
+    // 「片側のみのmismatch」に見えるが、実際にはいずれもwrestlerA/wrestlerB
+    // 双方が同時にmismatchしていた。ここでは「playerAのみ」「playerBのみ」
+    // 「両者同時」の3パターンを、テスト名と実体が一致する形で明示的に分離する
+    // （既存の検証パラメータ自体は削除せず、正確な名前の下へ再配置した）。
+
+    test('A. playerAのみmismatch（playerBは正しい組み合わせ）→ Engine.start拒否', () {
       expect(
         () => CombatV1Engine.start(
           wrestlerA: misakiWrestler,
-          deckA: buildJackDeck(ownerId: 'player-a'),
+          deckA: buildJackDeck(ownerId: 'player-a'), // playerA: Misaki wrestler + Jack deck（mismatch）
           wrestlerB: jackWrestler,
-          deckB: buildMisakiDeck(ownerId: 'player-b'),
+          deckB: buildJackDeck(ownerId: 'player-b'), // playerB: Jack wrestler + Jack deck（正しい組み合わせ）
           rules: rules,
           catalog: productionCardCatalog,
         ),
@@ -102,27 +111,41 @@ void main() {
       );
     });
 
-    test('D. Jack wrestler + Misaki Production Deck → CombatV1IllegalActionException', () {
+    test('B. playerBのみmismatch（playerAは正しい組み合わせ）→ Engine.start拒否', () {
+      expect(
+        () => CombatV1Engine.start(
+          wrestlerA: misakiWrestler,
+          deckA: buildMisakiDeck(ownerId: 'player-a'), // playerA: Misaki wrestler + Misaki deck（正しい組み合わせ）
+          wrestlerB: jackWrestler,
+          deckB: buildMisakiDeck(ownerId: 'player-b'), // playerB: Jack wrestler + Misaki deck（mismatch）
+          rules: rules,
+          catalog: productionCardCatalog,
+        ),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+    });
+
+    test('C. 両者同時にmismatch（オリエンテーション1: Misaki wrestler+Jack deck / Jack wrestler+Misaki deck）→ Engine.start拒否', () {
+      expect(
+        () => CombatV1Engine.start(
+          wrestlerA: misakiWrestler,
+          deckA: buildJackDeck(ownerId: 'player-a'), // playerA: Misaki wrestler + Jack deck（mismatch）
+          wrestlerB: jackWrestler,
+          deckB: buildMisakiDeck(ownerId: 'player-b'), // playerB: Jack wrestler + Misaki deck（mismatch）
+          rules: rules,
+          catalog: productionCardCatalog,
+        ),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+    });
+
+    test('D. 両者同時にmismatch（オリエンテーション2: Jack wrestler+Misaki deck / Misaki wrestler+Jack deck）→ Engine.start拒否', () {
       expect(
         () => CombatV1Engine.start(
           wrestlerA: jackWrestler,
-          deckA: buildMisakiDeck(ownerId: 'player-a'),
+          deckA: buildMisakiDeck(ownerId: 'player-a'), // playerA: Jack wrestler + Misaki deck（mismatch）
           wrestlerB: misakiWrestler,
-          deckB: buildJackDeck(ownerId: 'player-b'),
-          rules: rules,
-          catalog: productionCardCatalog,
-        ),
-        throwsA(isA<CombatV1IllegalActionException>()),
-      );
-    });
-
-    test('両者同時に取り違えても拒否される（wrestlerA/Bどちらも不一致）', () {
-      expect(
-        () => CombatV1Engine.start(
-          wrestlerA: misakiWrestler,
-          deckA: buildJackDeck(ownerId: 'player-a'),
-          wrestlerB: jackWrestler,
-          deckB: buildJackDeck(ownerId: 'player-b'), // wrestlerBは正しい組み合わせ
+          deckB: buildJackDeck(ownerId: 'player-b'), // playerB: Misaki wrestler + Jack deck（mismatch）
           rules: rules,
           catalog: productionCardCatalog,
         ),
