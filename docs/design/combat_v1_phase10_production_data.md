@@ -1,6 +1,6 @@
 # Combat Ver.1 Phase 10 — Production Data 設計・確定値記録
 
-- ステータス: Phase 10A（豪田ミサキ）着手時点
+- ステータス: Phase 10B（黒蝶ジャック）完了時点
 - 関連: [`../combat_rules_v1.md`](../combat_rules_v1.md)（SSOT） /
   [`combat_v1_open_questions.md`](combat_v1_open_questions.md)
 
@@ -220,10 +220,132 @@ buildMisakiDeck(ownerId: 'player-b')
 
 ---
 
-## 8. 変更履歴
+## 9. 黒蝶ジャック — Production Wrestler（Phase 10B）
+
+| フィールド | 値 |
+|---|---|
+| id | `jack` |
+| name | 黒蝶ジャック |
+
+### 9.1 ENERGY Pool（`combat_rules_v1.md`18章の検証値をそのまま採用）
+
+| 属性 | 値 |
+|---|---|
+| 打（strike） | 3 |
+| 関（joint） | 1 |
+| 投（throwing） | 1 |
+| 飛（aerial） | 0 |
+| ラフ（rough） | 4 |
+| ＊（wild） | 1 |
+| **合計** | **10** |
+
+---
+
+## 10. 黒蝶ジャック — Production Technique（12種、Phase 10B）
+
+`combat_rules_v1.md`20章は5技（チョーク攻撃・顔面かきむしり・黒蝶クラッシュ・
+黒蝶ドライバー・ブラック・ジャック）のCOST／DMG／HEAT／デッキ枚数のみを確定値として
+持ち、状態遷移（requiredOpponentState/resultingOpponentState）・Technique
+Family・finisherType・残り7技（NORMAL6＋SIGNATURE1）の名称・数値は一次資料に
+記載がなかった。Phase 10Bセッションで、Claudeが叩き台（技名・数値・family割当・
+Counter・Deck内訳を含む完全な提案）を提示し、ユーザーが内容を確認のうえ
+「進めてください」と正式承認した。`docs/data/one_night_match_techniques.xlsx`にも
+ジャックの技候補があったが、Misaki（Phase 10A 6章）と同じ理由——技名・数値・
+判定モデル（凶attribute・KO/SUBMISSION決着・Speed等の廃止フィールド）が
+SSOT20章と一致しない別系統の旧候補——で不採用とした。
+
+| # | 技名 | ID | category | attribute | family | Cost | DMG | HEAT | 状態 | 備考 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | チョーク攻撃 | `jack_choke_attack` | NORMAL | rough | CHOKE | ラフ1 | 10 | 20 | STAND→STAND | 20章確定値。23.4章のCHOKE例そのもの |
+| 2 | 顔面かきむしり | `jack_face_claw` | NORMAL | rough | CLAW | ラフ1 | 10 | 20 | STAND→STAND | 20章確定値 |
+| 3 | 闇討ちキック | `jack_sneak_kick` | NORMAL | strike | KICK | 打1 | 10 | 10 | STAND→STAND | Phase 10B新規確定（基本技） |
+| 4 | 黒蝶エルボー | `jack_elbow` | NORMAL | strike | ELBOW | 打1 | 10 | 10 | STAND→STAND | Phase 10B新規確定（基本技） |
+| 5 | 闇討ちラリアット | `jack_sneak_lariat` | NORMAL | strike | LARIAT | 打2 | 20 | 20 | STAND→DOWN | Phase 10B新規確定 |
+| 6 | 黒蝶スープレックス | `jack_suplex` | NORMAL | throwing | SUPLEX | 投1 | 10 | 10 | STAND→STAND | Phase 10B新規確定（投1枠を使用） |
+| 7 | アームロック | `jack_armlock` | NORMAL | joint | ARMBAR | 関1 | 10 | 10 | STAND→STAND | Phase 10B新規確定（関1枠を使用） |
+| 8 | とどめの踏みつけ | `jack_finishing_stomp` | NORMAL | strike | STOMP | 打1 | 10 | 20 | DOWN→DOWN | 20章「踏みつけは通常技」・23.3章STOMP=STRIKE groupに対応 |
+| 9 | 黒蝶クラッシュ | `jack_kurocho_crash` | SIGNATURE | rough | TACKLE | ラフ2 | 20 | 40 | STAND→DOWN | 20章確定値 |
+| 10 | 黒蝶ニードロップ | `jack_knee_drop` | SIGNATURE | strike | KNEE | 打2 | 20 | 30 | STAND→DOWN | Phase 10B新規確定 |
+| 11 | 黒蝶ドライバー | `jack_kurocho_driver` | FINISHER | rough | DRIVER | ラフ3 | 30 | 50 | STAND→DOWN | 20章確定値。finisherType=directPin |
+| 12 | ブラック・ジャック | `jack_black_jack` | FINISHER | strike | LARIAT | 打3 | 30 | 50 | STAND→DOWN | 20章確定値。finisherType=normal |
+
+### 10.1 finisherType確定経緯
+
+`combat_rules_v1.md`20章は黒蝶ドライバーを「妨害型FINISHER」、ブラック・ジャックを
+「決着型FINISHER」とのみ記載し、`CombatV1FinisherType`（normal/directPin/submission）
+のどれに対応するかは未確定だった。Phase 10Bセッションでユーザーへ確認のうえ、
+以下で正式確定した。
+
+- **黒蝶ドライバー**: `finisherType = directPin`（妨害型＝成功後すぐPINへ自動移行し
+  主導権を握る）。
+- **ブラック・ジャック**: `finisherType = normal`（決着型＝成功後、攻撃側が任意で
+  PINを選択する強力な通常技）。
+
+### 10.2 State Mapping（全12技、Phase 10Bで新規確定）
+
+STAND始動11技（#1〜7・9〜12）は`requiredOpponentState:
+CombatV1WrestlerPosture.stand`を明示的に設定する（nullは「STAND/DOWNどちらでも
+使用可能」を意味するため、Phase 10A Codexレビュー指摘と同じ不整合を作らないため）。
+DOWN始動は#8（とどめの踏みつけ）のみ。
+
+---
+
+## 11. 黒蝶ジャック — Production Counter（3種、Phase 10B）
+
+`combat_rules_v1.md`21章・`combat_v1_open_questions.md`のいずれにもジャック用
+COUNTERの正式割当は記載がなかった。Phase 10Aミサキ4章と同じ「広範囲/中範囲/専門」
+テンプレートで、Phase 10Bセッションでユーザーが確認のうえ以下を正式採用した。
+attribute（支払い属性）は、ジャックが保有量の多いENERGY属性（打3／ラフ4）の範囲内
+から選定した（関1／投1は乏しく、Counter属性に選ぶと常に支払い不能になるため除外、
+Phase 10Aミサキ4章と同じ理由）。
+
+| # | 役割 | 名称 | ID | attribute | counterableFamilies | counterableGroups |
+|---|---|---|---|---|---|---|
+| 1 | 広範囲型 | 闇討ちガード | `counter_jack_sneak_guard` | strike（打） | — | [STRIKE] |
+| 2 | 中範囲型 | 黒蝶リバーサル | `counter_jack_reversal` | rough（ラフ） | [SUPLEX, BACKDROP, POWERBOMB, DRIVER] | — |
+| 3 | 専門型 | チョークブレイク | `counter_jack_choke_break` | strike（打） | [CHOKE, CLAW] | — |
+
+---
+
+## 12. 黒蝶ジャック — Production Deck（30枚、Phase 10B）
+
+ROUGH技の枚数は`combat_rules_v1.md`20章の確定基準（チョーク攻撃×1・顔面かきむしり×1・
+黒蝶クラッシュ×2・黒蝶ドライバー×1＝計5枚）をそのまま採用した。残りはPhase 10Bで
+新規確定した配分。
+
+| category | 内訳 | 枚数 |
+|---|---|---|
+| NORMAL | チョーク攻撃×1、顔面かきむしり×1、闇討ちキック×3、黒蝶エルボー×3、闇討ちラリアット×3、黒蝶スープレックス×2、アームロック×2、とどめの踏みつけ×3 | 18 |
+| SIGNATURE | 黒蝶クラッシュ×2、黒蝶ニードロップ×2 | 4 |
+| FINISHER | 黒蝶ドライバー×1、ブラック・ジャック×1 | 2 |
+| COUNTER | 闇討ちガード×2、黒蝶リバーサル×2、チョークブレイク×2 | 6 |
+| **合計** | | **30** |
+
+同名上限（`CombatV1RulesConfig`既定値）: NORMAL 3／SIGNATURE 2／FINISHER
+1／COUNTER 2のいずれにも収まる。`combat_v1_open_questions.md`の未解決項目#2
+（ジャックのデッキ配分＝SIGNATURE/FINISHER/COUNTER内訳が一次資料に記載なし）は
+本節で解決した。
+
+`buildJackDeck({required String ownerId})`は`buildMisakiDeck`と同じowner
+namespace方式を踏襲する（7章参照。instanceIdは`<ownerId>_<cardId>_#<連番>`、
+ownerIdが空/空白文字のみの場合は`ArgumentError`）。Jack vs Jackミラーマッチ
+（`buildJackDeck(ownerId: 'player-a')`/`buildJackDeck(ownerId: 'player-b')`）で
+2デッキ計60枚のinstanceIdがすべて一意であることをProduction
+test（`test/combat_v1/combat_v1_production_jack_test.dart`）で検証した。
+Misaki(player-a) vs Jack(player-b)という異なるレスラー同士の組み合わせでも
+同様に60枚すべて一意であることをあわせて検証した。
+
+---
+
+## 13. 変更履歴
 
 - **Phase 10-Precondition〜10A**: 本書を新規作成。上記1〜6章の内容を、Phase
   10Aセッション内でユーザーへ確認のうえ正式確定した。
 - **Phase 10A（GitHub Codexレビュー指摘対応）**: 7章を新規追加。Production
   Deck builderのinstanceId生成方式を、`wrestlerId`固定から必須`ownerId`
   パラメータ方式へ変更した経緯を記録した。
+- **Phase 10B**: 9〜12章を新規追加。黒蝶ジャックのProduction
+  Wrestler／Technique（12種）／Counter（3種）／Deck（30枚）を、Phase
+  10Aと同じowner namespace方式・広範囲/中範囲/専門Counterテンプレートで
+  正式確定した。`combat_v1_open_questions.md`未解決項目#2（ジャックのデッキ
+  配分）を解決した。

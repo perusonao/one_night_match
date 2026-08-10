@@ -147,6 +147,23 @@ Production Dataとして確定しきれなかった項目。Phase 10A実装セ�
 
 ---
 
+## Phase 10B時点で解決した項目（黒蝶ジャック Production Data実装セッションで確定）
+
+以下は`combat_rules_v1.md`20章（黒蝶ジャックROUGH関連・検証版）・18章（ENERGY配分検証値）
+だけではProduction Dataとして確定しきれなかった項目。Phase
+10Bセッション内でユーザーへ確認のうえ正式仕様として採用した。詳細・全データは
+[`combat_v1_phase10_production_data.md`](combat_v1_phase10_production_data.md)
+9〜12章を参照。
+
+| # | 項目 | 確定内容 | 関連章 |
+|---|---|---|---|
+| GG | 黒蝶ドライバー・ブラック・ジャックのfinisherType | 20章は「妨害型」「決着型」としか記載せず`CombatV1FinisherType`の対応が未確定だった。ユーザー確認のうえ黒蝶ドライバー=`directPin`、ブラック・ジャック=`normal`として確定した | `combat_v1_phase10_production_data.md` 10.1章 |
+| HH | ジャックの残り技（NORMAL6種＋SIGNATURE1種）の名称・数値・状態遷移 | 20章に記載がなかったため、Claudeが草案（技名・attribute・family・Cost/DMG/HEAT・状態遷移を含む）を提示し、ユーザーが承認のうえ正式確定した | `combat_v1_phase10_production_data.md` 10章 |
+| II | ジャック用COUNTER 3種の正式割当 | Phase 10Aミサキと同じ広範囲/中範囲/専門テンプレートで、闇討ちガード（STRIKE group／打）・黒蝶リバーサル（SUPLEX+BACKDROP+POWERBOMB+DRIVER／ラフ）・チョークブレイク（CHOKE+CLAW／打）の3種を正式採用した | `combat_v1_phase10_production_data.md` 11章 |
+| JJ | ジャックのデッキ配分（SIGNATURE/FINISHER/COUNTER内訳） | 下記「後続Phaseまで保留可能な項目」#2として起票していた未解決事項。SIGNATURE4（2種×2）／FINISHER2（2種×1）／COUNTER6（3種×2）で確定した。ROUGH技5枚の基準（20章）は変更していない | `combat_v1_phase10_production_data.md` 12章 |
+
+---
+
 ## 後続Phaseまで保留可能な項目
 
 ### 1. PINカード「共有4枚」の管理構造
@@ -155,12 +172,7 @@ Production Dataとして確定しきれなかった項目。Phase 10A実装セ�
 
 ### 2. ジャックのデッキ配分（SIGNATURE/FINISHER/COUNTER内訳）
 
-- 関連章: `combat_rules_v1.md` 21章
-- 内容: 一次資料（docx）にはアカリ・レイナ・ミサキの3人について
-  「SIGNATURE各×2、FINISHER各×1、COUNTER各×2」という内訳が明記されているが、ジャックについては
-  NORMAL18枚（うちROUGH5枚）の基準のみが記載され、SIGNATURE/FINISHER/COUNTERの内訳が示されていない。
-  推測で補完していない。
-- 解決が必要な時期: **Phase 10（4レスラー正式デッキ実装）着手前**。
+**Phase 10Bで解決済み（JJ番）。上記「Phase 10B時点で解決した項目」参照。**
 
 ### 3. アカリ・レイナの技データ（全12技の詳細数値）
 

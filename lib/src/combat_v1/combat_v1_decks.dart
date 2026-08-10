@@ -1,7 +1,7 @@
-/// Production 30枚Deck定義（docs/combat_rules_v1.md 3・21章、Phase 10A）。
+/// Production 30枚Deck定義（docs/combat_rules_v1.md 3・21章、Phase 10A/10B）。
 ///
-/// Phase 10Aでは豪田ミサキの正式30枚デッキのみを対象とする（黒蝶ジャック・火神アカリ・
-/// 白銀レイナは今回実装しない）。配分は`combat_rules_v1.md`21章の方針
+/// Phase 10Aで豪田ミサキ、Phase 10Bで黒蝶ジャックの正式30枚デッキを追加した
+/// （火神アカリ・白銀レイナは今回実装しない）。ミサキの配分は`combat_rules_v1.md`21章の方針
 /// （基本NORMAL×3・その他NORMAL×2、SIGNATURE各×2、FINISHER各×1、COUNTER各×2）を
 /// そのまま正式採用した（docs/design/combat_v1_phase10_production_data.md 5章）。
 ///
@@ -97,4 +97,48 @@ CombatV1DeckDefinition buildMisakiDeck({required String ownerId}) =>
     CombatV1DeckDefinition(
       wrestlerId: misakiWrestler.id,
       entries: _buildEntries(ownerId, misakiDeckSpec),
+    );
+
+/// 黒蝶ジャック Production Deck 30枚の内訳
+/// （NORMAL18・SIGNATURE4・FINISHER2・COUNTER6、
+/// docs/design/combat_v1_phase10_production_data.md Phase 10B節）。
+/// ROUGH技の枚数（チョーク攻撃×1・顔面かきむしり×1・黒蝶クラッシュ×2・
+/// 黒蝶ドライバー×1＝計5枚）は`combat_rules_v1.md`20章の確定値をそのまま採用した。
+const List<(String, CombatV1CardCategory, int)> jackDeckSpec = [
+  // NORMAL 18枚: ROUGH2種は20章の確定枚数（×1）、残り6種はPhase
+  // 10Bで新規確定した配分（基本4種×3、投/関の各1種×2）。
+  ('jack_choke_attack', CombatV1CardCategory.normal, 1),
+  ('jack_face_claw', CombatV1CardCategory.normal, 1),
+  ('jack_sneak_kick', CombatV1CardCategory.normal, 3),
+  ('jack_elbow', CombatV1CardCategory.normal, 3),
+  ('jack_sneak_lariat', CombatV1CardCategory.normal, 3),
+  ('jack_suplex', CombatV1CardCategory.normal, 2),
+  ('jack_armlock', CombatV1CardCategory.normal, 2),
+  ('jack_finishing_stomp', CombatV1CardCategory.normal, 3),
+
+  // SIGNATURE 4枚: 2種×2枚。
+  ('jack_kurocho_crash', CombatV1CardCategory.signature, 2),
+  ('jack_knee_drop', CombatV1CardCategory.signature, 2),
+
+  // FINISHER 2枚: 2種×1枚。
+  ('jack_kurocho_driver', CombatV1CardCategory.finisher, 1),
+  ('jack_black_jack', CombatV1CardCategory.finisher, 1),
+
+  // COUNTER 6枚: 3種×2枚。
+  ('counter_jack_sneak_guard', CombatV1CardCategory.counter, 2),
+  ('counter_jack_reversal', CombatV1CardCategory.counter, 2),
+  ('counter_jack_choke_break', CombatV1CardCategory.counter, 2),
+];
+
+/// 黒蝶ジャック Production Deck（30枚）。
+///
+/// [ownerId]は、このデッキがどちらのplayerへ配られるかを表す識別子で、
+/// physical instanceIdの生成にのみ使う（必須・デフォルト値なし、
+/// `buildMisakiDeck`と同じ設計方針——docs/design/combat_v1_phase10_production_data.md
+/// 7章参照）。[CombatV1DeckDefinition.wrestlerId]は引き続き常に[jackWrestler.id]
+/// （"jack"）を指す。
+CombatV1DeckDefinition buildJackDeck({required String ownerId}) =>
+    CombatV1DeckDefinition(
+      wrestlerId: jackWrestler.id,
+      entries: _buildEntries(ownerId, jackDeckSpec),
     );
