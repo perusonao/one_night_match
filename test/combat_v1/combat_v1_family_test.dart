@@ -84,8 +84,7 @@ void main() {
       }
     });
 
-    test('taxonomy合計は30family（SSOTの「合計29 family」という記述との'
-        '不一致は最終報告で明示する）', () {
+    test('taxonomy合計は30family（docs/combat_rules_v1.md 23.3章）', () {
       expect(CombatV1TechniqueFamily.values.length, 30);
     });
 
@@ -145,14 +144,14 @@ void main() {
   });
 
   group('COUNTER matching — family/groupマッチング（docs/combat_rules_v1.md「23.5章」）', () {
-    const familyOnlyCounter = CombatV1Counter(
+    final familyOnlyCounter = CombatV1Counter(
       id: 'match_family_only',
       name: 'family専門カウンター',
       attribute: CombatV1EnergyAttribute.strike,
       counterableFamilies: [CombatV1TechniqueFamily.kick],
     );
 
-    const groupOnlyCounter = CombatV1Counter(
+    final groupOnlyCounter = CombatV1Counter(
       id: 'match_group_only',
       name: 'group広域カウンター',
       attribute: CombatV1EnergyAttribute.strike,

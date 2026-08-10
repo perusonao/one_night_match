@@ -45,7 +45,7 @@ void main() {
 
   group('counterSyntheticCost — 動的ENERGY COST（docs/combat_rules_v1.md「7章」）', () {
     test('COUNTER必要量は攻撃Cost属性構成をコピーせず、単一属性totalになる', () {
-      const counter = CombatV1Counter(
+      final counter = CombatV1Counter(
         id: 'synthetic_test_counter',
         name: 'テスト合成コストカウンター',
         attribute: CombatV1EnergyAttribute.throwing,

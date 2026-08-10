@@ -34,6 +34,9 @@ class CombatV1PendingAttack {
     required this.heatGain,
     this.requiredOpponentState,
     this.resultOpponentState,
+    this.directPin = false,
+    this.submissionHold = false,
+    this.finisherType,
   }) : energyCost = CombatV1EnergyCost(
          Map.unmodifiable(energyCost.amounts),
        );
@@ -65,4 +68,17 @@ class CombatV1PendingAttack {
   final int heatGain;
   final CombatV1WrestlerPosture? requiredOpponentState;
   final CombatV1WrestlerPosture? resultOpponentState;
+
+  /// 宣言時点の`CombatV1Technique`定義から複製したimmutable metadata
+  /// （Phase 4 Codexレビュー指摘H2/H3対応）。Phase
+  /// 5（PIN）・Phase 6（SUBMISSION）・Phase 9（FINISHER）が「成立した
+  /// TECHNIQUEの性質」を参照するためのDomain境界としてのみ保持する。
+  /// Phase 4ではこれらの値による分岐処理（PIN移行・SUBMISSION判定・
+  /// FINISHER解禁等）は一切行わない
+  /// （[CombatV1Technique.directPin]/[CombatV1Technique.submissionHold]/
+  /// [CombatV1Technique.finisherType]と同じ意味、docs/combat_rules_v1.md
+  /// 6章・13章）。
+  final bool directPin;
+  final bool submissionHold;
+  final CombatV1FinisherType? finisherType;
 }

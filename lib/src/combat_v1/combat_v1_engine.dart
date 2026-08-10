@@ -22,6 +22,8 @@ import 'combat_v1_enums.dart';
 import 'combat_v1_match_state.dart';
 import 'combat_v1_pending_attack.dart';
 import 'combat_v1_rules_config.dart';
+import 'combat_v1_state_invariants.dart';
+import 'combat_v1_successful_technique_snapshot.dart';
 import 'combat_v1_technique.dart';
 import 'combat_v1_wrestler.dart';
 
@@ -79,28 +81,44 @@ enum CombatV1TechniqueLegalityReasonCode {
 
   /// ENERGYが不足している（ワイルド補完込みで支払い不可）。
   insufficientEnergy,
+
+  /// [CombatV1MatchState]自体が構造的に不整合（`phase`と`pendingAttack`の
+  /// 整合性、pendingの`attackerPlayerIndex`/`defenderPlayerIndex`の整合性
+  /// など）。通常のCommand呼び出しでは到達しないが、直接構築された
+  /// malformed stateに対する防御的チェック（Phase 4 Codexレビュー指摘H1）。
+  malformedPendingState,
 }
 
 /// [CombatV1Engine.checkTechniqueLegality] 等、読み取り専用の判定APIの結果。
 ///
-/// Phase 4のCodexレビュー指摘（10-2）対応: 以前は`legal`と[reasonCode]を
-/// 別々の位置引数として渡す設計だったため、理論上`legal=false`かつ
-/// `reasonCode=legal`のような矛盾した組み合わせを型システムが防げなかった。
-/// 名前付きファクトリコンストラクタ（[CombatV1ActionCheck.success]/
-/// [CombatV1ActionCheck.failure]）のみを公開し、矛盾した組み合わせを
-/// 構築できない設計へ改めた（`failure`側は`assert`で
-/// `reasonCode != legal`を強制する）。
+/// Phase 4のCodexレビュー指摘（M2、旧10-2）対応: 以前は`legal`と
+/// [reasonCode]を別々の位置引数として渡す設計だったため、理論上
+/// `legal=false`かつ`reasonCode=legal`のような矛盾した組み合わせを型
+/// システムが防げなかった。名前付きファクトリコンストラクタ
+/// （[CombatV1ActionCheck.success]/[CombatV1ActionCheck.failure]）のみを
+/// 公開し、矛盾した組み合わせを構築できない設計へ改めた。
+///
+/// Phase 4 Codexレビュー追加指摘（H4）: 当初`failure`側は`assert`で
+/// `reasonCode != legal`を強制していたが、`assert`はrelease
+/// buildで無効化されるため、release環境では矛盾状態を構築できてしまう
+/// 欠陥があった。`assert`に依存せず、コンストラクタ本体で無条件に
+/// [ArgumentError]を送出する方式へ変更した（この検証のため`failure`は
+/// `const`コンストラクタではなくなった。`success`は矛盾しようがないため
+/// 引き続き`const`のまま）。
 class CombatV1ActionCheck {
   const CombatV1ActionCheck.success(this.reason)
     : legal = true,
       reasonCode = CombatV1TechniqueLegalityReasonCode.legal;
 
-  const CombatV1ActionCheck.failure(this.reason, this.reasonCode)
-    : legal = false,
-      assert(
-        reasonCode != CombatV1TechniqueLegalityReasonCode.legal,
+  CombatV1ActionCheck.failure(this.reason, this.reasonCode) : legal = false {
+    if (reasonCode == CombatV1TechniqueLegalityReasonCode.legal) {
+      throw ArgumentError.value(
+        reasonCode,
+        'reasonCode',
         'CombatV1ActionCheck.failureにはlegal以外のreasonCodeを指定してください',
       );
+    }
+  }
 
   final bool legal;
 
@@ -152,23 +170,32 @@ enum CombatV1CounterLegalityReasonCode {
 
   /// 動的ENERGY COST（返される攻撃のCost総量）を支払えない。
   insufficientEnergy,
+
+  /// [CombatV1MatchState]自体が構造的に不整合（`pendingStructuralConsistencyViolation`
+  /// 参照、Phase 4 Codexレビュー指摘H1）。
+  malformedPendingState,
 }
 
 /// [CombatV1Engine.checkCounterLegality]の結果。[CombatV1ActionCheck]と同じ
 /// 設計（`success`/`failure`ファクトリのみを公開し、矛盾した`legal`/
-/// `reasonCode`の組み合わせを構築できないようにする）。
+/// `reasonCode`の組み合わせを構築できないようにする。`failure`が`assert`
+/// ではなく[ArgumentError]でrelease buildでも拒否する点も同じ、H4対応）。
 class CombatV1CounterActionCheck {
   const CombatV1CounterActionCheck.success(this.reason)
     : legal = true,
       reasonCode = CombatV1CounterLegalityReasonCode.legal;
 
-  const CombatV1CounterActionCheck.failure(this.reason, this.reasonCode)
-    : legal = false,
-      assert(
-        reasonCode != CombatV1CounterLegalityReasonCode.legal,
+  CombatV1CounterActionCheck.failure(this.reason, this.reasonCode)
+    : legal = false {
+    if (reasonCode == CombatV1CounterLegalityReasonCode.legal) {
+      throw ArgumentError.value(
+        reasonCode,
+        'reasonCode',
         'CombatV1CounterActionCheck.failureにはlegal以外のreasonCodeを'
         '指定してください',
       );
+    }
+  }
 
   final bool legal;
   final String reason;
@@ -464,6 +491,9 @@ class CombatV1Engine {
       heatGain: technique.heatGain,
       requiredOpponentState: technique.requiredOpponentState,
       resultOpponentState: technique.resultOpponentState,
+      directPin: technique.directPin,
+      submissionHold: technique.submissionHold,
+      finisherType: technique.finisherType,
     );
 
     return next.copyWith(
@@ -579,6 +609,11 @@ class CombatV1Engine {
     CombatV1MatchState state, {
     Random? random,
   }) {
+    final invariantViolation = pendingStructuralConsistencyViolation(state);
+    if (invariantViolation != null) {
+      throw CombatV1IllegalActionException(invariantViolation);
+    }
+
     if (state.phase != CombatV1MatchPhase.counterResponsePending) {
       throw CombatV1IllegalActionException(
         'declineCounterはcounterResponsePendingフェーズでのみ呼び出せます'
@@ -603,7 +638,9 @@ class CombatV1Engine {
   /// 4. 相手状態変化
   /// 5. pending攻撃カードを攻撃側のdiscardへ
   /// 6. 攻撃側1 draw
-  /// 7. pending clear、phase = action
+  /// 7. `lastSuccessfulTechnique`を更新（decline成功時のみ、Phase 4
+  ///    Codexレビュー指摘H2/H3/12/13）
+  /// 8. pending clear、phase = action
   static CombatV1MatchState _resolvePendingAttack(
     CombatV1MatchState state,
     CombatV1PendingAttack pending, {
@@ -648,7 +685,24 @@ class CombatV1Engine {
       log: [...next.log, ...drawLogs],
     );
 
-    // 7. pending clear、phase = action
+    // 7. lastSuccessfulTechniqueを更新（decline経路でのみ更新する。
+    // playCounter側では一切更新しない、docs/combat_rules_v1.md 7.1章）。
+    next = next.copyWith(
+      lastSuccessfulTechnique: CombatV1SuccessfulTechniqueSnapshot(
+        attackerPlayerIndex: pending.attackerPlayerIndex,
+        cardInstanceId: pending.attackCardInstance.instanceId,
+        cardId: pending.attackCardId,
+        category: pending.category,
+        attribute: pending.attribute,
+        family: pending.family,
+        directPin: pending.directPin,
+        submissionHold: pending.submissionHold,
+        finisherType: pending.finisherType,
+        resultOpponentState: pending.resultOpponentState,
+      ),
+    );
+
+    // 8. pending clear、phase = action
     return next.clearPendingAttack().copyWith(phase: CombatV1MatchPhase.action);
   }
 
@@ -710,6 +764,14 @@ class CombatV1Engine {
     String instanceId, {
     required CombatV1CardCatalog catalog,
   }) {
+    final invariantViolation = pendingStructuralConsistencyViolation(state);
+    if (invariantViolation != null) {
+      return CombatV1ActionCheck.failure(
+        invariantViolation,
+        CombatV1TechniqueLegalityReasonCode.malformedPendingState,
+      );
+    }
+
     if (state.phase != CombatV1MatchPhase.action) {
       return CombatV1ActionCheck.failure(
         'actionフェーズではありません（現在: ${state.phase.name}）',
@@ -720,7 +782,7 @@ class CombatV1Engine {
     final attacker = state.active;
     final entry = _findInHand(attacker, instanceId);
     if (entry == null) {
-      return const CombatV1ActionCheck.failure(
+      return CombatV1ActionCheck.failure(
         '指定されたカードは手札にありません',
         CombatV1TechniqueLegalityReasonCode.cardNotInHand,
       );
@@ -734,7 +796,7 @@ class CombatV1Engine {
       );
     }
     if (definedCategory == CombatV1CardCategory.counter) {
-      return const CombatV1ActionCheck.failure(
+      return CombatV1ActionCheck.failure(
         'COUNTERカードはTECHNIQUEとして使用できません',
         CombatV1TechniqueLegalityReasonCode.counterCannotAttack,
       );
@@ -755,14 +817,14 @@ class CombatV1Engine {
     }
 
     if (technique.category == CombatV1CardCategory.finisher) {
-      return const CombatV1ActionCheck.failure(
+      return CombatV1ActionCheck.failure(
         'FINISHERはまだ実装されていません（Phase 9で実装予定）',
         CombatV1TechniqueLegalityReasonCode.finisherNotImplemented,
       );
     }
 
     if (!technique.isStaticDataValid) {
-      return const CombatV1ActionCheck.failure(
+      return CombatV1ActionCheck.failure(
         '技の静的データが不正です（ENERGY COST・DMG・HEATのいずれかが不正です）',
         CombatV1TechniqueLegalityReasonCode.invalidTechniqueData,
       );
@@ -815,6 +877,14 @@ class CombatV1Engine {
     required CombatV1CardCatalog catalog,
     required CombatV1RulesConfig rules,
   }) {
+    final invariantViolation = pendingStructuralConsistencyViolation(state);
+    if (invariantViolation != null) {
+      return CombatV1CounterActionCheck.failure(
+        invariantViolation,
+        CombatV1CounterLegalityReasonCode.malformedPendingState,
+      );
+    }
+
     if (state.phase != CombatV1MatchPhase.counterResponsePending) {
       return CombatV1CounterActionCheck.failure(
         'counterResponsePendingフェーズではありません（現在: ${state.phase.name}）',
@@ -824,7 +894,7 @@ class CombatV1Engine {
 
     final pending = state.pendingAttack;
     if (pending == null) {
-      return const CombatV1CounterActionCheck.failure(
+      return CombatV1CounterActionCheck.failure(
         '応答待ちの攻撃がありません',
         CombatV1CounterLegalityReasonCode.noPendingAttack,
       );
@@ -833,7 +903,7 @@ class CombatV1Engine {
     final defender = state.opponent;
     final entry = _findInHand(defender, instanceId);
     if (entry == null) {
-      return const CombatV1CounterActionCheck.failure(
+      return CombatV1CounterActionCheck.failure(
         '指定されたカードは防御側の手札にありません',
         CombatV1CounterLegalityReasonCode.cardNotInHand,
       );
@@ -847,7 +917,7 @@ class CombatV1Engine {
       );
     }
     if (definedCategory != CombatV1CardCategory.counter) {
-      return const CombatV1CounterActionCheck.failure(
+      return CombatV1CounterActionCheck.failure(
         'COUNTER以外のカードはCOUNTERとして使用できません',
         CombatV1CounterLegalityReasonCode.notCounterCard,
       );
@@ -865,14 +935,14 @@ class CombatV1Engine {
     }
 
     if (counter.attribute == CombatV1EnergyAttribute.wild) {
-      return const CombatV1CounterActionCheck.failure(
+      return CombatV1CounterActionCheck.failure(
         'このCOUNTERのattributeがwildです（Catalog validation違反データ）',
         CombatV1CounterLegalityReasonCode.wildAttribute,
       );
     }
 
     if (!techniqueFamilyMatchesCounter(counter, pending.family)) {
-      return const CombatV1CounterActionCheck.failure(
+      return CombatV1CounterActionCheck.failure(
         '攻撃の技系統・技系統グループのいずれとも一致しません',
         CombatV1CounterLegalityReasonCode.familyGroupMismatch,
       );

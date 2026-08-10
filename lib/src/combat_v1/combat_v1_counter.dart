@@ -18,14 +18,21 @@ import 'combat_v1_enums.dart';
 /// （immutableなSetへ変換すると重複自体が構造的に不可能になり、Catalog
 /// validationの対応するエラー種別が到達不能になってしまうため、あえて
 /// `List`のままにしている）。
+///
+/// コンストラクタで防御的コピー（`List.of`で複製した上で
+/// `List.unmodifiable`にラップ）を行い、呼び出し側が渡したmutableな
+/// Listを構築後に外部から変更してもこの定義の内容が変わらないようにする
+/// （Phase 4 Codexレビュー指摘M3）。`List.of`は重複を保持したままコピー
+/// するため、Catalog validationの重複検出は引き続き機能する。
 class CombatV1Counter {
-  const CombatV1Counter({
+  CombatV1Counter({
     required this.id,
     required this.name,
     required this.attribute,
-    this.counterableFamilies = const [],
-    this.counterableGroups = const [],
-  });
+    List<CombatV1TechniqueFamily> counterableFamilies = const [],
+    List<CombatV1TechniqueFamilyGroup> counterableGroups = const [],
+  }) : counterableFamilies = List.unmodifiable(List.of(counterableFamilies)),
+       counterableGroups = List.unmodifiable(List.of(counterableGroups));
 
   final String id;
   final String name;

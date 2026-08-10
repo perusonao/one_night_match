@@ -3,10 +3,14 @@
 // docs/design/combat_v1_phase1_design.md 4章、テスト項目31-H）。
 //
 // Phase 3 Codexレビューで、atomicity testのsnapshotがMatchState全体を
-// 比較していない点が指摘された（Phase 3レビューM4）。Phase
-// 4では[_FullStateSnapshot]でplayerA/playerB全field・sharedHeat・
-// activePlayerIndex・turnNumber・phase・pendingAttack・logを含めて
-// 意味的完全同値であることを検証する。
+// 比較していない点が指摘された（Phase 3レビューM4）。Phase 4では
+// [_FullStateSnapshot]でplayerA/playerB全field（wrestlerId/wrestlerName/
+// maxHp/hp/koc/pinCardsHeld/posture/energyPool/spentEnergy/hand/drawPile/
+// discardPile/reshuffleCount/techniquesUsedThisTurn）・matchId・
+// sharedHeat・activePlayerIndex・turnNumber・phase・pendingAttack全field・
+// lastSuccessfulTechnique・log内容全体を含めて意味的完全同値であることを
+// 検証する（単なるinstanceId一覧やlist長ではなく、値そのものを比較する。
+// Phase 4 Codexレビュー指摘M1）。
 
 import 'dart:math';
 
@@ -17,94 +21,184 @@ import 'package:one_night_match/src/combat_v1/combat_v1_deck_validation.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_engine.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_match_state.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_pending_attack.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
 
 import 'combat_v1_test_fixtures.dart';
 
+/// カード1枚を(instanceId, cardId, category)のタプルとして比較する
+/// （instanceIdだけでなくcardId/categoryも意味的に一致することを要求する、
+/// Phase 4 Codexレビュー指摘M1）。
+(String, String, CombatV1CardCategory) _cardTuple(CombatV1DeckEntry e) =>
+    (e.instanceId, e.cardId, e.category);
+
+List<(String, String, CombatV1CardCategory)> _cardTuples(
+  List<CombatV1DeckEntry> entries,
+) => entries.map(_cardTuple).toList();
+
 /// [CombatV1MatchState]の全fieldを比較するsnapshot（Phase 3 Codexレビュー
-/// M4「atomicity testのsnapshotがMatchState全体を比較していない」への
-/// Phase 4対応）。
+/// M4／Phase 4 Codexレビュー指摘M1対応）。
 class _FullStateSnapshot {
   _FullStateSnapshot(CombatV1MatchState s)
-    : playerA = _PlayerSnapshot(s.playerA),
+    : matchId = s.matchId,
+      playerA = _PlayerSnapshot(s.playerA),
       playerB = _PlayerSnapshot(s.playerB),
       activePlayerIndex = s.activePlayerIndex,
       sharedHeat = s.sharedHeat,
       turnNumber = s.turnNumber,
       phase = s.phase,
-      pendingAttackCardInstanceId = s.pendingAttack?.attackCardInstance.instanceId,
-      logLength = s.log.length;
+      pendingAttack = s.pendingAttack == null
+          ? null
+          : _PendingAttackSnapshot(s.pendingAttack!),
+      lastSuccessfulTechniqueCardInstanceId =
+          s.lastSuccessfulTechnique?.cardInstanceId,
+      log = List.of(s.log);
 
+  final String matchId;
   final _PlayerSnapshot playerA;
   final _PlayerSnapshot playerB;
   final int activePlayerIndex;
   final int sharedHeat;
   final int turnNumber;
   final CombatV1MatchPhase phase;
-  final String? pendingAttackCardInstanceId;
-  final int logLength;
+  final _PendingAttackSnapshot? pendingAttack;
+  final String? lastSuccessfulTechniqueCardInstanceId;
+  final List<String> log;
 
   void expectUnchanged(CombatV1MatchState after, {String? reason}) {
+    expect(after.matchId, matchId, reason: '$reason: matchId');
     playerA.expectUnchanged(after.playerA, label: 'playerA', reason: reason);
     playerB.expectUnchanged(after.playerB, label: 'playerB', reason: reason);
     expect(after.activePlayerIndex, activePlayerIndex, reason: '$reason: activePlayerIndex');
     expect(after.sharedHeat, sharedHeat, reason: '$reason: sharedHeat');
     expect(after.turnNumber, turnNumber, reason: '$reason: turnNumber');
     expect(after.phase, phase, reason: '$reason: phase');
+    if (pendingAttack == null) {
+      expect(after.pendingAttack, isNull, reason: '$reason: pendingAttack');
+    } else {
+      expect(after.pendingAttack, isNotNull, reason: '$reason: pendingAttack');
+      pendingAttack!.expectUnchanged(after.pendingAttack!, reason: reason);
+    }
     expect(
-      after.pendingAttack?.attackCardInstance.instanceId,
-      pendingAttackCardInstanceId,
-      reason: '$reason: pendingAttack',
+      after.lastSuccessfulTechnique?.cardInstanceId,
+      lastSuccessfulTechniqueCardInstanceId,
+      reason: '$reason: lastSuccessfulTechnique',
     );
-    expect(after.log.length, logLength, reason: '$reason: log');
+    expect(List.of(after.log), log, reason: '$reason: log');
+  }
+}
+
+class _PendingAttackSnapshot {
+  _PendingAttackSnapshot(CombatV1PendingAttack p)
+    : attackerPlayerIndex = p.attackerPlayerIndex,
+      defenderPlayerIndex = p.defenderPlayerIndex,
+      attackCard = _cardTuple(p.attackCardInstance),
+      category = p.category,
+      attribute = p.attribute,
+      family = p.family,
+      energyCostAmounts = Map.of(p.energyCost.amounts),
+      damage = p.damage,
+      heatGain = p.heatGain,
+      requiredOpponentState = p.requiredOpponentState,
+      resultOpponentState = p.resultOpponentState,
+      directPin = p.directPin,
+      submissionHold = p.submissionHold,
+      finisherType = p.finisherType;
+
+  final int attackerPlayerIndex;
+  final int defenderPlayerIndex;
+  final (String, String, CombatV1CardCategory) attackCard;
+  final CombatV1CardCategory category;
+  final CombatV1EnergyAttribute attribute;
+  final CombatV1TechniqueFamily family;
+  final Map<CombatV1EnergyAttribute, int> energyCostAmounts;
+  final int damage;
+  final int heatGain;
+  final CombatV1WrestlerPosture? requiredOpponentState;
+  final CombatV1WrestlerPosture? resultOpponentState;
+  final bool directPin;
+  final bool submissionHold;
+  final CombatV1FinisherType? finisherType;
+
+  void expectUnchanged(CombatV1PendingAttack after, {String? reason}) {
+    expect(after.attackerPlayerIndex, attackerPlayerIndex, reason: '$reason: pending.attacker');
+    expect(after.defenderPlayerIndex, defenderPlayerIndex, reason: '$reason: pending.defender');
+    expect(_cardTuple(after.attackCardInstance), attackCard, reason: '$reason: pending.card');
+    expect(after.category, category, reason: '$reason: pending.category');
+    expect(after.attribute, attribute, reason: '$reason: pending.attribute');
+    expect(after.family, family, reason: '$reason: pending.family');
+    expect(
+      after.energyCost.amounts,
+      equals(energyCostAmounts),
+      reason: '$reason: pending.energyCost',
+    );
+    expect(after.damage, damage, reason: '$reason: pending.damage');
+    expect(after.heatGain, heatGain, reason: '$reason: pending.heatGain');
+    expect(
+      after.requiredOpponentState,
+      requiredOpponentState,
+      reason: '$reason: pending.requiredOpponentState',
+    );
+    expect(
+      after.resultOpponentState,
+      resultOpponentState,
+      reason: '$reason: pending.resultOpponentState',
+    );
+    expect(after.directPin, directPin, reason: '$reason: pending.directPin');
+    expect(after.submissionHold, submissionHold, reason: '$reason: pending.submissionHold');
+    expect(after.finisherType, finisherType, reason: '$reason: pending.finisherType');
   }
 }
 
 class _PlayerSnapshot {
   _PlayerSnapshot(CombatV1PlayerState p)
-    : hp = p.hp,
+    : wrestlerId = p.wrestlerId,
+      wrestlerName = p.wrestlerName,
+      maxHp = p.maxHp,
+      hp = p.hp,
       koc = p.koc,
       pinCardsHeld = p.pinCardsHeld,
       posture = p.posture,
+      energyPoolAmounts = Map.of(p.energyPool.amounts),
       spentEnergy = Map.of(p.spentEnergy),
-      hand = p.hand.map((e) => e.instanceId).toList(),
-      drawPile = p.drawPile.map((e) => e.instanceId).toList(),
-      discardPile = p.discardPile.map((e) => e.instanceId).toList(),
+      hand = _cardTuples(p.hand),
+      drawPile = _cardTuples(p.drawPile),
+      discardPile = _cardTuples(p.discardPile),
       reshuffleCount = p.reshuffleCount,
       techniquesUsedThisTurn = p.techniquesUsedThisTurn;
 
+  final String wrestlerId;
+  final String wrestlerName;
+  final int maxHp;
   final int hp;
   final int koc;
   final int pinCardsHeld;
   final CombatV1WrestlerPosture posture;
+  final Map<CombatV1EnergyAttribute, int> energyPoolAmounts;
   final Map<CombatV1EnergyAttribute, int> spentEnergy;
-  final List<String> hand;
-  final List<String> drawPile;
-  final List<String> discardPile;
+  final List<(String, String, CombatV1CardCategory)> hand;
+  final List<(String, String, CombatV1CardCategory)> drawPile;
+  final List<(String, String, CombatV1CardCategory)> discardPile;
   final int reshuffleCount;
   final int techniquesUsedThisTurn;
 
   void expectUnchanged(CombatV1PlayerState after, {required String label, String? reason}) {
+    expect(after.wrestlerId, wrestlerId, reason: '$reason: $label.wrestlerId');
+    expect(after.wrestlerName, wrestlerName, reason: '$reason: $label.wrestlerName');
+    expect(after.maxHp, maxHp, reason: '$reason: $label.maxHp');
     expect(after.hp, hp, reason: '$reason: $label.hp');
     expect(after.koc, koc, reason: '$reason: $label.koc');
     expect(after.pinCardsHeld, pinCardsHeld, reason: '$reason: $label.pinCardsHeld');
     expect(after.posture, posture, reason: '$reason: $label.posture');
+    expect(
+      after.energyPool.amounts,
+      equals(energyPoolAmounts),
+      reason: '$reason: $label.energyPool',
+    );
     expect(after.spentEnergy, equals(spentEnergy), reason: '$reason: $label.spentEnergy');
-    expect(
-      after.hand.map((e) => e.instanceId).toList(),
-      hand,
-      reason: '$reason: $label.hand',
-    );
-    expect(
-      after.drawPile.map((e) => e.instanceId).toList(),
-      drawPile,
-      reason: '$reason: $label.drawPile',
-    );
-    expect(
-      after.discardPile.map((e) => e.instanceId).toList(),
-      discardPile,
-      reason: '$reason: $label.discardPile',
-    );
+    expect(_cardTuples(after.hand), hand, reason: '$reason: $label.hand');
+    expect(_cardTuples(after.drawPile), drawPile, reason: '$reason: $label.drawPile');
+    expect(_cardTuples(after.discardPile), discardPile, reason: '$reason: $label.discardPile');
     expect(after.reshuffleCount, reshuffleCount, reason: '$reason: $label.reshuffleCount');
     expect(
       after.techniquesUsedThisTurn,
@@ -356,7 +450,7 @@ void main() {
       techniques: fixtureTechniques,
       counters: {
         ...fixtureCounters,
-        'ctr_wild': const CombatV1Counter(
+        'ctr_wild': CombatV1Counter(
           id: 'ctr_wild',
           name: '不正カウンター',
           attribute: CombatV1EnergyAttribute.wild,
@@ -408,5 +502,130 @@ void main() {
       throwsA(isA<CombatV1IllegalActionException>()),
     );
     snapshot.expectUnchanged(resolved, reason: '二重response');
+  });
+
+  group('malformed pending — Command実行前ガード（18、Phase 4 Codexレビュー指摘H1）', () {
+    test('malformed_pending_attacker_index_is_rejected: '
+        'pending.attackerPlayerIndexがstate.activePlayerIndexと不一致なら拒否', () {
+      final pending = pendingState();
+      // activePlayerIndex==0のまま、pending.attackerPlayerIndexだけ1に
+      // すり替えた不正なpendingへ差し替える（本来到達しない直接構築）。
+      final malformedPending = CombatV1PendingAttack(
+        attackerPlayerIndex: 1, // 本来0であるべき
+        defenderPlayerIndex: 0,
+        attackCardInstance: pending.pendingAttack!.attackCardInstance,
+        category: pending.pendingAttack!.category,
+        attribute: pending.pendingAttack!.attribute,
+        family: pending.pendingAttack!.family,
+        energyCost: pending.pendingAttack!.energyCost,
+        damage: pending.pendingAttack!.damage,
+        heatGain: pending.pendingAttack!.heatGain,
+      );
+      final malformedState = pending.copyWith(pendingAttack: malformedPending);
+      final snapshot = _FullStateSnapshot(malformedState);
+
+      expect(
+        () => CombatV1Engine.playCounter(
+          malformedState,
+          'ctr1',
+          catalog: fixtureCatalog,
+          rules: fixtureRules,
+        ),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(malformedState, reason: 'malformed attacker index (playCounter)');
+
+      expect(
+        () => CombatV1Engine.declineCounter(malformedState),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(malformedState, reason: 'malformed attacker index (declineCounter)');
+    });
+
+    test('malformed_pending_defender_index_is_rejected: '
+        'pending.defenderPlayerIndexが期待値と不一致なら拒否', () {
+      final pending = pendingState();
+      // activePlayerIndex==0のまま、pending.defenderPlayerIndexを
+      // attackerPlayerIndexと同じ0にすり替えた不正なpending。
+      final malformedPending = CombatV1PendingAttack(
+        attackerPlayerIndex: 0,
+        defenderPlayerIndex: 0, // 本来1であるべき
+        attackCardInstance: pending.pendingAttack!.attackCardInstance,
+        category: pending.pendingAttack!.category,
+        attribute: pending.pendingAttack!.attribute,
+        family: pending.pendingAttack!.family,
+        energyCost: pending.pendingAttack!.energyCost,
+        damage: pending.pendingAttack!.damage,
+        heatGain: pending.pendingAttack!.heatGain,
+      );
+      final malformedState = pending.copyWith(pendingAttack: malformedPending);
+      final snapshot = _FullStateSnapshot(malformedState);
+
+      expect(
+        () => CombatV1Engine.playCounter(
+          malformedState,
+          'ctr1',
+          catalog: fixtureCatalog,
+          rules: fixtureRules,
+        ),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(malformedState, reason: 'malformed defender index (playCounter)');
+
+      expect(
+        () => CombatV1Engine.declineCounter(malformedState),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(malformedState, reason: 'malformed defender index (declineCounter)');
+    });
+
+    test('phase_pending_invariant_mismatch_is_rejected（Given A: '
+        'phase=action かつ pendingAttackが存在する不整合state）', () {
+      final pending = pendingState();
+      // phaseだけをactionへ戻し、pendingAttackはそのまま残した不整合state
+      // （本来到達しない直接構築）。
+      final malformedState = pending.copyWith(phase: CombatV1MatchPhase.action);
+      final snapshot = _FullStateSnapshot(malformedState);
+
+      expect(
+        () => CombatV1Engine.declareTechnique(
+          malformedState,
+          malformedState.active.hand.isEmpty ? 'dummy' : malformedState.active.hand.first.instanceId,
+          catalog: fixtureCatalog,
+        ),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(malformedState, reason: 'phase=action with pendingAttack present');
+    });
+
+    test('phase_pending_invariant_mismatch_is_rejected（Given B: '
+        'phase=counterResponsePending かつ pendingAttack=null）', () {
+      final malformedState = buildMatchState(
+        phase: CombatV1MatchPhase.counterResponsePending,
+        handA: const [attack],
+        handB: const [matchingCounter],
+      );
+      final snapshot = _FullStateSnapshot(malformedState);
+
+      expect(
+        () => CombatV1Engine.playCounter(
+          malformedState,
+          'ctr1',
+          catalog: fixtureCatalog,
+          rules: fixtureRules,
+        ),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(malformedState, reason: 'phase=pending, pendingAttack=null (playCounter)');
+
+      expect(
+        () => CombatV1Engine.declineCounter(malformedState),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(
+        malformedState,
+        reason: 'phase=pending, pendingAttack=null (declineCounter)',
+      );
+    });
   });
 }

@@ -472,3 +472,58 @@ Phase 3レビュー指摘（M1）を受け、`CombatV1PlayerStateInvariantErrorC
 `copyWith`パターンでは「明示的にnullへ戻す」ことと「省略（既存値維持）」を区別できないため、
 `pendingAttack`のクリア専用に`clearPendingAttack()`メソッドを追加した（`copyWith`の
 `pendingAttack`引数は非nullの差し替えにのみ使う）。
+
+---
+
+## 13. Phase 4 Codexレビュー修正（技術設計の差分）
+
+Phase 4実装のCodex第三者レビュー（BLOCKED判定はレビュー環境が古いbranchを参照したことが原因、
+実質判定はC. CHANGES REQUIRED）を受け、以下の技術的修正を行った。ゲームルール自体
+（`combat_rules_v1.md`）の新規追加はなく、Domain modelの不変条件強化・型安全性強化・後続Phaseが
+参照するためのDomain境界整備のみ。Phase 5/6/8/9の「処理」はこのレビュー対応でも一切実装していない。
+
+### 13.1 H1: PendingAttack/MatchState invariant
+
+`combat_v1_state_invariants.dart`へ2つの関数を追加した。
+
+- `pendingStructuralConsistencyViolation(state)`: pending/state間の安価な構造整合性チェック
+  （`phase`と`pendingAttack`存在の整合性、`attackerPlayerIndex`/`defenderPlayerIndex`の整合性）。
+  カードゾーンの走査は含まない。`CombatV1Engine`の`checkTechniqueLegality`/`checkCounterLegality`/
+  `declineCounter`の先頭で呼び出し、malformed pendingが誤ったplayerへ作用することを防ぐ
+  （毎Commandで全カードを重くvalidateする設計は避け、cheap invariantとdiagnostic
+  invariantを分離した）。
+- `validateMatchStateInvariants(state)`: カードゾーンの全件スキャンを含む完全な診断
+  （pending cardの二重所持、instanceIdの重複、pending
+  カードのcategory整合性）。Engine本体には自動配線せず、CPU/Simulator/テストからオプトインで
+  呼び出す想定（`validatePlayerStateInvariants`と同じ方針）。
+
+### 13.2 H2/H3: 成功Technique metadata
+
+`CombatV1PendingAttack`へ`directPin`/`submissionHold`/`finisherType`を追加した
+（`CombatV1Technique`の同名フィールドから宣言時点でスナップショットする）。新規ファイル
+`combat_v1_successful_technique_snapshot.dart`に`CombatV1SuccessfulTechniqueSnapshot`
+（immutable value object）を追加し、`CombatV1MatchState.lastSuccessfulTechnique`
+（nullable、match-level・ターン開始時にclearしない）として保持する。declineによる攻撃成立時
+（`_resolvePendingAttack`）にのみ更新し、`playCounter`（COUNTER成立）では更新しない。これらの値に
+よる分岐処理（PIN移行・SUBMISSION判定・FINISHER解禁等）はPhase 5/6/9まで実装しない。
+
+### 13.3 H4: `CombatV1ActionCheck`/`CombatV1CounterActionCheck`のassert非依存化
+
+`failure`ファクトリの`legal=false`/`reasonCode=legal`矛盾防止を、`assert`（release
+buildで無効化される）から、コンストラクタ本体内の無条件`ArgumentError`送出へ変更した。この
+検証のため`failure`は`const`コンストラクタではなくなった（`success`は矛盾しようがないため
+引き続き`const`）。呼び出し側の`const CombatV1ActionCheck.failure(...)`/
+`const CombatV1CounterActionCheck.failure(...)`はすべて`const`を外して更新した。
+
+### 13.4 M3: `CombatV1Counter`の防御的コピー
+
+`counterableFamilies`/`counterableGroups`をコンストラクタで`List.unmodifiable(List.of(...))`
+によりコピーするよう変更した。呼び出し側が渡した元のmutableなListを構築後に変更しても定義内容が
+変わらない。`List.of`は重複を保持したままコピーするため、Catalog
+validationの重複検出（`counterDuplicateFamily`/`counterDuplicateGroup`）は引き続き機能する。この
+変更により`CombatV1Counter`は`const`コンストラクタではなくなった（フィクスチャの
+`fixtureCounters`/`fixtureCatalog`を`const`から`final`へ変更した）。
+
+### 13.5 新規ファイル
+
+`combat_v1_successful_technique_snapshot.dart`（`lib/src/combat_v1/`）を追加した。

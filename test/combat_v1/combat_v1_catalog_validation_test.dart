@@ -26,7 +26,7 @@ const _validTechnique = CombatV1Technique(
   family: CombatV1TechniqueFamily.kick,
 );
 
-const _validCounter = CombatV1Counter(
+final _validCounter = CombatV1Counter(
   id: 'cv_counter',
   name: '検証用カウンター',
   attribute: CombatV1EnergyAttribute.strike,
@@ -149,7 +149,7 @@ void main() {
       final catalog = CombatV1CardCatalog(
         techniques: const {},
         counters: {
-          'wild_counter': const CombatV1Counter(
+          'wild_counter': CombatV1Counter(
             id: 'wild_counter',
             name: '不正カウンター',
             attribute: CombatV1EnergyAttribute.wild,
@@ -169,7 +169,7 @@ void main() {
       final catalog = CombatV1CardCatalog(
         techniques: const {},
         counters: {
-          'empty_counter': const CombatV1Counter(
+          'empty_counter': CombatV1Counter(
             id: 'empty_counter',
             name: '空カウンター',
             attribute: CombatV1EnergyAttribute.strike,
@@ -188,7 +188,7 @@ void main() {
       final catalog = CombatV1CardCatalog(
         techniques: const {},
         counters: {
-          'dup_family': const CombatV1Counter(
+          'dup_family': CombatV1Counter(
             id: 'dup_family',
             name: '重複family',
             attribute: CombatV1EnergyAttribute.strike,
@@ -211,7 +211,7 @@ void main() {
       final catalog = CombatV1CardCatalog(
         techniques: const {},
         counters: {
-          'dup_group': const CombatV1Counter(
+          'dup_group': CombatV1Counter(
             id: 'dup_group',
             name: '重複group',
             attribute: CombatV1EnergyAttribute.strike,
@@ -235,7 +235,7 @@ void main() {
       final catalog = CombatV1CardCatalog(
         techniques: const {},
         counters: {
-          'redundant': const CombatV1Counter(
+          'redundant': CombatV1Counter(
             id: 'redundant',
             name: '冗長カウンター',
             attribute: CombatV1EnergyAttribute.strike,
@@ -256,7 +256,7 @@ void main() {
       final catalog = CombatV1CardCatalog(
         techniques: const {},
         counters: {
-          'ok': const CombatV1Counter(
+          'ok': CombatV1Counter(
             id: 'ok',
             name: '非冗長カウンター',
             attribute: CombatV1EnergyAttribute.strike,

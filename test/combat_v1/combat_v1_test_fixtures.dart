@@ -194,7 +194,7 @@ const Map<String, CombatV1Technique> fixtureTechniques = {
 /// Phase 4でfamily/groupの成立判定に使う対象を設定する。
 /// docs/combat_rules_v1.md 3・7章（COUNTERカードのテスト用fixture方針）の広範囲/中範囲/専門の
 /// 方針に沿って3段階の範囲を用意する。
-const Map<String, CombatV1Counter> fixtureCounters = {
+final Map<String, CombatV1Counter> fixtureCounters = {
   /// 広範囲: STRIKE group全体を返せる（打属性で支払う）。
   'fx_counter_a': CombatV1Counter(
     id: 'fx_counter_a',
@@ -225,7 +225,7 @@ const Map<String, CombatV1Counter> fixtureCounters = {
 
 /// [fixtureTechniques]・[fixtureCounters]を横断参照するテスト用カタログ
 /// （Deck validation用、docs/combat_rules_v1.md 4章）。
-const CombatV1CardCatalog fixtureCatalog = CombatV1CardCatalog(
+final CombatV1CardCatalog fixtureCatalog = CombatV1CardCatalog(
   techniques: fixtureTechniques,
   counters: fixtureCounters,
 );
