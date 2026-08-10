@@ -142,6 +142,16 @@ extension CombatV1PinCountResultLabel on CombatV1PinCountResult {
 /// （stringで雑に持たない）。
 enum CombatV1PinSource { normal, directPin }
 
+/// SUBMISSIONの自動解決結果（docs/combat_rules_v1.md 10.1章、Phase 6）。
+///
+/// 防御側のKOCから一括で自動決定する（PINのKICK OUT自動判定と同じ思想、
+/// 防御側の任意選択は存在しない）。
+///
+/// - [escape]: 防御側がKOC（[CombatV1RulesConfig.submissionEscapeKocCost]）
+///   を支払い、SUBMISSIONから脱出する。
+/// - [giveUp]: 防御側がKOCを支払えず、攻撃側の勝利で試合が終了する。
+enum CombatV1SubmissionOutcome { escape, giveUp }
+
 extension CombatV1TechniqueFamilyGrouping on CombatV1TechniqueFamily {
   /// この技系統が属する上位分類（docs/combat_rules_v1.md「23.3章 Technique
   /// Family」）。Technique自身はgroupを保持せず、常にfamilyから導出する。

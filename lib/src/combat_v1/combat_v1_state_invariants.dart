@@ -194,6 +194,26 @@ String? pinStateConsistencyViolation({
   return null;
 }
 
+/// SUBMISSION自動遷移（`_resolvePendingAttack`、Technique成功のstate commit
+/// より前）が操作する[defender]がPhase 6の最低限のstate invariantを満たして
+/// いるかを検証する軽量チェック（[pinStateConsistencyViolation]と同じ位置
+/// 付け）。
+///
+/// - `defender.koc >= 0`
+///
+/// これが崩れたstateでKOC消費（ESCAPE）を計算すると、正常な結果として誤って
+/// 解釈されてしまう（docs/combat_rules_v1.md 10.1章）。
+///
+/// 不整合があれば人間可読な理由を、無ければ`null`を返す。
+String? submissionStateConsistencyViolation({
+  required CombatV1PlayerState defender,
+}) {
+  if (defender.koc < 0) {
+    return '防御側のkocが負数です（koc:${defender.koc}）';
+  }
+  return null;
+}
+
 /// pending/state間の構造的整合性（`phase`と`pendingAttack`存在の整合性、
 /// `attackerPlayerIndex`/`defenderPlayerIndex`の整合性）を検証する軽量
 /// チェック（Phase 4 Codexレビュー指摘H1対応）。

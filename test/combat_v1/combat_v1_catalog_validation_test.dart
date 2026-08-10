@@ -142,6 +142,83 @@ void main() {
         contains(CombatV1CatalogValidationErrorCode.catalogKeyIdMismatch),
       );
     });
+
+    test(
+      'directPin=trueかつsubmissionHold=true（category!=finisher）は排他違反'
+      '（docs/combat_rules_v1.md 10章、Phase 6）',
+      () {
+        final catalog = CombatV1CardCatalog(
+          techniques: {
+            'both': const CombatV1Technique(
+              id: 'both',
+              name: '排他違反技',
+              category: CombatV1CardCategory.normal,
+              attribute: CombatV1EnergyAttribute.throwing,
+              energyCost: CombatV1EnergyCost({
+                CombatV1EnergyAttribute.throwing: 1,
+              }),
+              damage: 20,
+              heatGain: 20,
+              directPin: true,
+              submissionHold: true,
+              family: CombatV1TechniqueFamily.backdrop,
+            ),
+          },
+          counters: const {},
+        );
+        final result = validateCatalog(catalog);
+        expect(result.isValid, isFalse);
+        expect(
+          result.errors.map((e) => e.code),
+          contains(
+            CombatV1CatalogValidationErrorCode
+                .techniqueDirectPinSubmissionHoldConflict,
+          ),
+        );
+      },
+    );
+
+    test('directPinのみ、submissionHoldのみはそれぞれ単独で許可される', () {
+      final catalog = CombatV1CardCatalog(
+        techniques: {
+          'direct_pin_only': const CombatV1Technique(
+            id: 'direct_pin_only',
+            name: 'DIRECT PINのみ',
+            category: CombatV1CardCategory.normal,
+            attribute: CombatV1EnergyAttribute.throwing,
+            energyCost: CombatV1EnergyCost({
+              CombatV1EnergyAttribute.throwing: 1,
+            }),
+            damage: 20,
+            heatGain: 20,
+            directPin: true,
+            family: CombatV1TechniqueFamily.backdrop,
+          ),
+          'submission_hold_only': const CombatV1Technique(
+            id: 'submission_hold_only',
+            name: 'submissionHoldのみ',
+            category: CombatV1CardCategory.normal,
+            attribute: CombatV1EnergyAttribute.joint,
+            energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.joint: 1}),
+            damage: 20,
+            heatGain: 20,
+            submissionHold: true,
+            family: CombatV1TechniqueFamily.crossface,
+          ),
+        },
+        counters: const {},
+      );
+      final result = validateCatalog(catalog);
+      expect(
+        result.errors.map((e) => e.code),
+        isNot(
+          contains(
+            CombatV1CatalogValidationErrorCode
+                .techniqueDirectPinSubmissionHoldConflict,
+          ),
+        ),
+      );
+    });
   });
 
   group('validateCatalog — Counter', () {

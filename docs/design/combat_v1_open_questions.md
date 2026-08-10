@@ -61,6 +61,21 @@ Phase 1のCore Skeleton実装は、現在のSSOT（`combat_rules_v1.md`）と技
 
 ---
 
+## Phase 6時点で解決した項目（Phase 6セッションで確定）
+
+以下は前回（Phase 0）時点で「Phase 6着手前に決める必要がある」としていたが、Phase 6セッションで
+明示的に確定した。`combat_rules_v1.md`本文（一次資料由来）には記載がなかったため、Phase
+6実装セッション内でユーザーへ確認したうえで正式仕様として採用した。
+
+| # | 項目 | 確定内容 | 関連章 |
+|---|---|---|---|
+| N | 通常SUBMISSIONへの突入方法 | 自動トリガーのみ。`submissionHold=true`のTECHNIQUEがCOUNTERされず成立し、解決後の相手HPが閾値（既定50）以下ならDIRECT PINと同じ仕組みで同一Command内で自動的にSUBMISSIONへ移行する。`declarePin`に相当する独立APIは追加しない | `combat_rules_v1.md` 10.1章 |
+| O | ESCAPE/GIVE UPの判定方式 | 完全自動。防御側KOC>=1（既定コスト1）なら自動的にESCAPE成功、KOC==0なら自動的にGIVE UP。PINのKICK OUT自動判定と同じ思想で、防御側の任意選択は存在しない | `combat_rules_v1.md` 10.1章 |
+| P | ESCAPE成功後のturn/activePlayerIndexの扱い | 攻撃側のターンを終了し、ESCAPEした側（防御側）の新しいターンへ進める（PIN 1/2カウントと同じ扱い） | `combat_rules_v1.md` 10.1章 |
+| Q | directPin/submissionHoldの排他性 | 同一TECHNIQUEに両方trueを設定することをCatalog validationで禁止する（`category==finisher`の技は対象外） | `combat_rules_v1.md` 10.1章・23.6章 |
+
+---
+
 ## 後続Phaseまで保留可能な項目
 
 ### 1. PINカード「共有4枚」の管理構造
