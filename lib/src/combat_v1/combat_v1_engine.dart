@@ -1521,8 +1521,11 @@ class CombatV1Engine {
   /// 3. cardIdが[catalog]に存在するか
   /// 4. COUNTERカードではないか（COUNTERはTECHNIQUEとして使用不可、7章）
   /// 5. `entry.category`とTechnique定義の`category`が一致するか
-  /// 6. FINISHERなら共有HEATが解禁閾値に達しているか（13章、Phase 9）
-  /// 7. Technique定義の静的データが有効か（[CombatV1Technique.isStaticDataValid]）
+  /// 6. Technique定義の静的データが有効か（[CombatV1Technique.isStaticDataValid]。
+  ///    category/finisherTypeの不変条件チェックを含む——資源（HEAT）の
+  ///    有無を判定する前に、そもそもカードのデータが壊れていないかを
+  ///    先に確認する、Phase 9 Codexレビュー指摘対応）
+  /// 7. FINISHERなら共有HEATが解禁閾値に達しているか（13章、Phase 9）
   /// 8. `requiredOpponentState`を満たすか
   /// 9. ENERGYを支払えるか（ワイルド補完込み、5.1章）
   ///
@@ -1624,6 +1627,24 @@ class CombatV1Engine {
       );
     }
 
+    // データの妥当性（静的データvalidation）を、資源（HEAT）判定より先に
+    // 確認する。category==finisherかつfinisherType==nullのような壊れた
+    // データが、HEAT解禁チェックだけを通過して合法と誤判定されないように
+    // するため（Phase 9 Codexレビュー指摘「Reject finishers without a
+    // resolution type」対応。assertが無効化されるビルドでも
+    // [CombatV1Technique.hasConsistentFinisherType]経由でここが最終防衛線
+    // になる）。
+    if (!technique.isStaticDataValid) {
+      return CombatV1ActionCheck.failure(
+        !technique.hasConsistentFinisherType
+            ? '技の静的データが不正です（category==finisherならfinisherTypeが'
+                  '必須、category!=finisherならfinisherTypeはnullである'
+                  '必要があります）'
+            : '技の静的データが不正です（ENERGY COST・DMG・HEATのいずれかが不正です）',
+        CombatV1TechniqueLegalityReasonCode.invalidTechniqueData,
+      );
+    }
+
     if (technique.category == CombatV1CardCategory.finisher &&
         !finisherUnlocked(sharedHeat: state.sharedHeat, rules: rules)) {
       return CombatV1ActionCheck.failure(
@@ -1631,13 +1652,6 @@ class CombatV1Engine {
         '使用できません（現在: ${state.sharedHeat}、docs/combat_rules_v1.md '
         '12・13章）',
         CombatV1TechniqueLegalityReasonCode.finisherHeatNotReached,
-      );
-    }
-
-    if (!technique.isStaticDataValid) {
-      return CombatV1ActionCheck.failure(
-        '技の静的データが不正です（ENERGY COST・DMG・HEATのいずれかが不正です）',
-        CombatV1TechniqueLegalityReasonCode.invalidTechniqueData,
       );
     }
 

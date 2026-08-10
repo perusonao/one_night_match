@@ -22,12 +22,16 @@
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_catalog_validation.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_deck.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_deck_validation.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_energy.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_engine.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_finisher_rules.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_match_state.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_state_invariants.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_technique.dart';
 
 import 'combat_v1_test_fixtures.dart';
 
@@ -551,6 +555,342 @@ void main() {
       );
       expect(started.phase, CombatV1MatchPhase.discard);
       expect(started.sharedHeat, 0);
+    });
+  });
+
+  // Phase 9 Codexレビュー指摘「Reject finishers without a resolution type」
+  // （P2）対応: category==finisherかつfinisherType==nullの技が、assertが
+  // 無効化されたビルドではruntime validationで拒否されず、HEAT解禁後に
+  // normal FINISHER相当として黙って解決されてしまう問題への再発防止テスト。
+  //
+  // 通常のコンストラクタは、この不変条件をassertで強制しているため、Dart
+  // assertionが有効な環境（flutter testを含む）では不正な組み合わせを
+  // 直接構築できない。以下は[CombatV1Technique.unsafeForTesting]
+  // （テスト専用、assertを迂回する別コンストラクタ）を使い、assertionが
+  // 無効化されたビルドで不正データが構築されてしまった場合を再現する。
+  group('I. category/finisherType不変条件（Phase 9 Codexレビュー指摘対応）', () {
+    test(
+      '通常のコンストラクタはfinisherType==nullのFINISHERをassertで拒否する'
+      '（既存の防御、変更なし）',
+      () {
+        expect(
+          () => CombatV1Technique(
+            id: 'bad_finisher_ctor_assert',
+            name: '不正フィニッシャー（コンストラクタassert確認用）',
+            category: CombatV1CardCategory.finisher,
+            attribute: CombatV1EnergyAttribute.strike,
+            energyCost: const CombatV1EnergyCost({
+              CombatV1EnergyAttribute.strike: 2,
+            }),
+            damage: 30,
+            heatGain: 30,
+            family: CombatV1TechniqueFamily.lariat,
+            // finisherTypeを指定しない（null）。
+          ),
+          throwsA(isA<AssertionError>()),
+        );
+      },
+    );
+
+    test('hasConsistentFinisherType: category==finisherかつfinisherType==nullはfalse', () {
+      const invalid = CombatV1Technique.unsafeForTesting(
+        id: 'bad_finisher_null_type',
+        name: '不正フィニッシャー（finisherType無し）',
+        category: CombatV1CardCategory.finisher,
+        attribute: CombatV1EnergyAttribute.strike,
+        energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 2}),
+        damage: 30,
+        heatGain: 30,
+        family: CombatV1TechniqueFamily.lariat,
+        // finisherType: null（既定値のまま）。
+      );
+      expect(invalid.hasConsistentFinisherType, isFalse);
+      expect(invalid.isStaticDataValid, isFalse);
+    });
+
+    test(
+      'hasConsistentFinisherType: category!=finisherかつfinisherType!=null'
+      'もfalse（対称ケース）',
+      () {
+        const invalid = CombatV1Technique.unsafeForTesting(
+          id: 'bad_normal_with_type',
+          name: '不正NORMAL技（finisherType誤設定）',
+          category: CombatV1CardCategory.normal,
+          attribute: CombatV1EnergyAttribute.strike,
+          energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 1}),
+          damage: 10,
+          heatGain: 10,
+          family: CombatV1TechniqueFamily.elbow,
+          finisherType: CombatV1FinisherType.normal,
+        );
+        expect(invalid.hasConsistentFinisherType, isFalse);
+        expect(invalid.isStaticDataValid, isFalse);
+      },
+    );
+
+    test('hasConsistentFinisherType: フィクスチャ技はすべて不変条件を満たす（regression）', () {
+      for (final technique in fixtureTechniques.values) {
+        expect(
+          technique.hasConsistentFinisherType,
+          isTrue,
+          reason: '${technique.id}はcategory/finisherTypeの不変条件を満たすべき',
+        );
+      }
+    });
+
+    test(
+      'checkTechniqueLegality: HEAT解禁済みでもfinisherType==nullのFINISHERは'
+      'invalidTechniqueDataで拒否される',
+      () {
+        const invalidFinisher = CombatV1Technique.unsafeForTesting(
+          id: 'bad_finisher_heat_ok',
+          name: '不正フィニッシャー（HEAT解禁済み）',
+          category: CombatV1CardCategory.finisher,
+          attribute: CombatV1EnergyAttribute.strike,
+          energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 2}),
+          damage: 30,
+          heatGain: 30,
+          family: CombatV1TechniqueFamily.lariat,
+        );
+        final catalog = CombatV1CardCatalog(
+          techniques: {
+            ...fixtureTechniques,
+            invalidFinisher.id: invalidFinisher,
+          },
+          counters: fixtureCounters,
+        );
+        final entry = CombatV1DeckEntry(
+          instanceId: 'atk_bad_finisher_heat_ok',
+          cardId: invalidFinisher.id,
+          category: CombatV1CardCategory.finisher,
+        );
+        final state = buildMatchState(
+          handA: [entry],
+          sharedHeat: 500, // HEATは十分に解禁済み
+        );
+        final check = CombatV1Engine.checkTechniqueLegality(
+          state,
+          'atk_bad_finisher_heat_ok',
+          catalog: catalog,
+        );
+        expect(check.legal, isFalse);
+        expect(
+          check.reasonCode,
+          CombatV1TechniqueLegalityReasonCode.invalidTechniqueData,
+        );
+      },
+    );
+
+    test(
+      'checkTechniqueLegality: HEAT不足でもデータ不正が優先され'
+      'invalidTechniqueDataで拒否される（finisherHeatNotReachedにはならない）',
+      () {
+        const invalidFinisher = CombatV1Technique.unsafeForTesting(
+          id: 'bad_finisher_low_heat',
+          name: '不正フィニッシャー（HEAT不足）',
+          category: CombatV1CardCategory.finisher,
+          attribute: CombatV1EnergyAttribute.strike,
+          energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 2}),
+          damage: 30,
+          heatGain: 30,
+          family: CombatV1TechniqueFamily.lariat,
+        );
+        final catalog = CombatV1CardCatalog(
+          techniques: {
+            ...fixtureTechniques,
+            invalidFinisher.id: invalidFinisher,
+          },
+          counters: fixtureCounters,
+        );
+        final entry = CombatV1DeckEntry(
+          instanceId: 'atk_bad_finisher_low_heat',
+          cardId: invalidFinisher.id,
+          category: CombatV1CardCategory.finisher,
+        );
+        final state = buildMatchState(handA: [entry], sharedHeat: 0);
+        final check = CombatV1Engine.checkTechniqueLegality(
+          state,
+          'atk_bad_finisher_low_heat',
+          catalog: catalog,
+        );
+        expect(check.legal, isFalse);
+        expect(
+          check.reasonCode,
+          CombatV1TechniqueLegalityReasonCode.invalidTechniqueData,
+        );
+      },
+    );
+
+    test('declareTechnique: 不正FINISHERの宣言は例外を送出しstateを一切変更しない（atomicity）', () {
+      const invalidFinisher = CombatV1Technique.unsafeForTesting(
+        id: 'bad_finisher_declare',
+        name: '不正フィニッシャー（宣言テスト）',
+        category: CombatV1CardCategory.finisher,
+        attribute: CombatV1EnergyAttribute.strike,
+        energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 2}),
+        damage: 30,
+        heatGain: 30,
+        family: CombatV1TechniqueFamily.lariat,
+      );
+      final catalog = CombatV1CardCatalog(
+        techniques: {...fixtureTechniques, invalidFinisher.id: invalidFinisher},
+        counters: fixtureCounters,
+      );
+      final entry = CombatV1DeckEntry(
+        instanceId: 'atk_bad_finisher_declare',
+        cardId: invalidFinisher.id,
+        category: CombatV1CardCategory.finisher,
+      );
+      final state = buildMatchState(handA: [entry], sharedHeat: 500);
+
+      expect(
+        () => CombatV1Engine.declareTechnique(
+          state,
+          'atk_bad_finisher_declare',
+          catalog: catalog,
+        ),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      // state完全不変（宣言は一切コミットされていない）。
+      expect(state.playerA.hand.length, 1);
+      expect(state.playerA.hand.first.instanceId, 'atk_bad_finisher_declare');
+      expect(state.playerA.spentEnergy, isEmpty);
+      expect(state.phase, CombatV1MatchPhase.action);
+      expect(state.sharedHeat, 500);
+      expect(state.pendingAttack, isNull);
+    });
+
+    test(
+      'validateCatalog: finisherType==nullのFINISHERは'
+      'techniqueInvalidFinisherTypeで拒否される',
+      () {
+        const invalidFinisher = CombatV1Technique.unsafeForTesting(
+          id: 'bad_finisher_catalog',
+          name: '不正フィニッシャー（catalog検証）',
+          category: CombatV1CardCategory.finisher,
+          attribute: CombatV1EnergyAttribute.strike,
+          energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 2}),
+          damage: 30,
+          heatGain: 30,
+          family: CombatV1TechniqueFamily.lariat,
+        );
+        final catalog = CombatV1CardCatalog(
+          techniques: {invalidFinisher.id: invalidFinisher},
+          counters: const {},
+        );
+        final result = validateCatalog(catalog);
+        expect(result.isValid, isFalse);
+        expect(
+          result.errors.map((e) => e.code),
+          contains(
+            CombatV1CatalogValidationErrorCode.techniqueInvalidFinisherType,
+          ),
+        );
+      },
+    );
+
+    test(
+      'validateCatalog: category!=finisherなのにfinisherType!=nullも'
+      'techniqueInvalidFinisherTypeで拒否される（対称ケース）',
+      () {
+        const invalidNormal = CombatV1Technique.unsafeForTesting(
+          id: 'bad_normal_catalog',
+          name: '不正NORMAL技（catalog検証）',
+          category: CombatV1CardCategory.normal,
+          attribute: CombatV1EnergyAttribute.strike,
+          energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 1}),
+          damage: 10,
+          heatGain: 10,
+          family: CombatV1TechniqueFamily.elbow,
+          finisherType: CombatV1FinisherType.directPin,
+        );
+        final catalog = CombatV1CardCatalog(
+          techniques: {invalidNormal.id: invalidNormal},
+          counters: const {},
+        );
+        final result = validateCatalog(catalog);
+        expect(result.isValid, isFalse);
+        expect(
+          result.errors.map((e) => e.code),
+          contains(
+            CombatV1CatalogValidationErrorCode.techniqueInvalidFinisherType,
+          ),
+        );
+      },
+    );
+
+    test('validateCatalog: フィクスチャカタログはvalid（regression）', () {
+      final result = validateCatalog(fixtureCatalog);
+      expect(result.isValid, isTrue);
+    });
+  });
+
+  group('J. normal/directPin/submission FINISHER正常系のregression（修正後も従来どおり合法）', () {
+    test('normal FINISHER（fx_finisher_a）はHEAT解禁済みなら合法', () {
+      final state = buildMatchState(
+        handA: const [normalFinisher],
+        sharedHeat: 200,
+      );
+      final check = CombatV1Engine.checkTechniqueLegality(
+        state,
+        'atk_fin_normal',
+        catalog: fixtureCatalog,
+      );
+      expect(check.legal, isTrue);
+    });
+
+    test('directPin FINISHER（fx_finisher_b）はHEAT解禁済みなら合法', () {
+      final state = buildMatchState(
+        handA: const [directPinFinisher],
+        sharedHeat: 200,
+      );
+      final check = CombatV1Engine.checkTechniqueLegality(
+        state,
+        'atk_fin_direct',
+        catalog: fixtureCatalog,
+      );
+      expect(check.legal, isTrue);
+    });
+
+    test('submission FINISHER（fx_finisher_c）はHEAT解禁済みなら合法', () {
+      final state = buildMatchState(
+        handA: const [submissionFinisher],
+        sharedHeat: 200,
+      );
+      final check = CombatV1Engine.checkTechniqueLegality(
+        state,
+        'atk_fin_sub',
+        catalog: fixtureCatalog,
+      );
+      expect(check.legal, isTrue);
+    });
+  });
+
+  group('K. 非FINISHER Techniqueへのregressionなし', () {
+    test('NORMAL/SIGNATURE技はfinisherType==nullのままisStaticDataValid==true（regression）', () {
+      for (final technique in fixtureTechniques.values) {
+        if (technique.category == CombatV1CardCategory.finisher) continue;
+        expect(technique.finisherType, isNull);
+        expect(technique.isStaticDataValid, isTrue, reason: technique.id);
+      }
+    });
+
+    test('NORMAL技のcheckTechniqueLegalityはfinisherType関連チェックの影響を受けない', () {
+      const normalAttack = CombatV1DeckEntry(
+        instanceId: 'atk_normal_regress',
+        cardId: 'fx_normal_strike',
+        category: CombatV1CardCategory.normal,
+      );
+      final state = buildMatchState(
+        handA: const [normalAttack],
+        sharedHeat: 0,
+      );
+      final check = CombatV1Engine.checkTechniqueLegality(
+        state,
+        'atk_normal_regress',
+        catalog: fixtureCatalog,
+      );
+      expect(check.legal, isTrue);
     });
   });
 }

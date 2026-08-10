@@ -38,6 +38,38 @@ class CombatV1Technique {
          '（docs/design/combat_v1_phase1_design.md 2.4章の優先順位ルール）',
        );
 
+  /// テスト専用: 上記コンストラクタが強制する`category`/[finisherType]の
+  /// 不変条件チェック（2つのassert）を意図的に迂回してインスタンスを構築
+  /// する。
+  ///
+  /// Dart assertionが有効な環境（`flutter test`を含む）では、通常の
+  /// コンストラクタで不正な組み合わせ（例: `category==finisher`かつ
+  /// `finisherType==null`）を直接構築することはできない。しかし
+  /// assertionが無効化されたビルド（`flutter build --release`等）では
+  /// assertは実行されないため、そのようなデータが万一構築されてしまった
+  /// 場合に[isStaticDataValid]/[hasConsistentFinisherType]・
+  /// [CombatV1Engine.checkTechniqueLegality]・`validateCatalog`（
+  /// `combat_v1_catalog_validation.dart`）が正しく拒否できることを、
+  /// assertionが有効なテスト環境からでも検証できるようにするためだけに
+  /// 存在する（Phase 9 Codexレビュー指摘「Reject finishers without a
+  /// resolution type」対応）。Production/Catalogコードから呼び出しては
+  /// ならない。
+  const CombatV1Technique.unsafeForTesting({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.attribute,
+    required this.energyCost,
+    required this.damage,
+    required this.heatGain,
+    required this.family,
+    this.requiredOpponentState,
+    this.resultOpponentState,
+    this.directPin = false,
+    this.submissionHold = false,
+    this.finisherType,
+  });
+
   final String id;
   final String name;
 
@@ -82,6 +114,20 @@ class CombatV1Technique {
   /// 9で実装した（`CombatV1Engine._resolvePendingAttack`参照）。
   final CombatV1FinisherType? finisherType;
 
+  /// [category]と[finisherType]の不変条件（`category ==
+  /// CombatV1CardCategory.finisher` ⟺ `finisherType != null`）が保たれて
+  /// いるか（docs/design/combat_v1_phase1_design.md 2.4章の優先順位ルール）。
+  ///
+  /// コンストラクタの2つのassert（本ファイル上部）と同じ不変条件を、assertが
+  /// 無効化されるビルドでも検出できるようにする（Phase 9 Codexレビュー指摘
+  /// 「Reject finishers without a resolution type」対応）。assertを無効化した
+  /// 状態で直接構築された`category==finisher`かつ`finisherType==null`の技が、
+  /// HEAT解禁チェックだけを通過し`_resolvePendingAttack`で`effectiveDirectPin`
+  /// /`effectiveSubmissionHold`が両方falseとなり、意図せずnormal
+  /// FINISHER相当として黙って解決されてしまう問題を防ぐ。
+  bool get hasConsistentFinisherType =>
+      (category == CombatV1CardCategory.finisher) == (finisherType != null);
+
   /// 静的データvalidation（Phase 3で導入、Phase
   /// 4でTechnique全体の責務として範囲を明確化、docs/combat_rules_v1.md
   /// 6・7章）:
@@ -93,6 +139,8 @@ class CombatV1Technique {
   ///   assertが無効化されるビルドでも検出できるようにする）
   /// - [damage]/[heatGain]が負数ではない（負のDMG/HEATはSSOT上想定されて
   ///   いないデータ不正として扱う）
+  /// - [hasConsistentFinisherType]（category/finisherTypeの不変条件、
+  ///   Phase 9で追加）
   ///
   /// [CombatV1Engine.checkTechniqueLegality]が
   /// `invalidTechniqueData`reasonCodeの判定に使う（`combat_v1_engine.dart`）。
@@ -102,5 +150,6 @@ class CombatV1Technique {
       energyCost.total > 0 &&
       attribute != CombatV1EnergyAttribute.wild &&
       damage >= 0 &&
-      heatGain >= 0;
+      heatGain >= 0 &&
+      hasConsistentFinisherType;
 }
