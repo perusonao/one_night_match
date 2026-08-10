@@ -274,6 +274,43 @@ const Map<String, CombatV1Technique> fixtureTechniques = {
     finisherType: CombatV1FinisherType.directPin,
     family: CombatV1TechniqueFamily.powerbomb,
   ),
+  /// Phase 9専用: finisherType==submissionのFINISHER
+  /// （docs/combat_rules_v1.md 10.2章「SUBMISSION FINISHER」）。相手HPを
+  /// 150→20（submissionHpThreshold=50以下）まで一撃で落とせるだけの
+  /// damageを持たせ、通常SUBMISSIONと同じ突入閾値でFINISHER専用SUBMISSION
+  /// 処理（ESCAPE/GIVE UP、HP0特例）を検証しやすくする（[fixtureDeckSpec]
+  /// には含めない——通常の30枚デッキ構成テストへ影響を与えないため、
+  /// declareTechnique/finisher系のテストでカタログへ直接この技を渡す
+  /// 用途専用。`category==finisher`のため`directPin`/`submissionHold`
+  /// フィールドはそもそも参照されない、2.4章）。
+  'fx_finisher_c': CombatV1Technique(
+    id: 'fx_finisher_c',
+    name: 'テストフィニッシャーC',
+    category: CombatV1CardCategory.finisher,
+    attribute: CombatV1EnergyAttribute.joint,
+    energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.joint: 2}),
+    damage: 130,
+    heatGain: 30,
+    finisherType: CombatV1FinisherType.submission,
+    family: CombatV1TechniqueFamily.crossface,
+  ),
+  /// Phase 9専用: attribute==roughのFINISHER（finisherType==normal）。
+  /// ROUGH次ターン制限・ROUGH-PIN不可ルール（Phase 8、15章）とFINISHERが
+  /// 独立に組み合わさることを検証する（20章「黒蝶ドライバー」のような
+  /// ROUGH属性FINISHERの役割を、正式技データではなく最小フィクスチャで
+  /// 再現する。[fixtureDeckSpec]には含めない）。
+  'fx_finisher_rough_normal': CombatV1Technique(
+    id: 'fx_finisher_rough_normal',
+    name: 'テストラフフィニッシャー',
+    category: CombatV1CardCategory.finisher,
+    attribute: CombatV1EnergyAttribute.rough,
+    energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.rough: 2}),
+    damage: 30,
+    heatGain: 30,
+    resultOpponentState: CombatV1WrestlerPosture.down,
+    finisherType: CombatV1FinisherType.normal,
+    family: CombatV1TechniqueFamily.choke,
+  ),
 };
 
 /// テスト用COUNTERカタログ（3種類、同名上限2枚 × 3種類 = 6枚）。

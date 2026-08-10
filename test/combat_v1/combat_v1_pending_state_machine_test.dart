@@ -232,10 +232,13 @@ void main() {
 
   group('directPin/submissionHold — 未COUNTER時も特殊処理は発火しない（34）', () {
     test('directPin==trueの技がdeclineで成立してもPIN関連フィールドは変化しない', () {
-      // fx_finisher_bはdirectPin==trueだがFINISHERのためPhase
-      // 4でも使用不可（finisherNotImplemented）。ここではNORMAL/SIGNATURE
-      // でdirectPin相当のフラグを持つローカル技を使い、decline経路でも
-      // 通常のDMG/HEAT/posture解決だけが起こることを検証する。
+      // fx_finisher_bはfinisherType==directPinを持つがFINISHERのため
+      // sharedHeatが解禁閾値未満だと使用不可（finisherHeatNotReached、
+      // Phase 9）。ここではPhase 4当時と同じ意図で、NORMAL/SIGNATUREで
+      // directPin相当のフラグを持つローカル技を使い、decline経路でも
+      // 通常のDMG/HEAT/posture解決だけが起こることを検証する
+      // （FINISHER自体のdirectPin/submissionHold本処理は
+      // combat_v1_finisher_test.dartを参照）。
       const directPinNormal = _directPinNormalTechnique;
       final catalog = CombatV1CardCatalog(
         techniques: {...fixtureTechniques, directPinNormal.id: directPinNormal},

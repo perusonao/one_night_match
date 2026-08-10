@@ -78,8 +78,8 @@ class CombatV1Technique {
   final bool submissionHold;
 
   /// FINISHERの決着方式。category==finisherの場合のみ非null
-  /// （docs/combat_rules_v1.md 13章）。FINISHER決着ロジック自体はPhase 9まで
-  /// 実装しない（Phase 1では値を保持するのみ）。
+  /// （docs/combat_rules_v1.md 13章）。決着ロジック本体はPhase
+  /// 9で実装した（`CombatV1Engine._resolvePendingAttack`参照）。
   final CombatV1FinisherType? finisherType;
 
   /// 静的データvalidation（Phase 3で導入、Phase

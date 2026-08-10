@@ -1049,3 +1049,101 @@ Phase 9（FINISHER）は引き続き未着手のまま。`category == finisher`�
 `finisherNotImplemented`で一律拒否する既存の仕組み（Phase 3）をPhase
 8でも変更していない。20章のROUGH FINISHER（黒蝶ドライバー）に関するデータ・Catalog
 validationはPhase 9着手時に扱う（SSOT根拠のない先行実装はしない）。
+
+---
+
+## 18. Phase 9での更新（FINISHER）
+
+Phase 9（FINISHER）で、本書のPhase 1〜8設計から以下を更新した。ゲームルール自体
+（`combat_rules_v1.md` 13章）の新規確定事項は同書13.1〜13.4章・29章「変更履歴」を参照。ここでは
+実装内部の技術設計の差分を記す。
+
+### 18.1 新規ファイル
+
+`lib/src/combat_v1/combat_v1_finisher_rules.dart`（§1・§8で想定していた
+`combat_v1_finisher_rules.dart`の役割をほぼそのまま踏襲）を追加した。FINISHER解禁判定
+（`finisherUnlocked`）・SUBMISSION FINISHER専用のESCAPE/GIVE UP判定（
+`determineFinisherSubmissionOutcome`）を純粋関数として切り出し、`combat_v1_engine.dart`側の
+state遷移配線と責務を分離した（`combat_v1_pin_rules.dart`・`combat_v1_submission_rules.dart`と
+同じ方針）。`determineFinisherSubmissionOutcome`は、相手HPが0でない場合の判定を
+`combat_v1_submission_rules.dart`の`determineSubmissionOutcome`へそのまま委譲し、判定ロジックの
+重複を避けている。
+
+テストファイルとして`test/combat_v1/combat_v1_finisher_test.dart`を追加した。
+
+### 18.2 `checkTechniqueLegality`の変更: `finisherNotImplemented`を`finisherHeatNotReached`へ置換
+
+Phase 3〜8では`category == finisher`の技を無条件に`finisherNotImplemented`で拒否していたが、
+Phase 9でFINISHER本処理を実装したため、この分岐を「共有HEATが解禁閾値
+（`CombatV1RulesConfig.finisherHeatThreshold`、既定200）未満なら拒否する」判定へ置き換えた
+（`CombatV1TechniqueLegalityReasonCode.finisherHeatNotReached`）。旧`finisherNotImplemented`
+reasonCodeは、Phase 8の`notTechnique`削除（11.2章参照）と同じ方針で、実装が追加され意味を
+失った時点で削除した（互換レイヤーとして残さない）。それ以外のlegality判定順序（カテゴリ確認・
+静的データ検証・`requiredOpponentState`・ENERGY支払い）は変更していない。
+
+### 18.3 `CombatV1RulesConfig`への追加
+
+`finisherHeatThreshold`（既定200）を追加した（`combat_rules_v1.md` 12章「200以上でFINISHER
+解禁」・13.1章）。
+
+### 18.4 `_resolvePendingAttack`: `effectiveDirectPin`/`effectiveSubmissionHold`の導入
+
+`category == finisher`の技は`directPin`/`submissionHold`フィールドを参照しない（2.4章の優先順位
+ルール）ため、`_resolvePendingAttack`の先頭で以下を導出するよう変更した:
+
+```dart
+final isFinisher = pending.category == CombatV1CardCategory.finisher;
+final effectiveDirectPin = isFinisher
+    ? pending.finisherType == CombatV1FinisherType.directPin
+    : pending.directPin;
+final effectiveSubmissionHold = isFinisher
+    ? pending.finisherType == CombatV1FinisherType.submission
+    : pending.submissionHold;
+```
+
+Phase 4〜8で`pending.directPin`/`pending.submissionHold`を直接参照していた箇所（Step
+0のCommand atomicityガード・Step 9の自動移行分岐）を、いずれも`effectiveDirectPin`/
+`effectiveSubmissionHold`を参照するよう置き換えた。これにより、`finisherType == directPin`の
+FINISHERは既存のDIRECT PIN機構（`_resolvePin`、8章）を、`finisherType == submission`の
+FINISHERは既存の通常SUBMISSION自動移行の骨格（`_resolveSubmission`、10.1章）をそのまま
+再利用する（モデル・State Machineの変更は不要だった）。`finisherType == normal`の場合は
+`effectiveDirectPin`/`effectiveSubmissionHold`がいずれもfalseになるため、既存のロジックへ
+変更を加えることなく「自動移行なし、通常のTECHNIQUE成功解決のみ」が自然に実現される。
+
+`pending.directPin`/`pending.submissionHold`（フィールドそのもの）は、`lastSuccessfulTechnique`
+snapshotへコピーする箇所（Phase 4から変更なし）でのみそのまま参照を維持している——
+`CombatV1SuccessfulTechniqueSnapshot`は`CombatV1PendingAttack`と同じフィールド構成を1:1で
+ミラーする既存方針（Phase 4）を崩さないためであり、FINISHERの場合これらの値は常に`false`
+（未参照）のまま保持される。
+
+### 18.5 `_resolveSubmission`: `isFinisherSubmission`パラメータの追加
+
+`_resolveSubmission`（Phase 6で追加、通常SUBMISSION専用）へ`required bool
+isFinisherSubmission`を追加した。`true`の場合、ESCAPE/GIVE UP判定に
+`determineSubmissionOutcome`ではなく`determineFinisherSubmissionOutcome`
+（18.1章）を使う。ログの主語ラベルも`'SUBMISSION'`/`'FINISHER SUBMISSION'`で出し分け、
+UI/CPU/Simulatorがどちらの経路で発生したSUBMISSIONかをログから区別できるようにした
+（`CombatV1PinSource`が通常PIN/DIRECT PINをログ上区別するのと同じ思想。ただしFINISHERの
+DIRECT PIN側は既存の`CombatV1PinSource.directPin`をそのまま流用し、専用の新しい列挙値は
+追加していない——ログの主語は宣言時の技名で既に区別できるため、モデルの重複追加を避けた）。
+
+新規publicモデル・`CombatV1MatchPhase`の追加は無い（PIN・通常SUBMISSIONと同じ「防御側に
+実質的な選択肢が無いCommandには専用の応答待ちフェーズを設けない」方針、14.2章・15.2章を
+踏襲する）。
+
+### 18.6 Catalog validationへの変更なし
+
+`category == finisher`の技は既存の`techniqueDirectPinSubmissionHoldConflict`検証（Phase 6、
+15.6章）の対象外のまま変更していない——`directPin`/`submissionHold`フィールドに矛盾する値を
+持たせないための追加検証は、Phase 1設計時点の判断（2.4章「値を持たせても無視する……検証は
+現時点では型システムに強制させず、Phase10のデータ投入時のレビューで担保する」）どおり、
+Phase 9でも追加しなかった。
+
+### 18.7 `combat_v1_test_fixtures.dart`の拡張
+
+`fx_finisher_c`（`finisherType == submission`、SUBMISSION groupのFINISHER）・
+`fx_finisher_rough_normal`（`finisherType == normal`かつ`attribute == rough`のFINISHER、20章の
+「黒蝶ドライバー」のようなROUGH属性FINISHERの役割を最小フィクスチャで再現）を追加した
+（いずれも`fixtureDeckSpec`には含めない——`fx_finisher_a`/`fx_finisher_b`が既にFINISHER
+2種類×1枚という標準デッキ構成枠を満たしているため、Phase 5の`fx_normal_direct_pin`と同じ方針で
+デッキ構成テストへ影響を与えない用途専用として追加した）。
