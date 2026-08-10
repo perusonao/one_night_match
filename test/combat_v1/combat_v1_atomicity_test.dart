@@ -10,7 +10,8 @@
 // sharedHeat・activePlayerIndex・turnNumber・phase・pendingAttack全field・
 // lastSuccessfulTechnique・log内容全体を含めて意味的完全同値であることを
 // 検証する（単なるinstanceId一覧やlist長ではなく、値そのものを比較する。
-// Phase 4 Codexレビュー指摘M1）。
+// Phase 4 Codexレビュー指摘M1）。Phase 5で`winnerPlayerIndex`・
+// `lastSuccessfulTechnique.turnNumber`を追加した。
 
 import 'dart:math';
 
@@ -23,6 +24,7 @@ import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_match_state.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_pending_attack.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_state_invariants.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_successful_technique_snapshot.dart';
 
 import 'combat_v1_test_fixtures.dart';
@@ -54,6 +56,7 @@ class _FullStateSnapshot {
       lastSuccessfulTechnique = s.lastSuccessfulTechnique == null
           ? null
           : _LastSuccessfulTechniqueSnapshot(s.lastSuccessfulTechnique!),
+      winnerPlayerIndex = s.winnerPlayerIndex,
       log = List.of(s.log);
 
   final String matchId;
@@ -65,6 +68,7 @@ class _FullStateSnapshot {
   final CombatV1MatchPhase phase;
   final _PendingAttackSnapshot? pendingAttack;
   final _LastSuccessfulTechniqueSnapshot? lastSuccessfulTechnique;
+  final int? winnerPlayerIndex;
   final List<String> log;
 
   void expectUnchanged(CombatV1MatchState after, {String? reason}) {
@@ -98,16 +102,23 @@ class _FullStateSnapshot {
         reason: reason,
       );
     }
+    expect(
+      after.winnerPlayerIndex,
+      winnerPlayerIndex,
+      reason: '$reason: winnerPlayerIndex',
+    );
     expect(List.of(after.log), log, reason: '$reason: log');
   }
 }
 
-/// [CombatV1SuccessfulTechniqueSnapshot]の全10 fieldを比較するsnapshot
+/// [CombatV1SuccessfulTechniqueSnapshot]の全fieldを比較するsnapshot
 /// （Phase 4 Codex再レビュー指摘M1対応。旧実装は`cardInstanceId`のみを
-/// 比較しており、他fieldの意図しない変化を検出できなかった）。
+/// 比較しており、他fieldの意図しない変化を検出できなかった。Phase
+/// 5で`turnNumber`を追加）。
 class _LastSuccessfulTechniqueSnapshot {
   _LastSuccessfulTechniqueSnapshot(CombatV1SuccessfulTechniqueSnapshot s)
     : attackerPlayerIndex = s.attackerPlayerIndex,
+      turnNumber = s.turnNumber,
       cardInstanceId = s.cardInstanceId,
       cardId = s.cardId,
       category = s.category,
@@ -119,6 +130,7 @@ class _LastSuccessfulTechniqueSnapshot {
       resultOpponentState = s.resultOpponentState;
 
   final int attackerPlayerIndex;
+  final int turnNumber;
   final String cardInstanceId;
   final String cardId;
   final CombatV1CardCategory category;
@@ -134,6 +146,11 @@ class _LastSuccessfulTechniqueSnapshot {
       after.attackerPlayerIndex,
       attackerPlayerIndex,
       reason: '$reason: lastSuccessfulTechnique.attackerPlayerIndex',
+    );
+    expect(
+      after.turnNumber,
+      turnNumber,
+      reason: '$reason: lastSuccessfulTechnique.turnNumber',
     );
     expect(
       after.cardInstanceId,
@@ -298,6 +315,11 @@ void main() {
     instanceId: 'ctr_narrow',
     cardId: 'fx_counter_c', // families=[dropKick]のみ
     category: CombatV1CardCategory.counter,
+  );
+  const directPinAttack = CombatV1DeckEntry(
+    instanceId: 'atk_dp',
+    cardId: 'fx_normal_direct_pin', // 投1, STAND->DOWN, directPin=true
+    category: CombatV1CardCategory.normal,
   );
 
   CombatV1MatchState pendingState({
@@ -807,5 +829,259 @@ void main() {
         snapshot.expectUnchanged(malformedState, reason: '${entry.key} (declineCounter)');
       });
     }
+  });
+
+  group('Phase 5: 不正PIN Commandのatomicity（docs/combat_rules_v1.md 8章）', () {
+    test('wrong phase（discard中）でdeclarePinは失敗しstate完全不変', () {
+      final state = buildMatchState(
+        phase: CombatV1MatchPhase.discard,
+        postureB: CombatV1WrestlerPosture.down,
+        lastSuccessfulTechnique: fixtureSuccessfulTechnique(
+          attackerPlayerIndex: 0,
+          turnNumber: 1,
+        ),
+      );
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'wrong phase declarePin');
+    });
+
+    test('相手がSTANDでdeclarePinは失敗しstate完全不変（KOC/PINカードも不変）', () {
+      final state = buildMatchState(
+        lastSuccessfulTechnique: fixtureSuccessfulTechnique(
+          attackerPlayerIndex: 0,
+          turnNumber: 1,
+        ),
+      );
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'opponentNotDown declarePin');
+    });
+
+    test('このターン中の成功記録が無い場合、declarePinは失敗しstate完全不変', () {
+      final state = buildMatchState(postureB: CombatV1WrestlerPosture.down);
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'noSuccessfulTechniqueThisTurn declarePin');
+    });
+
+    test('試合終了後（winnerPlayerIndex設定済み）は全戦闘Commandが拒否されstate完全不変', () {
+      final endedState = buildMatchState(
+        handA: const [attack],
+        handB: const [matchingCounter],
+      ).copyWith(winnerPlayerIndex: 0);
+      final snapshot = _FullStateSnapshot(endedState);
+
+      expect(
+        () => CombatV1Engine.declareTechnique(
+          endedState,
+          'atk1',
+          catalog: fixtureCatalog,
+        ),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(endedState, reason: 'matchOver declareTechnique');
+
+      expect(
+        () => CombatV1Engine.declarePin(endedState, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(endedState, reason: 'matchOver declarePin');
+
+      expect(
+        () => CombatV1Engine.endTurn(endedState),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(endedState, reason: 'matchOver endTurn');
+
+      expect(
+        () => CombatV1Engine.discardCard(endedState, 'atk1'),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(endedState, reason: 'matchOver discardCard');
+    });
+  });
+
+  group('Phase 5 Codexレビュー修正: PIN state invariant guard atomicity（H1/H2）', () {
+    final directPinCatalog = CombatV1CardCatalog(
+      techniques: fixtureTechniques,
+      counters: fixtureCounters,
+    );
+
+    test('A: attacker pinCardsHeld=0（defender=4）はcheckPinLegality/declarePinとも拒否されstate完全不変', () {
+      final state = buildMatchState(
+        postureB: CombatV1WrestlerPosture.down,
+        pinCardsHeldA: 0,
+        pinCardsHeldB: 4,
+        lastSuccessfulTechnique: fixtureSuccessfulTechnique(
+          attackerPlayerIndex: 0,
+          turnNumber: 1,
+        ),
+      );
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(CombatV1Engine.checkPinLegality(state, rules: fixtureRules).legal, isFalse);
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'A: attacker pinCardsHeld=0');
+    });
+
+    test('B: PINカード合計=3はdeclarePinが拒否されstate完全不変', () {
+      final state = buildMatchState(
+        postureB: CombatV1WrestlerPosture.down,
+        pinCardsHeldA: 1,
+        pinCardsHeldB: 2,
+        lastSuccessfulTechnique: fixtureSuccessfulTechnique(
+          attackerPlayerIndex: 0,
+          turnNumber: 1,
+        ),
+      );
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'B: PINカード合計=3');
+    });
+
+    test('C: PINカード合計=5はdeclarePinが拒否されstate完全不変', () {
+      final state = buildMatchState(
+        postureB: CombatV1WrestlerPosture.down,
+        pinCardsHeldA: 2,
+        pinCardsHeldB: 3,
+        lastSuccessfulTechnique: fixtureSuccessfulTechnique(
+          attackerPlayerIndex: 0,
+          turnNumber: 1,
+        ),
+      );
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'C: PINカード合計=5');
+    });
+
+    test('D: defender koc=-1はdeclarePinが拒否され、3カウント勝利にせずwinner未設定・state完全不変', () {
+      final state = buildMatchState(
+        postureB: CombatV1WrestlerPosture.down,
+        kocB: -1,
+        lastSuccessfulTechnique: fixtureSuccessfulTechnique(
+          attackerPlayerIndex: 0,
+          turnNumber: 1,
+        ),
+      );
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'D: defender koc=-1');
+      expect(state.winnerPlayerIndex, isNull);
+    });
+
+    test('E: attacker koc=-1はdeclarePinが拒否されstate完全不変', () {
+      final state = buildMatchState(
+        postureB: CombatV1WrestlerPosture.down,
+        kocA: -1,
+        lastSuccessfulTechnique: fixtureSuccessfulTechnique(
+          attackerPlayerIndex: 0,
+          turnNumber: 1,
+        ),
+      );
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'E: attacker koc=-1');
+    });
+
+    test('F: DIRECT PIN予定TechniqueでPhase 5 invariant違反stateはdeclineCounterごと拒否され、'
+        'Technique成功処理を含め全state完全不変', () {
+      final state = buildMatchState(
+        handA: const [directPinAttack],
+        kocB: -1, // 防御側kocが不正（Phase 5 invariant違反）
+      );
+      final declared = CombatV1Engine.declareTechnique(
+        state,
+        'atk_dp',
+        catalog: directPinCatalog,
+      );
+      final snapshot = _FullStateSnapshot(declared);
+
+      expect(
+        () => CombatV1Engine.declineCounter(
+          declared,
+          rules: fixtureRules,
+          random: Random(1),
+        ),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      // DMG/HEAT/posture/discard/draw/lastSuccessfulTechnique/koc/
+      // pinCardsHeld/winner/phase/logのすべてが宣言直後のstateから
+      // 完全に不変であること（Technique成功だけ残してPINだけ拒否する
+      // 設計にはなっていないことの確認）。
+      snapshot.expectUnchanged(declared, reason: 'F: DIRECT PIN malformed invariant');
+      expect(declared.playerB.posture, CombatV1WrestlerPosture.stand);
+      expect(declared.lastSuccessfulTechnique, isNull);
+      expect(declared.winnerPlayerIndex, isNull);
+    });
+
+    test('G: winnerPlayerIndex=-1はvalidateMatchStateInvariantsでinvalid', () {
+      final state = buildMatchState().copyWith(winnerPlayerIndex: -1);
+      final result = validateMatchStateInvariants(state, rules: fixtureRules);
+      expect(result.isValid, isFalse);
+      expect(
+        result.errors.any(
+          (e) => e.code == CombatV1MatchStateInvariantErrorCode.winnerPlayerIndexOutOfRange,
+        ),
+        isTrue,
+      );
+    });
+
+    test('H: winnerPlayerIndex=2はvalidateMatchStateInvariantsでinvalid', () {
+      final state = buildMatchState().copyWith(winnerPlayerIndex: 2);
+      final result = validateMatchStateInvariants(state, rules: fixtureRules);
+      expect(result.isValid, isFalse);
+      expect(
+        result.errors.any(
+          (e) => e.code == CombatV1MatchStateInvariantErrorCode.winnerPlayerIndexOutOfRange,
+        ),
+        isTrue,
+      );
+    });
+
+    test('I: winnerPlayerIndex=null/0/1はいずれもwinnerPlayerIndexOutOfRangeを生成しない', () {
+      for (final winner in [null, 0, 1]) {
+        final state = buildMatchState().copyWith(winnerPlayerIndex: winner);
+        final result = validateMatchStateInvariants(state, rules: fixtureRules);
+        expect(
+          result.errors.any(
+            (e) => e.code == CombatV1MatchStateInvariantErrorCode.winnerPlayerIndexOutOfRange,
+          ),
+          isFalse,
+          reason: 'winnerPlayerIndex=$winner',
+        );
+      }
+    });
   });
 }

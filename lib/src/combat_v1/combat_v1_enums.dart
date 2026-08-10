@@ -118,6 +118,30 @@ enum CombatV1TechniqueFamily {
   weapon,
 }
 
+/// PINのカウント結果（docs/combat_rules_v1.md 8.2章「カウント」、Phase 5）。
+///
+/// `2.9`を`double`のようなfloatで持たず、閉じた型（enum）で表現する
+/// （docs/combat_rules_v1.md 8.2章のカウント表に合わせた3値）。
+enum CombatV1PinCountResult { one, two, twoPointNine }
+
+extension CombatV1PinCountResultLabel on CombatV1PinCountResult {
+  /// UI表示用の"1"/"2"/"2.9"（docs/combat_rules_v1.md 8.2章）。
+  String get displayLabel => switch (this) {
+    CombatV1PinCountResult.one => '1',
+    CombatV1PinCountResult.two => '2',
+    CombatV1PinCountResult.twoPointNine => '2.9',
+  };
+}
+
+/// PINの開始経路（docs/combat_rules_v1.md 8章、Phase 5）。
+///
+/// 通常PIN（`action`フェーズからの任意宣言、[normal]）と、DIRECT
+/// PIN（TECHNIQUE成功と同一遷移内で自動的に開始される、[directPin]）を
+/// 区別する。ログ・テスト・後続Phase（CPU/Simulator）が「どちらの経路で
+/// PINが始まったか」を区別できるようにするための最小限のenum
+/// （stringで雑に持たない）。
+enum CombatV1PinSource { normal, directPin }
+
 extension CombatV1TechniqueFamilyGrouping on CombatV1TechniqueFamily {
   /// この技系統が属する上位分類（docs/combat_rules_v1.md「23.3章 Technique
   /// Family」）。Technique自身はgroupを保持せず、常にfamilyから導出する。
