@@ -181,7 +181,49 @@ taxonomyと一致するため、family/group名称の参考にした（値その
 
 ---
 
-## 7. 変更履歴
+## 7. Production Deck instanceId設計（Phase 10A GitHub Codexレビュー指摘対応で確定）
+
+`cardId`（Technique/Counterの安定definition id、1章参照）と`instanceId`（デッキ内の
+物理カード1枚を識別するID、`CombatV1DeckEntry.instanceId`）は別概念である。
+
+- **cardId**: Technique/Counterの安定definition identity。同じcardIdを複数player・
+  複数枚のデッキ内カードが参照すること自体は正常（例: ミサキ同士のミラーマッチで両者が
+  `misaki_backdrop`を使う）。
+- **instanceId**: 物理カード1枚のidentity。`combat_v1_state_invariants.dart`の
+  `duplicateCardInstanceId`invariant（両playerの全カードゾーン＋pendingを通じて
+  一意）が要求するとおり、**match内でplayerを跨いで一意**でなければならない。
+
+Phase 10A初版の`buildMisakiDeck()`は、instanceIdを`<wrestlerId>_<cardId>_#<連番>`
+（wrestlerId固定）で生成していたため、同一レスラー同士のミラーマッチ（例:
+豪田ミサキ vs 豪田ミサキ）で両playerのデッキが完全に同一のinstanceId集合を持ってしまい、
+`declareTechnique`以降（`pendingAttackOwnershipViolation`が防御側ゾーンに同名instanceId
+を検出）でCommandが失敗する不具合があった（GitHub Codex自動レビュー、PR #10、P1）。
+
+この不具合を受け、Production Deck builder（`buildMisakiDeck`）は`ownerId`
+（このデッキがどちらのplayer向けかを表す識別子）を**必須named parameter**として要求する
+設計へ変更した。デフォルト値は用意しない——呼び出し側が指定を省略して同一デッキを
+両playerへそのまま渡し、再びinstanceId衝突を起こす事故を構造的に防ぐため。
+
+```dart
+buildMisakiDeck(ownerId: 'player-a')  // → misakiWrestler.idではなくownerIdをinstanceId生成に使う
+buildMisakiDeck(ownerId: 'player-b')
+```
+
+- `ownerId`はinstanceId生成専用であり、`CombatV1DeckDefinition.wrestlerId`（常に
+  `misakiWrestler.id`＝`"misaki"`）・cardId・Technique/Counter/Wrestlerのstable
+  IDのいずれにも影響しない。
+- `ownerId`が空文字（trim後）の場合は`ArgumentError`を送出する（player間instanceId
+  衝突の原因になるため）。
+- この設計はミサキ専用hackにせず、Phase 10B以降の黒蝶ジャック・火神アカリ・白銀レイナの
+  Production Deck builderでも同じ`ownerId`パラメータ方式を踏襲する想定
+  （ただし3人分のProduction Data自体はPhase 10Aでは実装しない）。
+
+---
+
+## 8. 変更履歴
 
 - **Phase 10-Precondition〜10A**: 本書を新規作成。上記1〜6章の内容を、Phase
   10Aセッション内でユーザーへ確認のうえ正式確定した。
+- **Phase 10A（GitHub Codexレビュー指摘対応）**: 7章を新規追加。Production
+  Deck builderのinstanceId生成方式を、`wrestlerId`固定から必須`ownerId`
+  パラメータ方式へ変更した経緯を記録した。

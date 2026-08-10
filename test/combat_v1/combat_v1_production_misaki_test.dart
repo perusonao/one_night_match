@@ -8,6 +8,8 @@
 /// Production Dataそのものを検証する（Core Engineルールのfixtureテストとは責務を分離する）。
 library;
 
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_catalog_validation.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_counter_catalog.dart';
@@ -19,10 +21,28 @@ import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_match_state.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_production_catalog.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_state_invariants.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_technique_catalog.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_wrestler_catalog.dart';
 
 const CombatV1RulesConfig rules = CombatV1RulesConfig();
+
+/// [state]が持つ、両playerの全カードゾーン（hand/drawPile/discardPile）＋
+/// pendingが所有する攻撃カードのinstanceIdをすべて集めたリスト（test専用
+/// helper、Productionコードへは追加しない）。GitHub Codex P1指摘
+/// （player間instanceId衝突）の再発を、match全体で横断的に検証するために使う。
+List<String> _allInstanceIds(CombatV1MatchState state) {
+  final pending = state.pendingAttack;
+  return [
+    ...state.playerA.hand.map((e) => e.instanceId),
+    ...state.playerA.drawPile.map((e) => e.instanceId),
+    ...state.playerA.discardPile.map((e) => e.instanceId),
+    ...state.playerB.hand.map((e) => e.instanceId),
+    ...state.playerB.drawPile.map((e) => e.instanceId),
+    ...state.playerB.discardPile.map((e) => e.instanceId),
+    if (pending != null) pending.attackCardInstance.instanceId,
+  ];
+}
 
 /// Technique state legality検証専用の最小MatchStateを組み立てる
 /// （`test/combat_v1/combat_v1_technique_legality_test.dart`の`_buildState`と
@@ -516,7 +536,7 @@ void main() {
   });
 
   group('J/K/L. Deck 30枚・18/4/2/6・同名上限', () {
-    late final deck = buildMisakiDeck();
+    late final deck = buildMisakiDeck(ownerId: 'player-a');
 
     test('合計30枚', () {
       expect(deck.size, 30);
@@ -560,10 +580,38 @@ void main() {
       expect(counts['counter_powerbomb_escape'], 2);
     });
 
-    test('instanceIdが全て一意', () {
+    test('A. 単一deck: instanceIdが30枚すべて一意', () {
       final ids = deck.entries.map((e) => e.instanceId).toSet();
       expect(ids.length, deck.size);
     });
+
+    test('ownerIdが空文字だとArgumentErrorを送出する（GitHub Codex P1指摘対応）', () {
+      expect(() => buildMisakiDeck(ownerId: ''), throwsArgumentError);
+      expect(() => buildMisakiDeck(ownerId: '   '), throwsArgumentError);
+    });
+
+    test(
+      'B. mirror match: 同じownerId未使用なら2デッキ計60枚のinstanceIdが'
+      'すべて一意（GitHub Codex P1指摘の再発防止）',
+      () {
+        final deckA = buildMisakiDeck(ownerId: 'player-a');
+        final deckB = buildMisakiDeck(ownerId: 'player-b');
+
+        final idsA = deckA.entries.map((e) => e.instanceId).toSet();
+        final idsB = deckB.entries.map((e) => e.instanceId).toSet();
+        expect(idsA.length, 30);
+        expect(idsB.length, 30);
+
+        // cardId構成（技の内訳）は両者同一でよい。
+        final cardIdsA = deckA.entries.map((e) => e.cardId).toList()..sort();
+        final cardIdsB = deckB.entries.map((e) => e.cardId).toList()..sort();
+        expect(cardIdsA, cardIdsB);
+
+        // instanceIdはplayerを跨いで衝突してはならない。
+        final allIds = [...idsA, ...idsB];
+        expect(allIds.toSet().length, 60);
+      },
+    );
   });
 
   group('M. Catalog validation', () {
@@ -581,7 +629,7 @@ void main() {
 
   group('N. Deck validation', () {
     test('buildMisakiDeck()はvalidateDeckを通過する', () {
-      final deck = buildMisakiDeck();
+      final deck = buildMisakiDeck(ownerId: 'player-a');
       final result = validateDeck(
         deck,
         catalog: productionCardCatalog,
@@ -592,12 +640,12 @@ void main() {
   });
 
   group('O/P. CombatV1Engine.start・card conservation', () {
-    test('ミサキ同士のミラーマッチでstartが正常に完了する', () {
+    test('ミサキ同士のミラーマッチでstartが正常に完了する（C. Engine.start mirror match）', () {
       final state = CombatV1Engine.start(
         wrestlerA: misakiWrestler,
-        deckA: buildMisakiDeck(),
+        deckA: buildMisakiDeck(ownerId: 'player-a'),
         wrestlerB: misakiWrestler,
-        deckB: buildMisakiDeck(),
+        deckB: buildMisakiDeck(ownerId: 'player-b'),
         rules: rules,
         catalog: productionCardCatalog,
       );
@@ -607,14 +655,20 @@ void main() {
       expect(state.phase, CombatV1MatchPhase.discard);
       expect(state.playerA.hp, rules.startingHp);
       expect(state.playerB.hp, rules.startingHp);
+
+      // GitHub Codex P1指摘の再発防止: start直後の時点で、両playerの
+      // 全カードゾーンを横断してinstanceId衝突がないこと。
+      final result = validateMatchStateInvariants(state, rules: rules);
+      expect(result.isValid, isTrue, reason: result.errors.join(' / '));
+      expect(_allInstanceIds(state).toSet().length, 60);
     });
 
     test('start直後、両プレイヤーのカード総数がデッキ枚数(30)と一致する（card conservation）', () {
       final state = CombatV1Engine.start(
         wrestlerA: misakiWrestler,
-        deckA: buildMisakiDeck(),
+        deckA: buildMisakiDeck(ownerId: 'player-a'),
         wrestlerB: misakiWrestler,
-        deckB: buildMisakiDeck(),
+        deckB: buildMisakiDeck(ownerId: 'player-b'),
         rules: rules,
         catalog: productionCardCatalog,
       );
@@ -630,10 +684,207 @@ void main() {
 
       expect(totalA, 30);
       expect(totalB, 30);
+      // 60枚合計・instanceId一意もあわせて確認する。
+      expect(totalA + totalB, 60);
+      expect(_allInstanceIds(state).toSet().length, 60);
       // ターン開始プレイヤー（playerA）は開始時ドローを終えているため手札6枚
       // （初期5枚+ターン開始ドロー1枚、discardフェーズでまだ1枚捨てていない）。
       expect(state.playerA.hand.length, rules.startingHandSize + 1);
     });
+
+    test(
+      'D. declareTechnique→declineCounterの1経路を通しても'
+      'instanceId衝突・pending ownership違反が起きない（GitHub Codex P1指摘対応）',
+      () {
+        final random = Random(20260810);
+        final started = CombatV1Engine.start(
+          wrestlerA: misakiWrestler,
+          deckA: buildMisakiDeck(ownerId: 'player-a'),
+          wrestlerB: misakiWrestler,
+          deckB: buildMisakiDeck(ownerId: 'player-b'),
+          rules: rules,
+          catalog: productionCardCatalog,
+          random: random,
+        );
+
+        // start直後はphase==discard（手札循環、docs/combat_rules_v1.md
+        // 16.1章）。1枚捨ててactionフェーズへ進めないとdeclareTechniqueは
+        // 呼べない。
+        final discardEntry = started.playerA.hand.first;
+        final afterDiscard = CombatV1Engine.discardCard(
+          started,
+          discardEntry.instanceId,
+        );
+        expect(afterDiscard.phase, CombatV1MatchPhase.action);
+
+        // COUNTERはTECHNIQUEとして宣言できないため、手札からCOUNTER以外の
+        // カードを1枚選ぶ（30枚中24枚がNORMAL/SIGNATURE/FINISHERのため、
+        // 残り5枚の手札が全てCOUNTERになる確率は無視できるほど小さいが、
+        // 万一の場合は分かりやすい失敗メッセージを出す）。
+        final attackEntry = afterDiscard.playerA.hand.firstWhere(
+          (e) => e.category != CombatV1CardCategory.counter,
+          orElse: () => throw StateError(
+            'テスト前提が崩れています: playerAの手札がCOUNTERのみです'
+            '（${afterDiscard.playerA.hand.map((e) => e.cardId).join(', ')}）',
+          ),
+        );
+
+        final declared = CombatV1Engine.declareTechnique(
+          afterDiscard,
+          attackEntry.instanceId,
+          catalog: productionCardCatalog,
+          rules: rules,
+        );
+        expect(declared.phase, CombatV1MatchPhase.counterResponsePending);
+        expect(declared.pendingAttack, isNotNull);
+
+        // pending中もinstanceId衝突・所有権違反が発生していないこと。
+        final pendingResult = validateMatchStateInvariants(
+          declared,
+          rules: rules,
+        );
+        expect(pendingResult.isValid, isTrue, reason: pendingResult.errors.join(' / '));
+        expect(_allInstanceIds(declared).toSet().length, 60);
+
+        final resolved = CombatV1Engine.declineCounter(
+          declared,
+          rules: rules,
+          random: random,
+        );
+        expect(resolved.phase, CombatV1MatchPhase.action);
+        expect(resolved.pendingAttack, isNull);
+
+        // decline成立後も、card conservation・instanceId一意性を維持する。
+        final totalA =
+            resolved.playerA.hand.length +
+            resolved.playerA.drawPile.length +
+            resolved.playerA.discardPile.length;
+        final totalB =
+            resolved.playerB.hand.length +
+            resolved.playerB.drawPile.length +
+            resolved.playerB.discardPile.length;
+        expect(totalA, 30);
+        expect(totalB, 30);
+
+        final resolvedResult = validateMatchStateInvariants(
+          resolved,
+          rules: rules,
+        );
+        expect(resolvedResult.isValid, isTrue, reason: resolvedResult.errors.join(' / '));
+        expect(_allInstanceIds(resolved).toSet().length, 60);
+
+        // 攻撃カードは攻撃側（playerA）のdiscardへ移動している。
+        expect(
+          resolved.playerA.discardPile.any(
+            (e) => e.instanceId == attackEntry.instanceId,
+          ),
+          isTrue,
+        );
+      },
+    );
+
+    test(
+      'E. declareTechnique→playCounterの1経路（COUNTER mirror test）を'
+      '通しても、両player全ゾーン+pendingでinstanceId衝突が起きない',
+      () {
+        // 手札の乱数shuffleに依存せず、攻撃側手札にmisaki_backdrop
+        // （family=BACKDROP、Cost投2）、防御側手札にcounter_suplex_reversal
+        // （counterableFamilies=[BACKDROP, SUPLEX]、attribute=throwing）を
+        // 直接配置した最小構成で検証する。drawPileにも1枚ずつ用意し、
+        // COUNTER成立後の1draw（7.1章）が空のdrawPile→discardPile
+        // reshuffleで直前に捨てたカードをそのまま引き戻す曖昧なケースを避ける。
+        final playerA = CombatV1PlayerState(
+          wrestlerId: misakiWrestler.id,
+          wrestlerName: misakiWrestler.name,
+          maxHp: rules.startingHp,
+          hp: rules.startingHp,
+          koc: rules.startingKoc,
+          pinCardsHeld: rules.startingPinCards,
+          energyPool: misakiWrestler.energyPool,
+          hand: const [
+            CombatV1DeckEntry(
+              instanceId: 'player-a_misaki_backdrop_#0',
+              cardId: 'misaki_backdrop',
+              category: CombatV1CardCategory.normal,
+            ),
+          ],
+          drawPile: const [
+            CombatV1DeckEntry(
+              instanceId: 'player-a_misaki_lariat_#0',
+              cardId: 'misaki_lariat',
+              category: CombatV1CardCategory.normal,
+            ),
+          ],
+        );
+        final playerB = CombatV1PlayerState(
+          wrestlerId: misakiWrestler.id,
+          wrestlerName: misakiWrestler.name,
+          maxHp: rules.startingHp,
+          hp: rules.startingHp,
+          koc: rules.startingKoc,
+          pinCardsHeld: rules.startingPinCards,
+          energyPool: misakiWrestler.energyPool,
+          hand: const [
+            CombatV1DeckEntry(
+              instanceId: 'player-b_counter_suplex_reversal_#0',
+              cardId: 'counter_suplex_reversal',
+              category: CombatV1CardCategory.counter,
+            ),
+          ],
+          drawPile: const [
+            CombatV1DeckEntry(
+              instanceId: 'player-b_misaki_power_slam_#0',
+              cardId: 'misaki_power_slam',
+              category: CombatV1CardCategory.normal,
+            ),
+          ],
+        );
+        final state = CombatV1MatchState(
+          matchId: 'phase10a-counter-mirror-test',
+          playerA: playerA,
+          playerB: playerB,
+          activePlayerIndex: 0,
+          phase: CombatV1MatchPhase.action,
+        );
+
+        final declared = CombatV1Engine.declareTechnique(
+          state,
+          'player-a_misaki_backdrop_#0',
+          catalog: productionCardCatalog,
+          rules: rules,
+        );
+        expect(declared.phase, CombatV1MatchPhase.counterResponsePending);
+
+        final countered = CombatV1Engine.playCounter(
+          declared,
+          'player-b_counter_suplex_reversal_#0',
+          catalog: productionCardCatalog,
+          rules: rules,
+        );
+        expect(countered.phase, CombatV1MatchPhase.action);
+        expect(countered.pendingAttack, isNull);
+
+        // 攻撃カード: 攻撃側(A)のdiscardへ。Counterカード: 防御側(B)のdiscardへ。
+        expect(
+          countered.playerA.discardPile.any(
+            (e) => e.instanceId == 'player-a_misaki_backdrop_#0',
+          ),
+          isTrue,
+        );
+        expect(
+          countered.playerB.discardPile.any(
+            (e) => e.instanceId == 'player-b_counter_suplex_reversal_#0',
+          ),
+          isTrue,
+        );
+
+        final result = validateMatchStateInvariants(countered, rules: rules);
+        expect(result.isValid, isTrue, reason: result.errors.join(' / '));
+        // 元々4枚（A: backdrop+lariat、B: counter+power_slam）が
+        // zone間を移動しただけで、instanceIdは4枚とも一意のまま保たれる。
+        expect(_allInstanceIds(countered).toSet().length, 4);
+      },
+    );
   });
 
   group('Q. Production DataをDomain lookupできる（Simulator/UI非依存）', () {

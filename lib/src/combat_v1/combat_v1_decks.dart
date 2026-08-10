@@ -4,26 +4,49 @@
 /// 白銀レイナは今回実装しない）。配分は`combat_rules_v1.md`21章の方針
 /// （基本NORMAL×3・その他NORMAL×2、SIGNATURE各×2、FINISHER各×1、COUNTER各×2）を
 /// そのまま正式採用した（docs/design/combat_v1_phase10_production_data.md 5章）。
+///
+/// physical instanceIdは、`CombatV1MatchState`のinvariant
+/// （`combat_v1_state_invariants.dart`の`duplicateCardInstanceId`：
+/// 両playerの全カードゾーン＋pendingを通じて一意）を満たす必要がある。
+/// cardId（Technique/Counterの安定definition
+/// id）はplayer間で同一でよい（同じレスラー同士のミラーマッチも正常な
+/// ユースケース）が、instanceIdはmatch内でplayerを跨いで一意でなければ
+/// ならないため、Production Deck
+/// builderは呼び出し側から[ownerId]（どちらのplayer向けに生成したデッキかを
+/// 表す識別子）を必ず受け取る（docs/design/combat_v1_phase10_production_data.md
+/// 7章）。
 library;
 
 import 'combat_v1_deck.dart';
 import 'combat_v1_enums.dart';
 import 'combat_v1_wrestler_catalog.dart';
 
-/// [wrestlerId]・[spec]（cardId／category／枚数）から物理カード
+/// [ownerId]・[spec]（cardId／category／枚数）から物理カード
 /// （[CombatV1DeckEntry]）のリストを組み立てる。instanceIdは
-/// `<wrestlerId>_<cardId>_#<連番>`で一意にする。
+/// `<ownerId>_<cardId>_#<連番>`で一意にする。
+///
+/// [ownerId]はphysical instanceId生成専用の識別子であり、Technique/Counterの
+/// 安定definition id（[cardId]）とは独立した概念（cardId自体は変更しない）。
 List<CombatV1DeckEntry> _buildEntries(
-  String wrestlerId,
+  String ownerId,
   List<(String cardId, CombatV1CardCategory category, int count)> spec,
 ) {
+  if (ownerId.trim().isEmpty) {
+    throw ArgumentError.value(
+      ownerId,
+      'ownerId',
+      'ownerIdを空にすることはできません（player間でinstanceIdが衝突する'
+          '原因になるため、Production Deck builderは呼び出しごとに一意な'
+          'ownerIdを必須とする）',
+    );
+  }
   final entries = <CombatV1DeckEntry>[];
   var seq = 0;
   for (final (cardId, category, count) in spec) {
     for (var i = 0; i < count; i++) {
       entries.add(
         CombatV1DeckEntry(
-          instanceId: '${wrestlerId}_${cardId}_#${seq++}',
+          instanceId: '${ownerId}_${cardId}_#${seq++}',
           cardId: cardId,
           category: category,
         ),
@@ -62,7 +85,16 @@ const List<(String, CombatV1CardCategory, int)> misakiDeckSpec = [
 ];
 
 /// 豪田ミサキ Production Deck（30枚）。
-CombatV1DeckDefinition buildMisakiDeck() => CombatV1DeckDefinition(
-  wrestlerId: misakiWrestler.id,
-  entries: _buildEntries(misakiWrestler.id, misakiDeckSpec),
-);
+///
+/// [ownerId]は、このデッキがどちらのplayerへ配られるかを表す識別子で、
+/// physical instanceIdの生成にのみ使う（必須・デフォルト値なし——呼び出し側が
+/// 指定を省略して同一デッキを両playerへそのまま渡し、instanceIdが衝突する
+/// ミラーマッチ事故を構造的に防ぐため）。[CombatV1DeckDefinition.wrestlerId]
+/// は引き続き常に[misakiWrestler.id]（"misaki"）を指す
+/// ——「どのレスラーのデッキか」と「どちらのplayerが使うか」は別概念であり、
+/// [ownerId]はwrestlerId／cardId／stable IDのいずれにも影響しない。
+CombatV1DeckDefinition buildMisakiDeck({required String ownerId}) =>
+    CombatV1DeckDefinition(
+      wrestlerId: misakiWrestler.id,
+      entries: _buildEntries(ownerId, misakiDeckSpec),
+    );
