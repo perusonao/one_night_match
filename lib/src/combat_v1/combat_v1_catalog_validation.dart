@@ -48,6 +48,13 @@ enum CombatV1CatalogValidationErrorCode {
   /// docs/design/combat_v1_phase1_design.md 2.4章）。
   techniqueDirectPinSubmissionHoldConflict,
 
+  /// [CombatV1Technique.category]と[CombatV1Technique.finisherType]の
+  /// 不変条件（`category==finisher` ⟺ `finisherType!=null`）が崩れている
+  /// （[CombatV1Technique.hasConsistentFinisherType]がfalse、Phase
+  /// 9 Codexレビュー指摘「Reject finishers without a resolution type」対応。
+  /// docs/design/combat_v1_phase1_design.md 2.4章）。
+  techniqueInvalidFinisherType,
+
   /// [CombatV1Counter.attribute]がwild（docs/combat_rules_v1.md「5.2章
   /// COUNTERでの＊(ワイルド)ENERGYの扱い」とは別概念。COUNTERの支払い属性
   /// そのものにwildは指定できない）。
@@ -190,6 +197,25 @@ CombatV1CatalogValidationResult validateCatalog(CombatV1CardCatalog catalog) {
           cardId: key,
           message: '$keyはdirectPinとsubmissionHoldが同時にtrueです'
               '（排他、docs/combat_rules_v1.md 10章）',
+        ),
+      );
+    }
+
+    // category==finisherならfinisherTypeが必須、category!=finisherなら
+    // finisherTypeはnullである必要がある（2.4章の優先順位ルール、Phase
+    // 9 Codexレビュー指摘対応）。特にcategory==finisherかつ
+    // finisherType==nullのデータは、HEAT解禁チェックだけを通過して
+    // Engineの決着処理で黙ってnormal FINISHER相当として扱われてしまう
+    // ため、Catalog validationの時点（試合開始前）で確実に拒否する。
+    if (!technique.hasConsistentFinisherType) {
+      errors.add(
+        CombatV1CatalogValidationError(
+          code: CombatV1CatalogValidationErrorCode.techniqueInvalidFinisherType,
+          cardId: key,
+          message: technique.category == CombatV1CardCategory.finisher
+              ? '$keyはcategory==finisherですがfinisherTypeが未設定です'
+              : '$keyはcategory!=finisherですがfinisherTypeが設定されています'
+                    '（$key: ${technique.finisherType}）',
         ),
       );
     }

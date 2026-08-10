@@ -368,7 +368,13 @@ void main() {
       );
     });
 
-    test('10. FINISHERはPhase 3では使用不可（finisherNotImplemented）', () {
+    test('10. HEAT不足のFINISHERは使用不可（finisherHeatNotReached、Phase 9）', () {
+      // sharedHeatの既定値0はFINISHER解禁閾値（既定200）未満のため、
+      // FINISHER本処理（Phase 9）が実装された後もこのケースでは
+      // 引き続き宣言できない。判定理由がfinisherHeatNotReachedへ変わった
+      // ことを検証する（旧finisherNotImplementedはPhase
+      // 9で削除、combat_v1_finisher_test.dartにHEAT解禁後の本処理テストを
+      // 別途用意する）。
       final state = _buildState(
         handA: [
           const CombatV1DeckEntry(
@@ -386,7 +392,7 @@ void main() {
       expect(check.legal, isFalse);
       expect(
         check.reasonCode,
-        CombatV1TechniqueLegalityReasonCode.finisherNotImplemented,
+        CombatV1TechniqueLegalityReasonCode.finisherHeatNotReached,
       );
       expect(
         () => declareAndResolveTechnique(state, 'a1', catalog: fixtureCatalog),
@@ -1131,10 +1137,11 @@ void main() {
       },
     );
 
-    test('59. FINISHERの本処理（DIRECT PIN等）は発生しない', () {
-      // fx_finisher_bはdirectPin==trueを持つが、Phase
-      // 3ではfinisherNotImplementedとして拒否されるだけで、DIRECT
-      // PIN相当の処理（PINカード移動等）は一切発生しない。
+    test('59. HEAT不足のFINISHERは本処理（DIRECT PIN等）が発生しない', () {
+      // fx_finisher_bはfinisherType==directPinを持つが、sharedHeatが解禁
+      // 閾値未満のためfinisherHeatNotReachedとして拒否されるだけで、DIRECT
+      // PIN相当の処理（PINカード移動等）は一切発生しない（HEAT解禁後の
+      // DIRECT PIN本処理はcombat_v1_finisher_test.dartを参照、Phase 9）。
       final state = _buildState(
         handA: [
           const CombatV1DeckEntry(
@@ -1147,7 +1154,7 @@ void main() {
       final pinCardsBefore = state.playerA.pinCardsHeld;
       expect(
         CombatV1Engine.checkTechniqueLegality(state, 'a1', catalog: fixtureCatalog).reasonCode,
-        CombatV1TechniqueLegalityReasonCode.finisherNotImplemented,
+        CombatV1TechniqueLegalityReasonCode.finisherHeatNotReached,
       );
       expect(state.playerA.pinCardsHeld, pinCardsBefore);
     });

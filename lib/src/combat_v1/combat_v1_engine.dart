@@ -19,6 +19,7 @@ import 'combat_v1_deck.dart';
 import 'combat_v1_deck_validation.dart';
 import 'combat_v1_energy.dart';
 import 'combat_v1_enums.dart';
+import 'combat_v1_finisher_rules.dart';
 import 'combat_v1_match_state.dart';
 import 'combat_v1_pending_attack.dart';
 import 'combat_v1_pin_rules.dart';
@@ -83,9 +84,11 @@ enum CombatV1TechniqueLegalityReasonCode {
   /// 7章。COUNTER本処理はPhase 4）。
   counterCannotAttack,
 
-  /// FINISHERは通常TECHNIQUEとして使用できない（FINISHER本処理はPhase 9、
-  /// docs/combat_rules_v1.md 13章）。
-  finisherNotImplemented,
+  /// 共有HEATがFINISHER解禁閾値
+  /// （[CombatV1RulesConfig.finisherHeatThreshold]、既定200）未満のため、
+  /// `category == finisher`のTECHNIQUEを宣言できない（docs/combat_rules_v1.md
+  /// 12章「200以上でFINISHER解禁」・13章、Phase 9）。
+  finisherHeatNotReached,
 
   /// 相手の状態（`requiredOpponentState`）が使用条件を満たさない。
   opponentStateMismatch,
@@ -955,6 +958,21 @@ class CombatV1Engine {
   ///    directPin/submissionHoldは排他のためelse-ifで判定する
   ///    ——`combat_v1_catalog_validation.dart`参照）。
   ///
+  ///    **FINISHER（Phase 9）**: `pending.category ==
+  ///    CombatV1CardCategory.finisher`の場合、`directPin`/`submissionHold`
+  ///    フィールドはそもそも参照しない（docs/design/combat_v1_phase1_design.md
+  ///    2.4章の優先順位ルール）。代わりに`pending.finisherType`から
+  ///    「実効directPin」「実効submissionHold」を導出する（下記
+  ///    `effectiveDirectPin`/`effectiveSubmissionHold`）:
+  ///    `finisherType == directPin`ならDIRECT PINと同じ自動移行、
+  ///    `finisherType == submission`ならFINISHER専用SUBMISSION処理
+  ///    （10.2章、[determineFinisherSubmissionOutcome]）へ自動移行、
+  ///    `finisherType == normal`ならどちらの自動移行も発生しない（13章
+  ///    「成功しても自動PINしない。攻撃側がその後PINを選択できる」——
+  ///    通常のTECHNIQUE成功解決のみで終わり、攻撃側は`phase ==
+  ///    action`へ戻った後に任意で[declarePin]を呼べる、既存の汎用
+  ///    legality判定がそのまま適用される）。
+  ///
   /// 0. （上記1に先立って）DIRECT PIN/SUBMISSIONへ移行することが事前に
   ///    判明している場合、Phase 5/6のstate invariant
   ///    （[pinStateConsistencyViolation]/[submissionStateConsistencyViolation]）
@@ -966,14 +984,27 @@ class CombatV1Engine {
   ///    （DMG・HEAT・posture・discard・attacker
   ///    draw・`lastSuccessfulTechnique`のいずれもcommitされない——
   ///    「Technique成功だけ残してPIN/SUBMISSIONだけ拒否する」設計には
-  ///    しない）。
+  ///    しない）。FINISHERも同じ`effectiveDirectPin`/`effectiveSubmissionHold`
+  ///    を使ってこのガードを通る。
   static CombatV1MatchState _resolvePendingAttack(
     CombatV1MatchState state,
     CombatV1PendingAttack pending, {
     required CombatV1RulesConfig rules,
     required Random random,
   }) {
-    if (pending.directPin) {
+    // FINISHER（category==finisher）はdirectPin/submissionHoldフィールドを
+    // 参照せず、finisherTypeのみが決着方式を決定する（docs/combat_rules_v1.md
+    // 13章、docs/design/combat_v1_phase1_design.md 2.4章）。NORMAL/SIGNATURE
+    // は従来通りdirectPin/submissionHoldフィールドをそのまま使う。
+    final isFinisher = pending.category == CombatV1CardCategory.finisher;
+    final effectiveDirectPin = isFinisher
+        ? pending.finisherType == CombatV1FinisherType.directPin
+        : pending.directPin;
+    final effectiveSubmissionHold = isFinisher
+        ? pending.finisherType == CombatV1FinisherType.submission
+        : pending.submissionHold;
+
+    if (effectiveDirectPin) {
       final resolvedOpponentPosture =
           pending.resultOpponentState ?? state.opponent.posture;
       if (resolvedOpponentPosture == CombatV1WrestlerPosture.down) {
@@ -996,7 +1027,7 @@ class CombatV1Engine {
       }
     }
 
-    if (pending.submissionHold) {
+    if (effectiveSubmissionHold) {
       final wouldBeOpponentHp = max(
         0,
         min(state.opponent.hp - pending.damage, state.opponent.maxHp),
@@ -1078,8 +1109,10 @@ class CombatV1Engine {
 
     // 9. DIRECT PIN自動移行（同一遷移内、上記コメント参照）。相手がDOWNで
     // なければPINへは移行しない（PINは相手DOWNが前提、docs/combat_rules_v1.md
-    // 8章）。
-    if (pending.directPin &&
+    // 8章）。FINISHER（finisherType==directPin）も
+    // effectiveDirectPin経由で同じ_resolvePinを使う（Phase 9、13章
+    // 「B. DIRECT PIN FINISHER」——8章のPINカードルールにそのまま従う）。
+    if (effectiveDirectPin &&
         next.opponent.posture == CombatV1WrestlerPosture.down) {
       next = _resolvePin(
         next,
@@ -1089,19 +1122,22 @@ class CombatV1Engine {
         random: random,
         source: CombatV1PinSource.directPin,
       );
-    } else if (pending.submissionHold &&
+    } else if (effectiveSubmissionHold &&
         submissionEligible(opponentHp: next.opponent.hp, rules: rules)) {
       // 通常SUBMISSION自動移行（同一遷移内、docs/combat_rules_v1.md
       // 10.1章「相手HP50以下で宣言可能」、Phase 6）。DIRECT PINと同じ
       // 思想——`state.lastSuccessfulTechnique`（match-level・stale化
       // しうる）は一切参照せず、今まさに解決した[pending]を直接使うことで
-      // 古い成功記録によるSUBMISSIONの再発火を構造的に防ぐ。
+      // 古い成功記録によるSUBMISSIONの再発火を構造的に防ぐ。FINISHER
+      // （finisherType==submission）の場合はisFinisherSubmission経由で
+      // 専用SUBMISSION処理（10.2章、Phase 9）へ切り替える。
       next = _resolveSubmission(
         next,
         attackerIndex: pending.attackerPlayerIndex,
         defenderIndex: pending.defenderPlayerIndex,
         rules: rules,
         random: random,
+        isFinisherSubmission: isFinisher,
       );
     }
 
@@ -1382,13 +1418,15 @@ class CombatV1Engine {
       ? state.copyWith(playerA: update(state.playerA))
       : state.copyWith(playerB: update(state.playerB));
 
-  /// SUBMISSIONを解決する（submissionHold Technique自動移行専用、Phase 6、
-  /// docs/combat_rules_v1.md 10.1章「通常SUBMISSION」）。
+  /// SUBMISSIONを解決する（submissionHold Technique自動移行、および
+  /// FINISHER submissionType自動移行の共通処理、Phase 6・Phase 9、
+  /// docs/combat_rules_v1.md 10.1・10.2章）。
   ///
   /// 防御側の[CombatV1PlayerState.koc]から、ESCAPE可否を一括で自動決定する
-  /// （[determineSubmissionOutcome]。PINのKICK OUT自動判定と同じ思想——
-  /// 防御側が必要なKOCを保有していれば必ずESCAPEし、あえて支払わない選択肢は
-  /// 存在しない）。
+  /// （[isFinisherSubmission]がfalseなら[determineSubmissionOutcome]、
+  /// trueなら[determineFinisherSubmissionOutcome]。いずれもPINのKICK
+  /// OUT自動判定と同じ思想——防御側が必要なKOCを保有していれば必ずESCAPE
+  /// し、あえて支払わない選択肢は存在しない）。
   ///
   /// - ESCAPE: 防御側のKOCを[CombatV1RulesConfig.submissionEscapeKocCost]
   ///   だけ減らす。その後は攻撃側のターンを終了し、`endTurn`と同じ内部処理
@@ -1396,6 +1434,9 @@ class CombatV1Engine {
   ///   同じ扱い。Phase 6セッションでユーザーが確定した方針）。
   /// - GIVE UP: KOCを支払えず、攻撃側の勝利で試合が終了する
   ///   （[CombatV1MatchState.winnerPlayerIndex]を攻撃側に設定）。
+  ///   [isFinisherSubmission]がtrueの場合、解決後の相手HPが0であれば
+  ///   KOCの保有量に関わらず必ずこの分岐になる（docs/combat_rules_v1.md
+  ///   10.2章「HP0: 即GIVE UP」、Phase 9）。
   ///
   /// PINと異なりPINカードは一切操作しない（docs/combat_rules_v1.md
   /// 10章「SUBMISSIONはPINカードを使用しない」）。支払い可能性を先に判定
@@ -1407,30 +1448,43 @@ class CombatV1Engine {
     required int defenderIndex,
     required CombatV1RulesConfig rules,
     required Random random,
+    required bool isFinisherSubmission,
   }) {
     final attackerName =
         (attackerIndex == 0 ? state.playerA : state.playerB).wrestlerName;
     final defenderBefore = defenderIndex == 0 ? state.playerA : state.playerB;
     final defenderName = defenderBefore.wrestlerName;
+    final sourceLabel = isFinisherSubmission
+        ? 'FINISHER SUBMISSION'
+        : 'SUBMISSION';
 
     var next = state.copyWith(
-      log: [...state.log, '$attackerNameが$defenderNameへSUBMISSIONを仕掛けた'],
+      log: [...state.log, '$attackerNameが$defenderNameへ$sourceLabelを仕掛けた'],
     );
 
-    final outcome = determineSubmissionOutcome(
-      defenderKoc: defenderBefore.koc,
-      rules: rules,
-    );
+    final outcome = isFinisherSubmission
+        ? determineFinisherSubmissionOutcome(
+            opponentHp: defenderBefore.hp,
+            defenderKoc: defenderBefore.koc,
+            rules: rules,
+          )
+        : determineSubmissionOutcome(
+            defenderKoc: defenderBefore.koc,
+            rules: rules,
+          );
 
     if (outcome == CombatV1SubmissionOutcome.giveUp) {
-      // 必要なKOCを支払えない → GIVE UP、SUBMISSION決着
-      // （docs/combat_rules_v1.md 10.1章）。
+      // 必要なKOCを支払えない、またはFINISHER SUBMISSIONでHP0（10.2章）
+      // → GIVE UP、SUBMISSION決着（docs/combat_rules_v1.md 10.1・10.2章）。
+      final reasonLabel = isFinisherSubmission && defenderBefore.hp <= 0
+          ? 'HP0でESCAPEできず'
+          : 'KOC不足でESCAPEできず';
       return next.copyWith(
         winnerPlayerIndex: attackerIndex,
         log: [
           ...next.log,
-          '$defenderNameはKOC不足でESCAPEできず、'
-              '$attackerNameのSUBMISSION勝利（GIVE UP）で試合が終了した',
+          '$defenderNameは$reasonLabel、'
+              '$attackerNameの$sourceLabel勝利（GIVE UP）で試合が終了した',
         ],
       );
     }
@@ -1444,7 +1498,7 @@ class CombatV1Engine {
     next = next.copyWith(
       log: [
         ...next.log,
-        '$defenderNameがKOC$kocCostを支払いSUBMISSIONからESCAPEした',
+        '$defenderNameがKOC$kocCostを支払い$sourceLabelからESCAPEした',
       ],
     );
 
@@ -1467,8 +1521,11 @@ class CombatV1Engine {
   /// 3. cardIdが[catalog]に存在するか
   /// 4. COUNTERカードではないか（COUNTERはTECHNIQUEとして使用不可、7章）
   /// 5. `entry.category`とTechnique定義の`category`が一致するか
-  /// 6. FINISHERではないか（FINISHER本処理はPhase 9、13章）
-  /// 7. Technique定義の静的データが有効か（[CombatV1Technique.isStaticDataValid]）
+  /// 6. Technique定義の静的データが有効か（[CombatV1Technique.isStaticDataValid]。
+  ///    category/finisherTypeの不変条件チェックを含む——資源（HEAT）の
+  ///    有無を判定する前に、そもそもカードのデータが壊れていないかを
+  ///    先に確認する、Phase 9 Codexレビュー指摘対応）
+  /// 7. FINISHERなら共有HEATが解禁閾値に達しているか（13章、Phase 9）
   /// 8. `requiredOpponentState`を満たすか
   /// 9. ENERGYを支払えるか（ワイルド補完込み、5.1章）
   ///
@@ -1570,17 +1627,31 @@ class CombatV1Engine {
       );
     }
 
-    if (technique.category == CombatV1CardCategory.finisher) {
+    // データの妥当性（静的データvalidation）を、資源（HEAT）判定より先に
+    // 確認する。category==finisherかつfinisherType==nullのような壊れた
+    // データが、HEAT解禁チェックだけを通過して合法と誤判定されないように
+    // するため（Phase 9 Codexレビュー指摘「Reject finishers without a
+    // resolution type」対応。assertが無効化されるビルドでも
+    // [CombatV1Technique.hasConsistentFinisherType]経由でここが最終防衛線
+    // になる）。
+    if (!technique.isStaticDataValid) {
       return CombatV1ActionCheck.failure(
-        'FINISHERはまだ実装されていません（Phase 9で実装予定）',
-        CombatV1TechniqueLegalityReasonCode.finisherNotImplemented,
+        !technique.hasConsistentFinisherType
+            ? '技の静的データが不正です（category==finisherならfinisherTypeが'
+                  '必須、category!=finisherならfinisherTypeはnullである'
+                  '必要があります）'
+            : '技の静的データが不正です（ENERGY COST・DMG・HEATのいずれかが不正です）',
+        CombatV1TechniqueLegalityReasonCode.invalidTechniqueData,
       );
     }
 
-    if (!technique.isStaticDataValid) {
+    if (technique.category == CombatV1CardCategory.finisher &&
+        !finisherUnlocked(sharedHeat: state.sharedHeat, rules: rules)) {
       return CombatV1ActionCheck.failure(
-        '技の静的データが不正です（ENERGY COST・DMG・HEATのいずれかが不正です）',
-        CombatV1TechniqueLegalityReasonCode.invalidTechniqueData,
+        '共有HEATが${rules.finisherHeatThreshold}未満のためFINISHERは'
+        '使用できません（現在: ${state.sharedHeat}、docs/combat_rules_v1.md '
+        '12・13章）',
+        CombatV1TechniqueLegalityReasonCode.finisherHeatNotReached,
       );
     }
 

@@ -352,6 +352,7 @@ Phase 6で以下を正式実装した（技術設計の詳細は
 - **HP0: 即GIVE UP**（HP0による特殊決着の唯一の例外パターン。14章参照）。
 
 Phase 6ではSUBMISSION FINISHERのロジックは実装しない（Phase 9でFINISHER全体とあわせて実装する、13章）。
+SUBMISSION FINISHERの自動解決ロジック自体はPhase 9で正式実装した（13.3章参照）。
 
 ---
 
@@ -436,7 +437,60 @@ enum CombatV1FinisherType {
 汎用フラグの値だけを見てSUBMISSION FINISHERと自動判定する設計にはしない。
 
 Phase 1ではFINISHER決着ロジックは実装しない。`CombatV1FinisherType` enumおよび技モデル上の表現のみ
-先行して定義する。
+先行して定義する。FINISHER解禁・決着処理そのものはPhase 9で正式実装した（13.1〜13.4章参照）。
+
+### 13.1 FINISHER解禁条件（Phase 9で確定）
+
+- 共有HEAT（[`CombatV1MatchState.sharedHeat`](../design/combat_v1_phase1_design.md)）が
+  `CombatV1RulesConfig.finisherHeatThreshold`（既定200、12章）以上のとき、`category ==
+  finisher`のTECHNIQUEを宣言できる。判定は既存の`checkTechniqueLegality`へ統合し、専用の
+  独立APIは追加しない（`finisherHeatNotReached`reasonCode）。
+- HEATは消費リソースではない（12章）ため、一度解禁されたFINISHERがHEAT減少により再び
+  使用不可へ戻ることはない。
+- 1ターン内でのFINISHER使用回数に、SSOTが定める特別な上限は無い。4章の方針
+  （Combo Speed不採用、ENERGYのみが同一ターン内の技使用回数を制限する）がFINISHERにも
+  そのまま適用される。
+
+### 13.2 finisherTypeと技モデル上のフィールドとの関係（Phase 9で確定）
+
+`category == finisher`の技では、`directPin`/`submissionHold`フィールドはそもそも参照しない
+（`finisherType`のみが決着方式を決定する、2.4章で確定済みの優先順位ルールをPhase 9の実装へ
+反映した）。決着方式ごとの自動移行判定は、既存のDIRECT PIN／通常SUBMISSION自動移行の仕組み
+（8章・10.1章）を`finisherType`経由でそのまま再利用する:
+
+- `finisherType == normal`: 自動移行なし。攻撃側は事後に既存の`declarePin`
+  （8章、通常PINと同じlegality判定）を任意で呼べる。
+- `finisherType == directPin`: 技成功と同一Command内でPINへ自動移行する（8章のPINカード
+  ルール——カウント・KOC消費・PINカード移動・kick out後の展開まで——にそのまま従う）。
+- `finisherType == submission`: 13.3章のFINISHER専用SUBMISSION処理へ自動移行する。
+
+### 13.3 SUBMISSION FINISHERの自動解決（Phase 9で確定、10.2章とあわせて参照）
+
+`finisherType == submission`の技が成立し、解決後の相手HPが
+`CombatV1RulesConfig.submissionHpThreshold`（既定50）以下になった場合、通常SUBMISSION
+（10.1章）と同じ仕組みでTECHNIQUE成功解決と同一Command内で自動的にFINISHER専用SUBMISSION
+処理へ移行する（突入条件の閾値自体は通常SUBMISSIONと共通の値を再利用する）。
+
+ESCAPE/GIVE UP判定は通常SUBMISSIONと同じ「防御側KOCから完全自動で決定する」方式だが、
+唯一の相違点として10.2章の「HP0: 即GIVE UP」を実装する: 解決後の相手HPが0の場合、防御側の
+KOC保有量に関わらず必ずGIVE UPとなる（ESCAPEの機会自体が発生しない）。相手HPが1以上
+（かつ閾値以下）の場合は、通常SUBMISSIONと全く同じKOCベースのESCAPE/GIVE UP判定
+（防御側KOC>=1なら必ずESCAPE、KOC==0ならGIVE UP）を適用する。
+
+ESCAPE成功後の展開（攻撃側のターンを終了し、防御側の新しいターンへ進める）・PINカードを
+一切操作しない点は、いずれも通常SUBMISSIONと同一である。
+
+### 13.4 COUNTER・ROUGHとの関係（Phase 9で確定）
+
+- **COUNTER**: FINISHERはCOUNTER可能（Phase 9セッションでユーザーが確認）。既存の
+  `declareTechnique`→`counterResponsePending`→`playCounter`/`declineCounter`という
+  State Machine（7章）はカテゴリを問わず一律に適用され、FINISHERを対象外にする特別な
+  仕組みは導入しない。COUNTER成立時は他のTECHNIQUEと全く同じく完全に無効化される
+  （DMG・HEAT・相手posture変化のいずれも発生せず、`lastSuccessfulTechnique`も更新しない）。
+- **ROUGH**: FINISHER自体にROUGH属性（`attribute == rough`）が設定されている場合、
+  ROUGHの判定（15章）はcategoryを問わずattributeのみを基準にするため、既存のロジック
+  （宣言時点で`roughTechniqueUsedThisTurn`をセットする等）がそのまま適用される。FINISHER
+  専用の追加ルールは無い。
 
 ---
 
@@ -885,3 +939,16 @@ Playtest Analytics、Simulatorの設計、Report、Diagnosticsなど、Ver.1へ�
     1枚に含む（15.3章）。
   - 次ターン制限は、そのターンの終了とともに（消費の有無に関わらず）消滅する。持ち越しはしない
     （15.3章）。
+
+- **Phase 9（FINISHER）**: `CombatV1FinisherType`に基づく3種の決着フロー（13章）を正式実装した。
+  一次資料・`combat_rules_v1.md`本文には「共有HEAT200以上でFINISHER解禁」「FINISHERだから自動的に
+  PINになる、という処理にはしない」「finisherType 3種の意味」までは明記されていたが、以下は
+  明記されていなかったため、Phase 9実装セッション内でユーザーへ確認したうえで正式仕様として
+  採用した。
+  - FINISHERはCOUNTER可能（13.4章）。既存のCOUNTER State Machine（7章）をカテゴリを問わず
+    一律に適用し、FINISHERを対象外にする特別な仕組みは導入しない。
+  - それ以外の項目（FINISHER解禁条件・finisherTypeと`directPin`/`submissionHold`フィールドとの
+    優先順位・SUBMISSION FINISHERのHP0特例・COUNTER以外の決着タイミング等）は、いずれも
+    Phase 0〜8で既に確定していたSSOT本文・優先順位ルール（2.4章、`combat_v1_open_questions.md`
+    G番）から導出可能だったため、新たな確認は不要と判断した（13.1〜13.3章参照）。
+  - `CombatV1RulesConfig.finisherHeatThreshold`（既定200）を新規追加した。

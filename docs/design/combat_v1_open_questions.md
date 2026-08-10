@@ -111,6 +111,25 @@ PINとの関係、次ターン制限の失効条件は記載がなかったた�
 
 ---
 
+## Phase 9時点で解決した項目（Phase 9セッションで確定）
+
+以下は前回（Phase 0）時点で「Phase 9着手前に決める必要がある」としていたが、Phase 9セッションで
+明示的に確定した。`combat_rules_v1.md`本文（12・13・10.2章）はFINISHER解禁条件・finisherType
+3種の意味・SUBMISSION FINISHERのHP0特例までは明記していたが、FINISHERとCOUNTERの関係
+（7章・13章のいずれにも相互の言及がなかった）だけは記載がなかったため、Phase
+9実装セッション内でユーザーへ確認したうえで正式仕様として採用した。
+
+| # | 項目 | 確定内容 | 関連章 |
+|---|---|---|---|
+| AA | FINISHERはCOUNTER可能か | COUNTER可能で確定した。既存のCOUNTER State Machine（7章、`declareTechnique`→`counterResponsePending`→`playCounter`/`declineCounter`）をカテゴリを問わず一律に適用し、FINISHERを対象外にする特別な仕組みは導入しない | `combat_rules_v1.md` 13.4章 |
+
+それ以外の項目（FINISHER解禁条件・`finisherType`と`directPin`/`submissionHold`フィールドとの
+優先順位・SUBMISSION FINISHERのHP0特例・PIN/GIVE UPを経由する決着タイミング等）は、いずれも
+Phase 0〜8で既に確定していたSSOT本文・優先順位ルール（`combat_rules_v1.md` 2.4章相当、本書G番）
+から導出可能だったため、Phase 9では新たな確認を行わなかった。
+
+---
+
 ## 後続Phaseまで保留可能な項目
 
 ### 1. PINカード「共有4枚」の管理構造

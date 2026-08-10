@@ -31,6 +31,7 @@ class CombatV1RulesConfig {
     this.submissionEscapeKocCost = 1,
     this.restHpRecovery = 10,
     this.roughRestrictedTechniqueLimit = 1,
+    this.finisherHeatThreshold = 200,
   });
 
   /// 全レスラー共通の初期HP（docs/combat_rules_v1.md 2・14章）。
@@ -107,6 +108,14 @@ class CombatV1RulesConfig {
   /// `techniquesUsedThisTurn`と同じ「使用」基準でカウントする、Phase
   /// 8セッションでユーザーが確定した方針）。
   final int roughRestrictedTechniqueLimit;
+
+  /// FINISHERが使用可能になる共有HEATの閾値（docs/combat_rules_v1.md
+  /// 12章「200以上でFINISHER解禁」・13章、Phase 9）。
+  /// [CombatV1MatchState.sharedHeat]がこの値以上のとき、`category ==
+  /// finisher`のTECHNIQUEを宣言できる。HEATは消費リソースではないため
+  /// （12章）、一度解禁されたFINISHERがHEAT減少により再び使用不可へ戻る
+  /// ことはない。
+  final int finisherHeatThreshold;
 
   /// [category]の同名カード上限（docs/combat_rules_v1.md 3章）。
   /// Deck validation（[../combat_v1_deck_validation.dart]）が参照する
