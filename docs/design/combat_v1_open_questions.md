@@ -130,6 +130,23 @@ Phase 0〜8で既に確定していたSSOT本文・優先順位ルール（`comb
 
 ---
 
+## Phase 10A時点で解決した項目（豪田ミサキ Production Data実装セッションで確定）
+
+以下は`combat_rules_v1.md`19章（豪田ミサキTECHNIQUE検証版）・18章（ENERGY配分検証値）だけでは
+Production Dataとして確定しきれなかった項目。Phase 10A実装セッション内でユーザーへ確認したうえで
+正式仕様として採用した。詳細・全データは
+[`combat_v1_phase10_production_data.md`](combat_v1_phase10_production_data.md)を参照。
+
+| # | 項目 | 確定内容 | 関連章 |
+|---|---|---|---|
+| BB | 豪田ドライバーのfinisherType | `normal`で確定した（豪田ボムは19章表の「DIRECT PIN」注記から`directPin`として確定済み、追加確認不要と判断） | `combat_v1_phase10_production_data.md` 3.1章 |
+| CC | ミサキENERGY Poolの検証値→Production値への昇格 | 18章の検証値（打3/関0/投4/飛0/ラフ1/＊1＝9）をそのままProduction値として正式採用した | `combat_v1_phase10_production_data.md` 2.1章 |
+| DD | ミサキ12技のTechnique Family割当 | 技名から自然に導ける現行30 family taxonomy上のmappingを正式採用した（19章本文には未記載だった） | `combat_v1_phase10_production_data.md` 3章 |
+| EE | ミサキ用COUNTER 3種の正式割当 | 広範囲型（STRIKE group／打）・中範囲型（BACKDROP+SUPLEX／投）・専門型（POWERBOMB／投）の3種を正式採用した（Excel「返し技一覧」はレスラー未割当・現行モデル非互換のため参考名称のみ使用） | `combat_v1_phase10_production_data.md` 4章 |
+| FF | Stable ID規約（Technique/Wrestler/Counter） | Technique: `<wrestler-stable-key>_<technique-stable-key>`。Wrestler: 短いASCII key（`misaki`）。Counterはレスラー非依存の共有definitionとして`counter_<counter-stable-key>`とする | `combat_v1_phase10_production_data.md` 1章 |
+
+---
+
 ## 後続Phaseまで保留可能な項目
 
 ### 1. PINカード「共有4枚」の管理構造
