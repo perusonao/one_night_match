@@ -573,3 +573,126 @@ pendingが所有するはずの攻撃カードが誤ってhand/drawPile/discardP
 `koc`/`pinCardsHeld`/`energyPool`/`reshuffleCount`等を検証していなかった。これらすべてを含む
 真の全field比較へ拡張した（実装ヘルパーをoracleにせず、Phase 3確定仕様に基づくliteral値で
 比較する既存方針は維持）。STAND→STAND等の既存6シナリオは変更していない。
+
+---
+
+## 14. Phase 5での更新（PIN/KOC）
+
+Phase 5（PIN/KOC）で、本書のPhase 1〜4設計から以下を更新した。ゲームルール自体
+（`combat_rules_v1.md` 8・9章）の新規確定事項は同書8章・29章「変更履歴」を参照。ここでは実装
+内部の技術設計の差分を記す。
+
+### 14.1 新規ファイル
+
+`lib/src/combat_v1/combat_v1_pin_rules.dart`（§1で想定していた`combat_v1_pin_rules.dart`の
+役割をほぼそのまま踏襲）を追加した。count決定（`determinePinCountResult`）・KOCコスト
+（`pinKocCostFor`）・PINカード移動可否（`pinCardMovesFor`/`pinCardTransferAmount`）・
+1カウントの追加ドロー可否（`pinCountGrantsBonusDraw`）・2.9カウントの攻撃継続可否
+（`pinCountAllowsAttackerToContinue`）を純粋関数として切り出し、`combat_v1_engine.dart`側の
+state遷移配線と責務を分離した（`combat_v1_counter_rules.dart`と同じ方針）。
+
+テストファイルとして`test/combat_v1/combat_v1_pin_test.dart`を追加した。
+
+### 14.2 State Machineに`pinResponsePending`を追加しない設計判断
+
+`combat_rules_v1.md` 8.2章で確定したとおり、PINのカウントは段階応答方式ではなく
+「PIN開始時点の防御側KOCから最終カウントを一括決定する」方式であり、KICK OUTも自動
+（防御側の任意choiceが存在しない）。このため、COUNTERの`counterResponsePending`のような
+防御側の実質的な選択を待つ中間フェーズは導入していない。`declarePin`（およびDIRECT PIN
+自動遷移）は、legality検証からカウント決定・KOC消費・PINカード移動・kick out後の展開
+（ターン終了 or 攻撃継続）までを単一のCommand呼び出し内で完結させる。
+
+この設計判断により、`CombatV1PendingPin`のようなpublic Domain modelおよび
+`CombatV1MatchPhase.pinResponsePending`は追加していない（`CombatV1PendingAttack`・
+`counterResponsePending`とは異なり、PINには「宣言はしたが未解決」という状態を跨いで保持する
+必要がないため）。
+
+### 14.3 `combat_v1_enums.dart`への追加
+
+- `CombatV1PinCountResult`（`one`/`two`/`twoPointNine`の3値enum、`displayLabel`extension
+  付き）: `2.9`をdoubleのようなfloatで持たず、閉じた型で表現する（8.2章）。
+- `CombatV1PinSource`（`normal`/`directPin`）: 通常PINとDIRECT PINをログ・テストが区別できる
+  ようにするための最小限のenum。
+
+### 14.4 `CombatV1RulesConfig`への追加
+
+`totalPinCards`（既定4）・`pinCountOneKocCost`（既定3）・`pinCountTwoKocCost`（既定2）・
+`pinCountTwoPointNineKocCost`（既定1）を追加した（`combat_rules_v1.md` 8.1・8.2章）。
+
+### 14.5 `CombatV1MatchState.winnerPlayerIndex`/`isOver`の追加
+
+Phase 1（§2.6）でPhase 5〜9のいずれかで実際の決着条件と同時に追加すると保留していた
+`winner`/`isOver`を、Phase 5でPINによる3カウント決着が初めて発生しうるようになったため
+正式追加した。`winnerPlayerIndex: int?`（`0`=playerA、`1`=playerB）と、そこから導出する
+`isOver`getterのみを持つ（勝者名stringの重複保存はしない）。`lastSuccessfulTechnique`と同じく
+一方向（null→非null）にのみ更新するため、`copyWith`は同じ`??`パターンで扱う（クリア専用
+メソッドは不要）。
+
+### 14.6 `CombatV1SuccessfulTechniqueSnapshot.turnNumber`の追加
+
+通常PIN（`declarePin`）のlegality判定「その攻撃ターン中にTECHNIQUEを成功させている場合」
+（`combat_rules_v1.md` 8章）を判定するために追加した。`lastSuccessfulTechnique`は
+match-levelでターンを跨いで残るため（13章）、`attackerPlayerIndex`の一致だけでは
+「今の攻撃ターン中」の判定に使えない。成立した時点の`CombatV1MatchState.turnNumber`を
+snapshotへ保持し、`checkPinLegality`が現在の`turnNumber`と一致するかまで確認することで、
+staleなsnapshotによる誤判定・DIRECT PINの再発火を防止する。既存フィールドは変更していない
+（後方互換な追加）。
+
+### 14.7 Engine API（`declarePin`/`checkPinLegality`/`hasPinOption`）
+
+```dart
+static CombatV1MatchState declarePin(
+  CombatV1MatchState state, {
+  required CombatV1RulesConfig rules,
+  Random? random,
+});
+
+static CombatV1PinActionCheck checkPinLegality(CombatV1MatchState state);
+static bool hasPinOption(CombatV1MatchState state);
+```
+
+`declarePin`は`action`フェーズから攻撃側が任意に呼び出す（`combat_rules_v1.md` 8章）。
+`checkPinLegality`は`CombatV1PinLegalityReasonCode`（`legal`/`matchOver`/`wrongPhase`/
+`opponentNotDown`/`noSuccessfulTechniqueThisTurn`）を返す読み取り専用API（既存の
+`CombatV1ActionCheck`/`CombatV1CounterActionCheck`と同じ`success`/`failure`ファクトリ設計）。
+
+DIRECT PINは専用のlegality APIを持たない。`_resolvePendingAttack`（decline経路の攻撃成立処理）
+の末尾で、pending攻撃自身の`directPin`フラグと解決後の相手postureのみを見て同一Command内で
+`_resolvePin`（`declarePin`と共通の内部解決処理）を呼び出す。`state.lastSuccessfulTechnique`
+（match-level・stale化しうる）は一切参照しないため、古い成功記録によるPINの再発火が構造的に
+起こらない。
+
+### 14.8 Game-over guard
+
+`combat_rules_v1.md` 8.2章の3カウント決着により`CombatV1MatchState.isOver`が`true`になった
+以後、`declareTechnique`/`playCounter`/`declineCounter`/`declarePin`/`endTurn`/`discardCard`の
+いずれも`CombatV1IllegalActionException`を送出する（silent no-opにしない）。
+`checkTechniqueLegality`/`checkPinLegality`には`matchOver`reasonCodeを追加した
+（`phase == action`のまま試合が終了するケースがあるため、`wrongPhase`とは独立に判定する）。
+`checkCounterLegality`には`matchOver`を追加していない——試合終了は常に`phase == action`の
+状態で発生し、`counterResponsePending`へは試合終了後に新規遷移しえない（`declareTechnique`
+自体が`matchOver`で拒否されるため）ため、`checkCounterLegality`側に追加すると到達不能な
+reasonCodeになってしまう（11.2章で削除した`notTechnique`と同じ理由）。`playCounter`/
+`declineCounter`自体には、この構造的な保証とは独立に防御的な`isOver`guardを直接配線して
+いる。
+
+### 14.9 Domain invariantの追加
+
+`combat_v1_state_invariants.dart`へ以下を追加した。
+
+- `CombatV1PlayerStateInvariantErrorCode.negativeKoc`（`koc < 0`）・
+  `pinCardsHeldBelowMinimum`（`pinCardsHeld < 1`）を`validatePlayerStateInvariants`へ追加。
+- `CombatV1MatchStateInvariantErrorCode.pinCardsTotalMismatch`
+  （`playerA.pinCardsHeld + playerB.pinCardsHeld != rules.totalPinCards`）を
+  `validateMatchStateInvariants`へ追加。既存呼び出し（`rules`引数なし）と後方互換にするため、
+  `rules`は`CombatV1RulesConfig rules = const CombatV1RulesConfig()`という既定値付き
+  named引数として追加した。
+
+### 14.10 `combat_v1_test_fixtures.dart`の拡張
+
+`buildMatchState`へ`kocA`/`kocB`/`pinCardsHeldA`/`pinCardsHeldB`/`turnNumber`/
+`lastSuccessfulTechnique`/`winnerPlayerIndex`を追加した（すべて既定値が既存の固定値
+——`koc=10`・`pinCardsHeld=2`・`turnNumber=1`・`null`——と一致するため、既存の呼び出し
+箇所は無変更で動作する）。`fixtureSuccessfulTechnique`ヘルパーと、DIRECT PIN検証用の
+NORMAL技`fx_normal_direct_pin`（`fixtureDeckSpec`には含めない——既存30枚デッキ構成テストへ
+影響を与えないため）を追加した。

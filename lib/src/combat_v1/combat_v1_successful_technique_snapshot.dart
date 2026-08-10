@@ -23,6 +23,7 @@ import 'combat_v1_enums.dart';
 class CombatV1SuccessfulTechniqueSnapshot {
   const CombatV1SuccessfulTechniqueSnapshot({
     required this.attackerPlayerIndex,
+    required this.turnNumber,
     required this.cardInstanceId,
     required this.cardId,
     required this.category,
@@ -36,6 +37,17 @@ class CombatV1SuccessfulTechniqueSnapshot {
 
   /// 成立させた攻撃側のplayerIndex。
   final int attackerPlayerIndex;
+
+  /// 成立した時点の`CombatV1MatchState.turnNumber`（Phase 5、新規追加）。
+  ///
+  /// 通常PIN（`declarePin`）の開始条件「その攻撃ターン中にTECHNIQUEを
+  /// 成功させている場合」（docs/combat_rules_v1.md 8章）を判定するために
+  /// 必要。`lastSuccessfulTechnique`はmatch-levelでターンを跨いで残るため
+  /// （13章）、`attackerPlayerIndex`の一致だけでは「今の攻撃ターン中」の
+  /// 判定に使えない（DOWNのままターンが進行するとstaleな成功記録を誤って
+  /// 参照しうる、Phase 5 stale snapshot対策）。`turnNumber`も一致することを
+  /// 合わせて確認することで、staleなsnapshotによる誤判定を防ぐ。
+  final int turnNumber;
 
   final String cardInstanceId;
   final String cardId;

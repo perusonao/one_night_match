@@ -46,15 +46,26 @@ Phase 1のCore Skeleton実装は、現在のSSOT（`combat_rules_v1.md`）と技
 
 ---
 
+## Phase 5時点で解決した項目（Phase 5セッションで確定）
+
+以下は前回（Phase 0）時点で「Phase 5着手前に決める必要がある」としていたが、Phase 5セッションで
+明示的に確定した。`combat_rules_v1.md`本文（一次資料由来）には記載がなかったため、Phase
+5実装セッション内でユーザーへ確認したうえで正式仕様として採用した。
+
+| # | 項目 | 確定内容 | 関連章 |
+|---|---|---|---|
+| J | PINカード「共有4枚」の管理構造・移動の主体と向き | 中央poolは持たず各`CombatV1PlayerState.pinCardsHeld`で管理し、`playerA.pinCardsHeld + playerB.pinCardsHeld == 4`をmatch-level invariantとして保証する（構造面はPhase1時点の想定どおり）。移動の主体と向きは、攻撃側が自分のPINカードを1枚使用してPINを開始し、1／2カウントでkick outされた場合にそのカードが攻撃側→防御側へ移動する、で確定した | `combat_rules_v1.md` 8.1章 |
+| K | PINカウントの決定方式 | 段階応答（`pinResponsePending`のような多段階の入力待ち）ではなく、PIN開始時点の防御側KOCから最終カウントを一括で決定する方式で確定した | `combat_rules_v1.md` 8.2章 |
+| L | KICK OUTの方式 | 自動（防御側が必要KOCを保有していれば必ずkick outし、「保有していてもあえて支払わない」という選択肢は存在しない）で確定した | `combat_rules_v1.md` 8.2章 |
+| M | kick out後の展開（phase/activePlayerIndex） | 1／2カウントは攻撃側のターンを終了し防御側へ主導権を移す（`endTurn`と同じ内部処理）。2.9カウントは攻撃側が`action`フェーズへ戻り攻撃を継続できる（`activePlayerIndex`不変）、で確定した | `combat_rules_v1.md` 8.3章 |
+
+---
+
 ## 後続Phaseまで保留可能な項目
 
 ### 1. PINカード「共有4枚」の管理構造
 
-- 関連章: `combat_rules_v1.md` 8.1章
-- 内容: Phase1では`CombatV1PlayerState.pinCardsHeld`を各プレイヤーが独立して持つ単純な`int`として
-  初期化するのみ。「共有4枚」という制約（`playerA.pinCardsHeld + playerB.pinCardsHeld == 4`が常に
-  成り立つべきという不変条件）を`CombatV1MatchState`側で検証・保証する仕組みを持たせるかどうかは未検討。
-- 解決が必要な時期: **Phase 5（PIN/KOC実装）着手前**。
+**Phase 5で解決済み（J番）。上記「Phase 5時点で解決した項目」参照。**
 
 ### 2. ジャックのデッキ配分（SIGNATURE/FINISHER/COUNTER内訳）
 
@@ -83,9 +94,11 @@ Phase 1のCore Skeleton実装は、現在のSSOT（`combat_rules_v1.md`）と技
 ### 6. `CombatV1MatchState`への集計系フィールドの要否
 
 - 関連章: `combat_v1_phase1_design.md` 2.6章
-- 内容: `winner`/`isOver`はPhase1では追加しないことを確定した。ただしPhase5〜9のどのタイミングで、
-  どのような形（`winnerIndex: int?`、`winReason: String?`等）で追加するかは各Phase着手時に個別判断する。
-- 解決が必要な時期: 各該当Phase（5・6・9のいずれか）着手時。
+- 内容: `winner`/`isOver`はPhase1では追加しないことを確定していた。**Phase 5で解決済み**:
+  PINによる3カウント決着が初めて発生しうるようになったため、`winnerPlayerIndex: int?`と、
+  そこから導出する`isOver`getterを`CombatV1MatchState`へ正式追加した（勝者名stringの重複保存は
+  しない）。技術設計の詳細は`combat_v1_phase1_design.md`「14.5章」参照。
+- 解決が必要な時期: ~~各該当Phase（5・6・9のいずれか）着手時~~ → Phase 5で解決済み。
 
 ### 7. Legacy Engine Removal Gate通過後の資産移植範囲の詳細
 

@@ -10,7 +10,8 @@
 // sharedHeat・activePlayerIndex・turnNumber・phase・pendingAttack全field・
 // lastSuccessfulTechnique・log内容全体を含めて意味的完全同値であることを
 // 検証する（単なるinstanceId一覧やlist長ではなく、値そのものを比較する。
-// Phase 4 Codexレビュー指摘M1）。
+// Phase 4 Codexレビュー指摘M1）。Phase 5で`winnerPlayerIndex`・
+// `lastSuccessfulTechnique.turnNumber`を追加した。
 
 import 'dart:math';
 
@@ -54,6 +55,7 @@ class _FullStateSnapshot {
       lastSuccessfulTechnique = s.lastSuccessfulTechnique == null
           ? null
           : _LastSuccessfulTechniqueSnapshot(s.lastSuccessfulTechnique!),
+      winnerPlayerIndex = s.winnerPlayerIndex,
       log = List.of(s.log);
 
   final String matchId;
@@ -65,6 +67,7 @@ class _FullStateSnapshot {
   final CombatV1MatchPhase phase;
   final _PendingAttackSnapshot? pendingAttack;
   final _LastSuccessfulTechniqueSnapshot? lastSuccessfulTechnique;
+  final int? winnerPlayerIndex;
   final List<String> log;
 
   void expectUnchanged(CombatV1MatchState after, {String? reason}) {
@@ -98,16 +101,23 @@ class _FullStateSnapshot {
         reason: reason,
       );
     }
+    expect(
+      after.winnerPlayerIndex,
+      winnerPlayerIndex,
+      reason: '$reason: winnerPlayerIndex',
+    );
     expect(List.of(after.log), log, reason: '$reason: log');
   }
 }
 
-/// [CombatV1SuccessfulTechniqueSnapshot]の全10 fieldを比較するsnapshot
+/// [CombatV1SuccessfulTechniqueSnapshot]の全fieldを比較するsnapshot
 /// （Phase 4 Codex再レビュー指摘M1対応。旧実装は`cardInstanceId`のみを
-/// 比較しており、他fieldの意図しない変化を検出できなかった）。
+/// 比較しており、他fieldの意図しない変化を検出できなかった。Phase
+/// 5で`turnNumber`を追加）。
 class _LastSuccessfulTechniqueSnapshot {
   _LastSuccessfulTechniqueSnapshot(CombatV1SuccessfulTechniqueSnapshot s)
     : attackerPlayerIndex = s.attackerPlayerIndex,
+      turnNumber = s.turnNumber,
       cardInstanceId = s.cardInstanceId,
       cardId = s.cardId,
       category = s.category,
@@ -119,6 +129,7 @@ class _LastSuccessfulTechniqueSnapshot {
       resultOpponentState = s.resultOpponentState;
 
   final int attackerPlayerIndex;
+  final int turnNumber;
   final String cardInstanceId;
   final String cardId;
   final CombatV1CardCategory category;
@@ -134,6 +145,11 @@ class _LastSuccessfulTechniqueSnapshot {
       after.attackerPlayerIndex,
       attackerPlayerIndex,
       reason: '$reason: lastSuccessfulTechnique.attackerPlayerIndex',
+    );
+    expect(
+      after.turnNumber,
+      turnNumber,
+      reason: '$reason: lastSuccessfulTechnique.turnNumber',
     );
     expect(
       after.cardInstanceId,
@@ -807,5 +823,88 @@ void main() {
         snapshot.expectUnchanged(malformedState, reason: '${entry.key} (declineCounter)');
       });
     }
+  });
+
+  group('Phase 5: 不正PIN Commandのatomicity（docs/combat_rules_v1.md 8章）', () {
+    test('wrong phase（discard中）でdeclarePinは失敗しstate完全不変', () {
+      final state = buildMatchState(
+        phase: CombatV1MatchPhase.discard,
+        postureB: CombatV1WrestlerPosture.down,
+        lastSuccessfulTechnique: fixtureSuccessfulTechnique(
+          attackerPlayerIndex: 0,
+          turnNumber: 1,
+        ),
+      );
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'wrong phase declarePin');
+    });
+
+    test('相手がSTANDでdeclarePinは失敗しstate完全不変（KOC/PINカードも不変）', () {
+      final state = buildMatchState(
+        lastSuccessfulTechnique: fixtureSuccessfulTechnique(
+          attackerPlayerIndex: 0,
+          turnNumber: 1,
+        ),
+      );
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'opponentNotDown declarePin');
+    });
+
+    test('このターン中の成功記録が無い場合、declarePinは失敗しstate完全不変', () {
+      final state = buildMatchState(postureB: CombatV1WrestlerPosture.down);
+      final snapshot = _FullStateSnapshot(state);
+
+      expect(
+        () => CombatV1Engine.declarePin(state, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(state, reason: 'noSuccessfulTechniqueThisTurn declarePin');
+    });
+
+    test('試合終了後（winnerPlayerIndex設定済み）は全戦闘Commandが拒否されstate完全不変', () {
+      final endedState = buildMatchState(
+        handA: const [attack],
+        handB: const [matchingCounter],
+      ).copyWith(winnerPlayerIndex: 0);
+      final snapshot = _FullStateSnapshot(endedState);
+
+      expect(
+        () => CombatV1Engine.declareTechnique(
+          endedState,
+          'atk1',
+          catalog: fixtureCatalog,
+        ),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(endedState, reason: 'matchOver declareTechnique');
+
+      expect(
+        () => CombatV1Engine.declarePin(endedState, rules: fixtureRules),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(endedState, reason: 'matchOver declarePin');
+
+      expect(
+        () => CombatV1Engine.endTurn(endedState),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(endedState, reason: 'matchOver endTurn');
+
+      expect(
+        () => CombatV1Engine.discardCard(endedState, 'atk1'),
+        throwsA(isA<CombatV1IllegalActionException>()),
+      );
+      snapshot.expectUnchanged(endedState, reason: 'matchOver discardCard');
+    });
   });
 }

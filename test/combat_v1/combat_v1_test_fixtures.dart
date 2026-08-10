@@ -18,6 +18,7 @@ import 'package:one_night_match/src/combat_v1/combat_v1_engine.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_match_state.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_successful_technique_snapshot.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_technique.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_wrestler.dart';
 
@@ -144,6 +145,24 @@ const Map<String, CombatV1Technique> fixtureTechniques = {
     heatGain: 10,
     family: CombatV1TechniqueFamily.backdrop,
   ),
+  /// Phase 5専用: DIRECT PINを持つNORMAL技（docs/combat_rules_v1.md 8章
+  /// 「DIRECT PINを持つ技は成功後に自動的にPINへ移行する」）。`category !=
+  /// finisher`のためFINISHER関連分岐（13章）を経由せず、`directPin`
+  /// フラグのみで検証できる（[fixtureDeckSpec]には含めない——通常の30枚
+  /// デッキ構成テストへ影響を与えないため、declareTechnique/checkPin系の
+  /// テストでカタログへ直接この技を渡す用途専用）。
+  'fx_normal_direct_pin': CombatV1Technique(
+    id: 'fx_normal_direct_pin',
+    name: 'テスト自動移行技',
+    category: CombatV1CardCategory.normal,
+    attribute: CombatV1EnergyAttribute.throwing,
+    energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.throwing: 1}),
+    damage: 20,
+    heatGain: 20,
+    resultOpponentState: CombatV1WrestlerPosture.down,
+    directPin: true,
+    family: CombatV1TechniqueFamily.backdrop,
+  ),
   'fx_signature_a': CombatV1Technique(
     id: 'fx_signature_a',
     name: 'テスト固有技A',
@@ -253,14 +272,21 @@ CombatV1MatchState buildMatchState({
   int techniquesUsedA = 0,
   int techniquesUsedB = 0,
   int activePlayerIndex = 0,
+  int kocA = 10,
+  int kocB = 10,
+  int pinCardsHeldA = 2,
+  int pinCardsHeldB = 2,
+  int turnNumber = 1,
+  CombatV1SuccessfulTechniqueSnapshot? lastSuccessfulTechnique,
+  int? winnerPlayerIndex,
 }) {
   final playerA = CombatV1PlayerState(
     wrestlerId: fixtureWrestlerA.id,
     wrestlerName: fixtureWrestlerA.name,
     maxHp: 150,
     hp: hpA,
-    koc: 10,
-    pinCardsHeld: 2,
+    koc: kocA,
+    pinCardsHeld: pinCardsHeldA,
     posture: postureA,
     energyPool: fixtureWrestlerA.energyPool,
     spentEnergy: spentA,
@@ -274,8 +300,8 @@ CombatV1MatchState buildMatchState({
     wrestlerName: fixtureWrestlerB.name,
     maxHp: 150,
     hp: hpB,
-    koc: 10,
-    pinCardsHeld: 2,
+    koc: kocB,
+    pinCardsHeld: pinCardsHeldB,
     posture: postureB,
     energyPool: fixtureWrestlerB.energyPool,
     spentEnergy: spentB,
@@ -290,10 +316,34 @@ CombatV1MatchState buildMatchState({
     playerB: playerB,
     activePlayerIndex: activePlayerIndex,
     sharedHeat: sharedHeat,
-    turnNumber: 1,
+    turnNumber: turnNumber,
     phase: phase,
+    lastSuccessfulTechnique: lastSuccessfulTechnique,
+    winnerPlayerIndex: winnerPlayerIndex,
   );
 }
+
+/// [attackerPlayerIndex]が現在ターン（[turnNumber]）にTECHNIQUEを成功させた
+/// ことを示す`lastSuccessfulTechnique`を組み立てる（Phase 5、通常PINの
+/// legality判定テスト用）。値は[fixtureTechniques]の`fx_normal_throw_down`
+/// （STAND→DOWN）を基準にした最小限のダミー値。
+CombatV1SuccessfulTechniqueSnapshot fixtureSuccessfulTechnique({
+  required int attackerPlayerIndex,
+  required int turnNumber,
+  bool directPin = false,
+}) => CombatV1SuccessfulTechniqueSnapshot(
+  attackerPlayerIndex: attackerPlayerIndex,
+  turnNumber: turnNumber,
+  cardInstanceId: 'fx_last_success',
+  cardId: 'fx_normal_throw_down',
+  category: CombatV1CardCategory.normal,
+  attribute: CombatV1EnergyAttribute.throwing,
+  family: CombatV1TechniqueFamily.slam,
+  directPin: directPin,
+  submissionHold: false,
+  finisherType: null,
+  resultOpponentState: CombatV1WrestlerPosture.down,
+);
 
 /// カード内訳の指定から物理カード（[CombatV1DeckEntry]）のリストを生成する
 /// （instanceIdはユニーク）。テストで様々な（正しい／不正な）デッキを

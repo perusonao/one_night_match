@@ -230,41 +230,78 @@ TECHNIQUEは禁止する。Cost側にwild要求を設定することも禁止（
 
 ---
 
-## 8. PIN
+## 8. PIN（Phase 5で正式実装）
 
-通常PINは、相手がDOWNで、その攻撃ターン中にTECHNIQUEを成功させている場合に行える。
-DIRECT PINを持つ技は成功後に自動的にPINへ移行する。**DIRECT PINでもPINカードを使用する**。
+通常PINは、相手がDOWNで、その攻撃ターン中にTECHNIQUEを成功させている場合に行える
+（`action`フェーズから攻撃側が任意に宣言する。Engine APIは`declarePin`、8.3章参照）。
+DIRECT PINを持つ技は成功後に自動的にPINへ移行する（TECHNIQUE成功解決と同一Command内で
+遷移し、後から古い成功記録を参照して再発火させることはない、8.3章参照）。
+**DIRECT PINでもPINカードを使用する**。
 
 ### 8.1 PINカード
 
-- PINカードは共有4枚。試合開始時は各プレイヤー2枚ずつ保持する。
-- 1カウント／2カウントで終了したPINでは、使用したPINカードを**原則として**相手側へ移動する。
-- 2.9カウントでは移動しない。
-- **最低1枚保証（正式採用）**: 現在PINカードが1枚しかないプレイヤーは、そのカードを相手へ移動しない。
-  つまり各プレイヤーは常に最低1枚のPINカードを保持する。
+- PINカードは共有4枚。試合開始時は各プレイヤー2枚ずつ保持する。中央poolは持たず、
+  各PlayerStateの保有枚数（`pinCardsHeld`）で管理する
+  （`playerA.pinCardsHeld + playerB.pinCardsHeld == 4`を常に維持するmatch-level invariant）。
+- **移動の主体と向き（Phase 5で確定）**: PINは攻撃側が自分の保有PINカードを1枚使用して開始する。
+  1カウントまたは2カウントでkick outされた場合、攻撃側が使用したそのPINカード1枚を
+  **攻撃側→防御側へ**移動する。
+- 2.9カウントでkick outされた場合はPINカードを移動しない。攻撃側は使用したPINカードを
+  そのまま保持し、攻撃側は`action`フェーズへ戻って攻撃を継続する（8.2・8.3章参照）。
+- **最低1枚保証（正式採用）**: 現在PINカードが1枚しかないプレイヤー（この場合は攻撃側）は、
+  そのカードを相手へ移動しない。つまり各プレイヤーは常に最低1枚のPINカードを保持する
+  （移動が抑止されても、KOC消費・カウント結果自体は通常どおり発生する）。
+
+例（攻撃側A・防御側B、A=1枚しか保有していない場合）:
+
+```
+A.pinCardsHeld = 1, B.pinCardsHeld = 3
+1カウントでkick out → 最低1枚保証によりカードは移動しない（A=1のまま、B=3のまま）
+```
 
 ### 8.2 カウント
 
-| カウント | 消費KOC | 効果 |
-|---|---|---|
-| 1カウント | KOC3 | 返した側は山札から追加で1枚引く |
-| 2カウント | KOC2 | — |
-| 2.9カウント | KOC1 | 攻撃側は攻撃を継続できる |
+PINのカウントは、防御側が段階ごとに応答する多段階のやり取りではなく、
+**PIN開始時点の防御側KOCから最終カウントを一括で決定する**（`pinResponsePending`のような
+段階的な入力待ちフェーズは設けない、8.3章参照）。
 
-必要なKOCを支払えなければ3カウントとなり、PIN決着。
+| 防御側KOC | 消費KOC | カウント | 効果 |
+|---|---|---|---|
+| KOC >= 3 | KOC3 | 1カウント | 返した側（防御側）は山札から追加で1枚引く |
+| KOC == 2 | KOC2 | 2カウント | — |
+| KOC == 1 | KOC1 | 2.9カウント | 攻撃側は攻撃を継続できる（`action`フェーズへ戻る） |
+| KOC == 0 | 支払い不能 | 3カウント | PIN決着（攻撃側の勝利で試合終了） |
 
-Phase 1ではPIN・カウント処理・PINカード移動のロジックは実装しない。PlayerStateにPINカード保有数
-（試合開始時2枚ずつ）を正しく初期化するところまでを対象とする（Phase 1範囲は
-[`combat_v1_phase1_design.md`](design/combat_v1_phase1_design.md) 参照）。
+- **KICK OUTは自動（Phase 5で確定）**: 防御側が必要なKOCを保有していれば必ずkick outする。
+  「保有していてもあえて支払わない」という選択肢は存在しない。
+- KOC支払いは防御側のみが行う（攻撃側はKOCを支払わない）。
+
+### 8.3 PIN後の展開（Phase 5で確定）
+
+- **1カウントまたは2カウントでkick out**: 攻撃側のターンを終了し、防御側へ主導権を移す
+  （`endTurn`と同じ内部処理——ENERGY全回復・1ドロー——で防御側の新しいターン
+  （`discard`フェーズ）へ進む）。防御側の状態（DOWN等）はこの遷移では変化しない。
+- **2.9カウントでkick out**: 攻撃側は`action`フェーズへ戻り、残りENERGY等の許す範囲で
+  TECHNIQUEの使用・追加のPIN宣言などを継続できる（`activePlayerIndex`は変化しない）。
+- **3カウント（KOC不足）**: PIN決着として試合が終了する（攻撃側の勝利。`winner`/`isOver`の
+  Domain表現はPhase 5で正式追加した、[`combat_v1_phase1_design.md`](design/combat_v1_phase1_design.md)
+  「Phase 5での更新」節参照）。
+
+Phase 1ではPIN・カウント処理・PINカード移動のロジックは実装しなかった。PlayerStateにPINカード
+保有数（試合開始時2枚ずつ）を正しく初期化するところまでが対象だった（Phase 1範囲は
+[`combat_v1_phase1_design.md`](design/combat_v1_phase1_design.md) 参照）。上記8.1〜8.3章の内容は
+Phase 5で正式実装した（技術設計の詳細は同書「Phase 5での更新」節を参照）。
 
 ---
 
 ## 9. KOC
 
 KOCは初期値10。PINのカウント（8章）およびSUBMISSIONからの脱出（10章）に使用する共通リソース。
+`koc >= 0`をDomain invariantとして保証し、支払い可能性を先に判定してから消費する
+（負のKOCをCommandで生成しない、8.2章）。
 
-Phase 1ではKOCの消費・判定ロジックは実装しない。PlayerStateにKOC=10が試合開始時に正しく初期化される
-ところまでを対象とする。
+Phase 1ではKOCの消費・判定ロジックは実装しなかった。PlayerStateにKOC=10が試合開始時に正しく
+初期化されるところまでが対象だった。PINでのKOC消費はPhase 5で正式実装した（8章参照）。
 
 ---
 
@@ -690,3 +727,21 @@ Playtest Analytics、Simulatorの設計、Report、Diagnosticsなど、Ver.1へ�
   - `declareTechnique`（Phase
     3までの`playTechnique`を改称、宣言のみを行い即時解決しない）・`playCounter`・`declineCounter`
     Command APIの確定（7.1章）
+
+- **Phase 5（PIN/KOC）**: 以下を新規確定した。
+  - PINカード移動の主体・向き: 攻撃側が自分の保有PINカードを1枚使用してPINを開始し、
+    1カウント／2カウントでkick outされた場合、その1枚を攻撃側→防御側へ移動する。2.9カウントでは
+    移動しない（8.1章）。
+  - PINカウントの決定方式: 段階応答（`pinResponsePending`のような多段階の入力待ち）ではなく、
+    PIN開始時点の防御側KOCから最終カウントを一括で決定する方式で確定した（8.2章）。
+  - KICK OUTは自動: 防御側が必要KOCを保有していれば必ずkick outする。「保有していてもあえて
+    支払わない」という選択肢は導入しない（8.2章）。
+  - KOC/カウント対応表（KOC>=3→1カウント／KOC==2→2カウント／KOC==1→2.9カウント／KOC==0→
+    3カウントでPIN決着）とKOC支払いは防御側のみが行う方針の確定（8.2章）。
+  - kick out後の展開: 1／2カウントは攻撃側のターンを終了し防御側へ主導権を移す
+    （`endTurn`と同じ内部処理）。2.9カウントは攻撃側が`action`フェーズへ戻り攻撃を継続できる
+    （8.3章）。
+  - `winnerPlayerIndex: int?`／`isOver`を`CombatV1MatchState`へ正式追加し、PINによる3カウント
+    決着で試合が終了する経路を確定した（技術設計は`combat_v1_phase1_design.md`参照）。
+  - DIRECT PINはTECHNIQUE成功解決と同一Command内で遷移し、古い`lastSuccessfulTechnique`を
+    後から参照して再発火させない設計方針を確定した（8章）。

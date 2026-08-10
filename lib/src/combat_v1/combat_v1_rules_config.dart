@@ -23,6 +23,10 @@ class CombatV1RulesConfig {
     this.finisherSameNameLimit = 1,
     this.counterSameNameLimit = 2,
     this.counterAllowsWildSubstitution = false,
+    this.totalPinCards = 4,
+    this.pinCountOneKocCost = 3,
+    this.pinCountTwoKocCost = 2,
+    this.pinCountTwoPointNineKocCost = 1,
   });
 
   /// 全レスラー共通の初期HP（docs/combat_rules_v1.md 2・14章）。
@@ -60,6 +64,23 @@ class CombatV1RulesConfig {
   /// `resolveEnergyPayment`の`allowWildSubstitution`引数へそのまま渡す
   /// （`combat_v1_energy.dart`）。
   final bool counterAllowsWildSubstitution;
+
+  /// PINカードの共有総数（docs/combat_rules_v1.md 8.1章）。
+  /// `playerA.pinCardsHeld + playerB.pinCardsHeld`は常にこの値と等しい
+  /// （Phase 5、match-level invariant）。
+  final int totalPinCards;
+
+  /// 1カウントでPINが終了した際に防御側が支払うKOC（docs/combat_rules_v1.md
+  /// 8.2章）。
+  final int pinCountOneKocCost;
+
+  /// 2カウントでPINが終了した際に防御側が支払うKOC（docs/combat_rules_v1.md
+  /// 8.2章）。
+  final int pinCountTwoKocCost;
+
+  /// 2.9カウントでPINが終了した際に防御側が支払うKOC
+  /// （docs/combat_rules_v1.md 8.2章）。
+  final int pinCountTwoPointNineKocCost;
 
   /// [category]の同名カード上限（docs/combat_rules_v1.md 3章）。
   /// Deck validation（[../combat_v1_deck_validation.dart]）が参照する

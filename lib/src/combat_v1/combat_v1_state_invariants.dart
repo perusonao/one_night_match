@@ -22,6 +22,7 @@ library;
 import 'combat_v1_enums.dart';
 import 'combat_v1_match_state.dart';
 import 'combat_v1_pending_attack.dart';
+import 'combat_v1_rules_config.dart';
 
 /// [validatePlayerStateInvariants]のエラー種別。
 enum CombatV1PlayerStateInvariantErrorCode {
@@ -38,6 +39,15 @@ enum CombatV1PlayerStateInvariantErrorCode {
   /// でない（負数のENERGY量を含む、Phase 4、Phase 3 Codexレビュー指摘
   /// 「10-1」）。
   invalidEnergyPool,
+
+  /// `koc`が負数（Phase 5、docs/combat_rules_v1.md 9章「koc >= 0」）。
+  /// PIN解決は支払い可能性を先に判定してから差し引くため（15章）、
+  /// 正規のCommand経路では発生しないはずだが、防御的に検証する。
+  negativeKoc,
+
+  /// `pinCardsHeld`が1未満（Phase 5、docs/combat_rules_v1.md 8.1章
+  /// 「最低1枚保証」）。
+  pinCardsHeldBelowMinimum,
 }
 
 /// [validatePlayerStateInvariants]の1件のエラー。
@@ -65,9 +75,10 @@ class CombatV1PlayerStateInvariantResult {
   bool get isValid => errors.isEmpty;
 }
 
-/// [player]の`spentEnergy`/`energyPool`が不変条件を満たしているか検証する
-/// （docs/combat_rules_v1.md 5章、Phase 4でnegativeSpentEnergy/
-/// invalidEnergyPoolを追加）。
+/// [player]の`spentEnergy`/`energyPool`/`koc`/`pinCardsHeld`が不変条件を
+/// 満たしているか検証する（docs/combat_rules_v1.md 5・8・9章、Phase
+/// 4でnegativeSpentEnergy/invalidEnergyPoolを追加、Phase
+/// 5でnegativeKoc/pinCardsHeldBelowMinimumを追加）。
 CombatV1PlayerStateInvariantResult validatePlayerStateInvariants(
   CombatV1PlayerState player,
 ) {
@@ -79,6 +90,25 @@ CombatV1PlayerStateInvariantResult validatePlayerStateInvariants(
         code: CombatV1PlayerStateInvariantErrorCode.invalidEnergyPool,
         message: '${player.wrestlerName}のenergyPoolに負数のENERGY量が'
             '含まれています',
+      ),
+    );
+  }
+
+  if (player.koc < 0) {
+    errors.add(
+      CombatV1PlayerStateInvariantError(
+        code: CombatV1PlayerStateInvariantErrorCode.negativeKoc,
+        message: '${player.wrestlerName}のkocが負数です（koc:${player.koc}）',
+      ),
+    );
+  }
+
+  if (player.pinCardsHeld < 1) {
+    errors.add(
+      CombatV1PlayerStateInvariantError(
+        code: CombatV1PlayerStateInvariantErrorCode.pinCardsHeldBelowMinimum,
+        message: '${player.wrestlerName}のpinCardsHeldが最低1枚を'
+            '下回っています（pinCardsHeld:${player.pinCardsHeld}）',
       ),
     );
   }
@@ -198,6 +228,11 @@ enum CombatV1MatchStateInvariantErrorCode {
   /// `pendingAttack.attackCardInstance.category`が
   /// `pendingAttack.category`と一致しない。
   pendingCardCategoryMismatch,
+
+  /// `playerA.pinCardsHeld + playerB.pinCardsHeld`が
+  /// [CombatV1RulesConfig.totalPinCards]と一致しない（Phase 5、
+  /// docs/combat_rules_v1.md 8.1章「PINカードは共有4枚」）。
+  pinCardsTotalMismatch,
 }
 
 /// [validateMatchStateInvariants]の1件のエラー。
@@ -322,10 +357,22 @@ String? pendingAttackOwnershipViolation(CombatV1MatchState state) {
 /// APIには自動配線しない——CPU/Simulator/テストからオプトインで呼び出す
 /// 想定（`validatePlayerStateInvariants`と同じ方針）。
 CombatV1MatchStateInvariantResult validateMatchStateInvariants(
-  CombatV1MatchState state,
-) {
+  CombatV1MatchState state, {
+  CombatV1RulesConfig rules = const CombatV1RulesConfig(),
+}) {
   final errors = <CombatV1MatchStateInvariantError>[];
   final pending = state.pendingAttack;
+
+  final pinCardsTotal = state.playerA.pinCardsHeld + state.playerB.pinCardsHeld;
+  if (pinCardsTotal != rules.totalPinCards) {
+    errors.add(
+      CombatV1MatchStateInvariantError(
+        code: CombatV1MatchStateInvariantErrorCode.pinCardsTotalMismatch,
+        message: 'playerA.pinCardsHeld + playerB.pinCardsHeldが'
+            '${rules.totalPinCards}と一致しません（合計:$pinCardsTotal）',
+      ),
+    );
+  }
   final isPendingPhase = state.phase == CombatV1MatchPhase.counterResponsePending;
 
   if (isPendingPhase != (pending != null)) {

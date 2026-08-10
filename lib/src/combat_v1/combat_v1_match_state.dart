@@ -97,8 +97,11 @@ class CombatV1PlayerState {
 
 /// 試合全体の不変状態。
 ///
-/// `winner`/`isOver`はPhase 1では持たない（Phase 1には決着条件が一切
-/// 存在しないため。docs/design/combat_v1_phase1_design.md 2.6章）。
+/// `winner`/`isOver`はPhase 1〜4では持たなかった（決着条件が一切
+/// 存在しなかったため。docs/design/combat_v1_phase1_design.md
+/// 2.6章）。Phase 5でPINによる決着（KOC不足による3カウント、
+/// docs/combat_rules_v1.md 8.2章）が初めて発生しうるため、[winnerPlayerIndex]
+/// を正式に追加した。
 class CombatV1MatchState {
   const CombatV1MatchState({
     required this.matchId,
@@ -111,6 +114,7 @@ class CombatV1MatchState {
     this.log = const [],
     this.pendingAttack,
     this.lastSuccessfulTechnique,
+    this.winnerPlayerIndex,
   });
 
   final String matchId;
@@ -145,6 +149,17 @@ class CombatV1MatchState {
   /// 参照）。
   final CombatV1SuccessfulTechniqueSnapshot? lastSuccessfulTechnique;
 
+  /// 試合の勝者（`0`=playerA、`1`=playerB）。試合が決着していなければ
+  /// `null`（Phase 5で新規追加。docs/combat_rules_v1.md 8.2章「必要なKOCを
+  /// 支払えなければ3カウントとなり、PIN決着」）。[lastSuccessfulTechnique]と
+  /// 同じく一方向（null→非null）にのみ更新する（勝者が決まった試合が
+  /// 再びnullへ戻ることはない）。
+  final int? winnerPlayerIndex;
+
+  /// 試合が決着しているか（[winnerPlayerIndex]から導出、勝者名stringの
+  /// 重複保存はしない）。
+  bool get isOver => winnerPlayerIndex != null;
+
   CombatV1PlayerState get active =>
       activePlayerIndex == 0 ? playerA : playerB;
 
@@ -154,8 +169,9 @@ class CombatV1MatchState {
   /// [pendingAttack]は明示的に渡した値だけを反映する（省略時は既存値を
   /// 維持）。`counterResponsePending`を抜けてpendingを消す場合は
   /// [clearPendingAttack]を使う（`null`を「省略」と区別できないため）。
-  /// [lastSuccessfulTechnique]は一方向（null→非null）にのみ更新するため
-  /// （13章）、同じ`??`パターンで問題ない（クリア用の別メソッドは不要）。
+  /// [lastSuccessfulTechnique]・[winnerPlayerIndex]は一方向（null→非null）
+  /// にのみ更新するため（13章、および本ファイル冒頭コメント）、同じ`??`
+  /// パターンで問題ない（クリア用の別メソッドは不要）。
   CombatV1MatchState copyWith({
     CombatV1PlayerState? playerA,
     CombatV1PlayerState? playerB,
@@ -166,6 +182,7 @@ class CombatV1MatchState {
     List<String>? log,
     CombatV1PendingAttack? pendingAttack,
     CombatV1SuccessfulTechniqueSnapshot? lastSuccessfulTechnique,
+    int? winnerPlayerIndex,
   }) => CombatV1MatchState(
     matchId: matchId,
     playerA: playerA ?? this.playerA,
@@ -178,6 +195,7 @@ class CombatV1MatchState {
     pendingAttack: pendingAttack ?? this.pendingAttack,
     lastSuccessfulTechnique:
         lastSuccessfulTechnique ?? this.lastSuccessfulTechnique,
+    winnerPlayerIndex: winnerPlayerIndex ?? this.winnerPlayerIndex,
   );
 
   /// [pendingAttack]を`null`へ戻した新しいstateを返す（COUNTER成功/decline
@@ -194,6 +212,7 @@ class CombatV1MatchState {
     log: log,
     pendingAttack: null,
     lastSuccessfulTechnique: lastSuccessfulTechnique,
+    winnerPlayerIndex: winnerPlayerIndex,
   );
 
   /// 手番プレイヤー（[active]）を更新した新しいstateを返す。

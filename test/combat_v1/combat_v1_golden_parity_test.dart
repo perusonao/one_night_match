@@ -188,16 +188,18 @@ void main() {
       expect(resolved.turnNumber, 1);
       expect(resolved.sharedHeat, 20);
       expect(resolved.pendingAttack, isNull);
+      expect(resolved.winnerPlayerIndex, isNull);
       expect(resolved.log, [
         'テストファイターAがテストダウン投げ技を宣言した',
         'テストファイターAの攻撃がCOUNTERされず成立した（DMG20、HEAT+20）',
         'テストファイターAがカードを1枚引いた',
       ]);
 
-      // ---- lastSuccessfulTechnique（全10 field）----
+      // ---- lastSuccessfulTechnique（全field）----
       final snapshot = resolved.lastSuccessfulTechnique;
       expect(snapshot, isNotNull);
       expect(snapshot!.attackerPlayerIndex, 0);
+      expect(snapshot.turnNumber, 1);
       expect(snapshot.cardInstanceId, 'a1');
       expect(snapshot.cardId, 'fx_normal_throw_down');
       expect(snapshot.category, CombatV1CardCategory.normal);
