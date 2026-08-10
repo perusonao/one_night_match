@@ -39,8 +39,10 @@ void main() {
     cardId: 'fx_finisher_a',
     category: CombatV1CardCategory.finisher,
   );
-  // fx_finisher_b: directPin型。投2、DMG30、HEAT30、STAND→DOWN
-  // （family=powerbomb/throwing group）。
+  // fx_finisher_b: directPin型。投2、DMG30、HEAT30、resultOpponentState
+  // 無し（posture不変。DIRECT PIN自動移行には「解決後の相手posture==down」
+  // が前提のため、これを検証するテストでは相手を事前にDOWNさせておく、
+  // family=powerbomb/throwing group）。
   const directPinFinisher = CombatV1DeckEntry(
     instanceId: 'atk_fin_direct',
     cardId: 'fx_finisher_b',
@@ -189,6 +191,10 @@ void main() {
       final state = buildMatchState(
         handA: const [directPinFinisher],
         sharedHeat: 200,
+        // fx_finisher_bはresultOpponentStateを持たないため、DIRECT PIN
+        // 自動移行の前提（解決後の相手posture==down）を満たすよう、相手を
+        // 事前にDOWNさせておく（8章「相手がDOWNで」）。
+        postureB: CombatV1WrestlerPosture.down,
         kocB: 10, // >=3 → 1カウント
         pinCardsHeldA: 2,
         pinCardsHeldB: 2,
@@ -233,6 +239,7 @@ void main() {
       final state = buildMatchState(
         handA: const [directPinFinisher],
         sharedHeat: 200,
+        postureB: CombatV1WrestlerPosture.down, // DIRECT PIN前提（上記参照）
         kocB: 0,
         pinCardsHeldA: 2,
         pinCardsHeldB: 2,
@@ -259,6 +266,7 @@ void main() {
         final state = buildMatchState(
           handA: const [directPinFinisher],
           sharedHeat: 200,
+          postureB: CombatV1WrestlerPosture.down, // DIRECT PIN前提（上記参照）
           kocB: 10,
           pinCardsHeldA: 0, // 直接構築されたmalformed state（正規経路では発生しない）
           pinCardsHeldB: 4,
@@ -501,6 +509,7 @@ void main() {
       final state = buildMatchState(
         handA: const [directPinFinisher],
         sharedHeat: 200,
+        postureB: CombatV1WrestlerPosture.down, // DIRECT PIN前提（Group C参照）
         kocB: 10,
       );
       int totalCards(CombatV1MatchState s) =>
