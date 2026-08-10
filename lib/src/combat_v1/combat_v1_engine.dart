@@ -224,6 +224,20 @@ enum CombatV1PinLegalityReasonCode {
   /// 試合が既に決着している（[CombatV1MatchState.isOver]）。
   matchOver,
 
+  /// 攻撃側がPINカードを保有していない（`pinCardsHeld < 1`、
+  /// docs/combat_rules_v1.md 8章「DIRECT PINでもPINカードを使用する」・
+  /// 8.1章。Phase 5 Codexレビュー指摘）。正規のCommand経路では最低1枚保証
+  /// （8.1章）により通常到達しないが、[malformedPinState]より前に明示的な
+  /// legality理由として判定する。
+  noPinCard,
+
+  /// [CombatV1MatchState]のPIN関連state（攻撃側/防御側の`pinCardsHeld`・
+  /// `koc`）がPhase 5の最小限のinvariantを満たさない
+  /// （`pinStateConsistencyViolation`参照、Phase 5 Codexレビュー指摘H1）。
+  /// [noPinCard]で捕捉されない残りのケース（防御側pinCardsHeld<1、PINカード
+  /// 合計不一致、koc負数のいずれか）を指す。
+  malformedPinState,
+
   /// `phase == action`ではない。
   wrongPhase,
 
@@ -740,12 +754,46 @@ class CombatV1Engine {
   ///    snapshotを後から参照するのではなく、今まさに解決した[pending]を
   ///    直接使うことで、stale snapshotの再発火を構造的に防ぐ
   ///    （docs/combat_rules_v1.md 8章のstale対策方針）。
+  ///
+  /// 0. （上記1に先立って）DIRECT PINへ移行することが事前に判明している
+  ///    場合、Phase 5 PIN state invariant（[pinStateConsistencyViolation]）
+  ///    をTechnique成功のいかなるstate commitより前に検証する（Phase 5
+  ///    Codexレビュー指摘H1、DIRECT PIN Command atomicity）。`koc`/
+  ///    `pinCardsHeld`はTechnique解決自体では変化しないため、[state]
+  ///    （解決前の元state）の値で判定して問題ない。不正なら
+  ///    [CombatV1IllegalActionException]を送出し、[state]を一切変更しない
+  ///    （DMG・HEAT・posture・discard・attacker
+  ///    draw・`lastSuccessfulTechnique`のいずれもcommitされない——
+  ///    「Technique成功だけ残してPINだけ拒否する」設計にはしない）。
   static CombatV1MatchState _resolvePendingAttack(
     CombatV1MatchState state,
     CombatV1PendingAttack pending, {
     required CombatV1RulesConfig rules,
     required Random random,
   }) {
+    if (pending.directPin) {
+      final resolvedOpponentPosture =
+          pending.resultOpponentState ?? state.opponent.posture;
+      if (resolvedOpponentPosture == CombatV1WrestlerPosture.down) {
+        final attacker = pending.attackerPlayerIndex == 0
+            ? state.playerA
+            : state.playerB;
+        final defender = pending.defenderPlayerIndex == 0
+            ? state.playerA
+            : state.playerB;
+        final violation = pinStateConsistencyViolation(
+          attacker: attacker,
+          defender: defender,
+          rules: rules,
+        );
+        if (violation != null) {
+          throw CombatV1IllegalActionException(
+            'DIRECT PINへ移行できません（Technique成功処理ごと拒否）: $violation',
+          );
+        }
+      }
+    }
+
     final attackerName = state.active.wrestlerName;
 
     // 1. DMG適用 + 2. HP 0 clamp
@@ -864,7 +912,7 @@ class CombatV1Engine {
     required CombatV1RulesConfig rules,
     Random? random,
   }) {
-    final check = checkPinLegality(state);
+    final check = checkPinLegality(state, rules: rules);
     if (!check.legal) {
       throw CombatV1IllegalActionException(check.reason);
     }
@@ -1317,19 +1365,50 @@ class CombatV1Engine {
   ///
   /// 少なくとも以下を順に判定する:
   /// 1. 試合が決着していないか（[CombatV1MatchState.isOver]）
-  /// 2. `phase == action`
-  /// 3. 相手がDOWN状態か
-  /// 4. このターン中に自分がTECHNIQUEを成功させているか（stale
+  /// 2. 攻撃側がPINカードを保有しているか（`pinCardsHeld >= 1`）
+  /// 3. 攻撃側/防御側のPIN関連state（pinCardsHeld合計・koc）がPhase
+  ///    5のinvariantを満たすか（[pinStateConsistencyViolation]、Phase 5
+  ///    Codexレビュー指摘H1）
+  /// 4. `phase == action`
+  /// 5. 相手がDOWN状態か
+  /// 6. このターン中に自分がTECHNIQUEを成功させているか（stale
   ///    snapshot対策込み、`turnNumber`一致まで確認する）
   ///
   /// DIRECT PIN（TECHNIQUE成功と同一遷移内で自動的に開始される、
   /// `_resolvePendingAttack`参照）はこのAPIの対象外——プレイヤーが選択して
-  /// 呼び出すCommandではないため。
-  static CombatV1PinActionCheck checkPinLegality(CombatV1MatchState state) {
+  /// 呼び出すCommandではないため。DIRECT PIN側は同じ
+  /// [pinStateConsistencyViolation]をTechnique成功のstate commitより前に
+  /// 直接呼び出すことでatomicityを確保する（`_resolvePendingAttack`参照）。
+  static CombatV1PinActionCheck checkPinLegality(
+    CombatV1MatchState state, {
+    CombatV1RulesConfig rules = const CombatV1RulesConfig(),
+  }) {
     if (state.isOver) {
       return CombatV1PinActionCheck.failure(
         '試合は既に終了しています',
         CombatV1PinLegalityReasonCode.matchOver,
+      );
+    }
+
+    final attacker = state.active;
+    final defender = state.opponent;
+
+    if (attacker.pinCardsHeld < 1) {
+      return CombatV1PinActionCheck.failure(
+        '攻撃側がPINカードを保有していません',
+        CombatV1PinLegalityReasonCode.noPinCard,
+      );
+    }
+
+    final pinViolation = pinStateConsistencyViolation(
+      attacker: attacker,
+      defender: defender,
+      rules: rules,
+    );
+    if (pinViolation != null) {
+      return CombatV1PinActionCheck.failure(
+        pinViolation,
+        CombatV1PinLegalityReasonCode.malformedPinState,
       );
     }
 
@@ -1340,7 +1419,7 @@ class CombatV1Engine {
       );
     }
 
-    if (state.opponent.posture != CombatV1WrestlerPosture.down) {
+    if (defender.posture != CombatV1WrestlerPosture.down) {
       return CombatV1PinActionCheck.failure(
         '相手がDOWN状態ではありません',
         CombatV1PinLegalityReasonCode.opponentNotDown,
@@ -1365,8 +1444,10 @@ class CombatV1Engine {
   /// [declarePin]で使用できるPINが存在するか（[checkPinLegality]への委譲、
   /// docs/combat_rules_v1.md 8章、Phase 5）。判定ロジックを重複実装しない
   /// （[hasAnyPlayableCounter]と同じ方針）。
-  static bool hasPinOption(CombatV1MatchState state) =>
-      checkPinLegality(state).legal;
+  static bool hasPinOption(
+    CombatV1MatchState state, {
+    CombatV1RulesConfig rules = const CombatV1RulesConfig(),
+  }) => checkPinLegality(state, rules: rules).legal;
 
   static CombatV1DeckEntry? _findInHand(
     CombatV1PlayerState player,

@@ -11,12 +11,14 @@
 /// ファイルの関数の大半（[validatePlayerStateInvariants]、
 /// [validateMatchStateInvariants]）は、CPU/Simulator/テストなど必要な
 /// 箇所からオプトインで呼び出す想定で、Engine本体のCommand
-/// APIには自動配線しない。例外は[pendingStructuralConsistencyViolation]と
-/// [pendingAttackOwnershipViolation]—— pending/state間の構造整合性、および
-/// pendingが所有する1枚のカードのゾーン所有権チェックのみを
-/// `CombatV1Engine`のCommand実行前ガードとして直接利用する（両player全体の
-/// instanceId重複スキャン等、より重い検証は含まないため、毎Command呼び出し
-/// でも許容できるコストに留めている）。
+/// APIには自動配線しない。例外は[pendingStructuralConsistencyViolation]・
+/// [pendingAttackOwnershipViolation]・[pinStateConsistencyViolation]
+/// —— pending/state間の構造整合性、pendingが所有する1枚のカードのゾーン
+/// 所有権チェック、およびPIN Commandが操作するattacker/defenderのPIN
+/// カード・KOC最小限チェック（Phase 5）のみを`CombatV1Engine`のCommand
+/// 実行前ガードとして直接利用する（両player全体のinstanceId重複スキャン等、
+/// より重い検証は含まないため、毎Command呼び出しでも許容できるコストに
+/// 留めている）。
 library;
 
 import 'combat_v1_enums.dart';
@@ -144,6 +146,54 @@ CombatV1PlayerStateInvariantResult validatePlayerStateInvariants(
   return CombatV1PlayerStateInvariantResult(errors);
 }
 
+/// PIN Commandが操作する[attacker]/[defender]がPhase 5の最低限のstate
+/// invariantを満たしているかを検証する軽量チェック（Phase 5 Codexレビュー
+/// 指摘H1対応）。
+///
+/// [pendingStructuralConsistencyViolation]・[pendingAttackOwnershipViolation]
+/// と同じ位置付け——`validateMatchStateInvariants`／`validatePlayerStateInvariants`
+/// のような重い全件診断ではなく、PIN Command（`declarePin`／DIRECT PIN自動
+/// 遷移）が実行前に必ず検証すべき最小限のチェックのみに限定する:
+///
+/// - `attacker.pinCardsHeld >= 1`
+/// - `defender.pinCardsHeld >= 1`
+/// - `attacker.pinCardsHeld + defender.pinCardsHeld == rules.totalPinCards`
+/// - `attacker.koc >= 0`
+/// - `defender.koc >= 0`
+///
+/// これらが崩れたstateでPINカード移動／KOC消費を計算すると、「移動なし」
+/// 「KOC不足」「3カウント」等の正常な結果として誤って解釈されてしまう
+/// （docs/combat_rules_v1.md 8章）。`CombatV1Engine.checkPinLegality`・
+/// DIRECT PIN自動遷移（`_resolvePendingAttack`、Technique成功のstate commit
+/// より前）の両方から、実際にPINカード／KOCを操作する前に呼び出す。
+///
+/// 不整合があれば人間可読な理由を、無ければ`null`を返す。
+String? pinStateConsistencyViolation({
+  required CombatV1PlayerState attacker,
+  required CombatV1PlayerState defender,
+  required CombatV1RulesConfig rules,
+}) {
+  if (attacker.pinCardsHeld < 1) {
+    return '攻撃側のpinCardsHeldが最低1枚を下回っています'
+        '（pinCardsHeld:${attacker.pinCardsHeld}）';
+  }
+  if (defender.pinCardsHeld < 1) {
+    return '防御側のpinCardsHeldが最低1枚を下回っています'
+        '（pinCardsHeld:${defender.pinCardsHeld}）';
+  }
+  final total = attacker.pinCardsHeld + defender.pinCardsHeld;
+  if (total != rules.totalPinCards) {
+    return 'PINカードの合計が${rules.totalPinCards}と一致しません（合計:$total）';
+  }
+  if (attacker.koc < 0) {
+    return '攻撃側のkocが負数です（koc:${attacker.koc}）';
+  }
+  if (defender.koc < 0) {
+    return '防御側のkocが負数です（koc:${defender.koc}）';
+  }
+  return null;
+}
+
 /// pending/state間の構造的整合性（`phase`と`pendingAttack`存在の整合性、
 /// `attackerPlayerIndex`/`defenderPlayerIndex`の整合性）を検証する軽量
 /// チェック（Phase 4 Codexレビュー指摘H1対応）。
@@ -233,6 +283,10 @@ enum CombatV1MatchStateInvariantErrorCode {
   /// [CombatV1RulesConfig.totalPinCards]と一致しない（Phase 5、
   /// docs/combat_rules_v1.md 8.1章「PINカードは共有4枚」）。
   pinCardsTotalMismatch,
+
+  /// `winnerPlayerIndex`が`null`/`0`/`1`のいずれでもない（Phase 5 Codex
+  /// レビュー指摘H2）。
+  winnerPlayerIndexOutOfRange,
 }
 
 /// [validateMatchStateInvariants]の1件のエラー。
@@ -373,6 +427,18 @@ CombatV1MatchStateInvariantResult validateMatchStateInvariants(
       ),
     );
   }
+
+  final winner = state.winnerPlayerIndex;
+  if (winner != null && winner != 0 && winner != 1) {
+    errors.add(
+      CombatV1MatchStateInvariantError(
+        code: CombatV1MatchStateInvariantErrorCode.winnerPlayerIndexOutOfRange,
+        message: 'winnerPlayerIndexがnull/0/1のいずれでもありません'
+            '（winnerPlayerIndex:$winner）',
+      ),
+    );
+  }
+
   final isPendingPhase = state.phase == CombatV1MatchPhase.counterResponsePending;
 
   if (isPendingPhase != (pending != null)) {

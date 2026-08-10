@@ -696,3 +696,65 @@ reasonCodeになってしまう（11.2章で削除した`notTechnique`と同じ�
 箇所は無変更で動作する）。`fixtureSuccessfulTechnique`ヘルパーと、DIRECT PIN検証用の
 NORMAL技`fx_normal_direct_pin`（`fixtureDeckSpec`には含めない——既存30枚デッキ構成テストへ
 影響を与えないため）を追加した。
+
+### 14.11 Codexレビュー指摘H1/H2対応
+
+Phase 5実装のCodex第三者レビューを受け、以下の技術的修正を行った。ゲームルール自体
+（`combat_rules_v1.md`）の追加確定事項はない（実装内部のDomain
+invariant強化・atomicity強化のみ）。
+
+#### H1: PIN Commandが Phase 5 invariant違反stateを拒否しない
+
+`combat_v1_state_invariants.dart`へ`pinStateConsistencyViolation({attacker, defender,
+rules})`を追加した。[pendingStructuralConsistencyViolation]・
+[pendingAttackOwnershipViolation]と同じ位置付け（軽量・Engine Commandガードとして
+直接利用する）で、以下を検証する:
+
+- `attacker.pinCardsHeld >= 1`
+- `defender.pinCardsHeld >= 1`
+- `attacker.pinCardsHeld + defender.pinCardsHeld == rules.totalPinCards`
+- `attacker.koc >= 0`
+- `defender.koc >= 0`
+
+**normal PIN（`checkPinLegality`/`declarePin`）**: `checkPinLegality`へ、攻撃側の
+`pinCardsHeld < 1`を専用の`noPinCard`reasonCodeで明示的に判定するチェックを追加した
+（`combat_rules_v1.md` 8章「DIRECT PINでもPINカードを使用する」——PINの実行には
+PINカードの保有が前提という一般則を、通常PINのlegality理由として明示する）。続けて
+`pinStateConsistencyViolation`を呼び出し、残り（防御側pinCardsHeld<1／PINカード合計
+不一致／koc負数のいずれか）を`malformedPinState`reasonCodeとして判定する。
+
+**DIRECT PIN transaction boundary（Command atomicity）**: directPin
+Techniqueの成功resolutionと自動PIN解決は同一Command
+transaction（`declineCounter`単位）として扱う、という方針を今回明示的に設計へ
+落とし込んだ。`_resolvePendingAttack`の先頭（DMG適用など、いかなるstate
+commitより前）で、そのpendingがDIRECT
+PINへ移行することが事前に判明している場合（`pending.directPin`かつ解決後の相手
+postureが`down`になる場合）、`pinStateConsistencyViolation`を検証する。不正なら
+[CombatV1IllegalActionException]を送出し、`declineCounter`全体を失敗させる——DMG・
+HEAT・posture・attack card discard・attacker draw・`lastSuccessfulTechnique`・KOC・
+PINカード・winner・phase・logのいずれもcommitしない（「Technique成功だけ残して
+PINだけ拒否する」設計にはしない）。`koc`/`pinCardsHeld`はTechnique解決自体では
+変化しないフィールドのため、解決前の元`state`の値で判定して問題ない。
+
+**directPin=falseの場合の過剰guard回避**: 上記のPhase 5
+invariantチェックは、実際にPINへ移行する経路（`declarePin`・DIRECT
+PIN自動遷移）にのみ適用する。`directPin=false`の通常Technique成功では、Phase
+5 invariantが崩れていることだけを理由にTechnique
+resolution自体を拒否しない（PINを一切試みない解決には、PINカード／KOCの状態を
+問わない）。
+
+#### H2: winnerPlayerIndexの値域invariantがない
+
+`CombatV1MatchStateInvariantErrorCode`へ`winnerPlayerIndexOutOfRange`
+（`winnerPlayerIndex`が`null`/`0`/`1`のいずれでもない）を追加し、
+`validateMatchStateInvariants`で検証するようにした。[isOver]の既存定義
+（`winnerPlayerIndex != null`）自体は変更していない——invalidな値域の検出は、
+Engine Commandへ自動配線しないopt-inのfull invariant
+validation（`validateMatchStateInvariants`）の責務とし、getterの意味は変えない。
+
+#### 新規/変更した公開API
+
+- `checkPinLegality`/`hasPinOption`に`CombatV1RulesConfig rules = const
+  CombatV1RulesConfig()`という既定値付き引数を追加した（PINカード合計の判定に
+  `rules.totalPinCards`が必要なため。既定値により既存呼び出し箇所は無変更で動作する）。
+- `CombatV1PinLegalityReasonCode`へ`noPinCard`／`malformedPinState`を追加した。

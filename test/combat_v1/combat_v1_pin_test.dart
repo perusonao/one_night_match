@@ -736,4 +736,89 @@ void main() {
       expect(totalCards(resolved), before);
     });
   });
+
+  group('K. Codexレビュー追加推奨テスト', () {
+    test(
+      'current turnでTechnique A成功→Technique BがCOUNTERされても、'
+      'checkPinLegalityはAを根拠にlegalのまま',
+      () {
+        const attackA = CombatV1DeckEntry(
+          instanceId: 'a_A',
+          cardId: 'fx_normal_throw_down', // 投1, STAND->DOWN
+          category: CombatV1CardCategory.normal,
+        );
+        const attackB = CombatV1DeckEntry(
+          instanceId: 'a_B',
+          cardId: 'fx_normal_strike', // 打1, family=elbow(STRIKE)
+          category: CombatV1CardCategory.normal,
+        );
+        const counterB = CombatV1DeckEntry(
+          instanceId: 'c_B',
+          cardId: 'fx_counter_a', // attribute=strike, groups=[strike]
+          category: CombatV1CardCategory.counter,
+        );
+
+        var state = buildMatchState(
+          handA: const [attackA, attackB],
+          handB: const [counterB],
+        );
+
+        // Technique A: 成立させる（相手DOWN・lastSuccessfulTechniqueを確定）。
+        final declaredA = CombatV1Engine.declareTechnique(
+          state,
+          'a_A',
+          catalog: fixtureCatalog,
+        );
+        state = CombatV1Engine.declineCounter(
+          declaredA,
+          rules: fixtureRules,
+          random: Random(1),
+        );
+        expect(state.lastSuccessfulTechnique?.cardInstanceId, 'a_A');
+        expect(
+          CombatV1Engine.checkPinLegality(state, rules: fixtureRules).legal,
+          isTrue,
+        );
+
+        // Technique B: 宣言してCOUNTERされる（同一ターン内・同一活動側）。
+        final declaredB = CombatV1Engine.declareTechnique(
+          state,
+          'a_B',
+          catalog: fixtureCatalog,
+        );
+        final afterCounter = CombatV1Engine.playCounter(
+          declaredB,
+          'c_B',
+          catalog: fixtureCatalog,
+          rules: fixtureRules,
+          random: Random(2),
+        );
+
+        // COUNTER成立はlastSuccessfulTechniqueを更新しない（Phase 4仕様）
+        // ため、Aの成功記録が引き続きPIN legalityの根拠として有効。
+        expect(afterCounter.lastSuccessfulTechnique?.cardInstanceId, 'a_A');
+        expect(
+          CombatV1Engine.checkPinLegality(afterCounter, rules: fixtureRules).legal,
+          isTrue,
+        );
+      },
+    );
+
+    test('非常に大きいKOC（100）でも1カウント・KOC3のみ消費される', () {
+      final state = buildMatchState(
+        postureB: CombatV1WrestlerPosture.down,
+        kocB: 100,
+        lastSuccessfulTechnique: fixtureSuccessfulTechnique(
+          attackerPlayerIndex: 0,
+          turnNumber: 1,
+        ),
+      );
+      final resolved = CombatV1Engine.declarePin(
+        state,
+        rules: fixtureRules,
+        random: Random(1),
+      );
+      expect(resolved.playerB.koc, 97);
+    });
+  });
 }
