@@ -93,6 +93,24 @@ Phase 1のCore Skeleton実装は、現在のSSOT（`combat_rules_v1.md`）と技
 
 ---
 
+## Phase 8時点で解決した項目（Phase 8セッションで確定）
+
+以下は前回（Phase 0）時点で「Phase 8着手前に決める必要がある」としていたが、Phase 8セッションで
+明示的に確定した。`combat_rules_v1.md`本文（一次資料由来、15章）には「1枚でも使用したターンはPIN
+できない」「相手は次の自ターンにTECHNIQUE最大1枚」という2つのルールの存在自体は記載があったが、
+「使用」と「成功」のどちらの基準で判定するか、COUNTERされたROUGH技の扱い、DIRECT
+PINとの関係、次ターン制限の失効条件は記載がなかったため、Phase
+8実装セッション内でユーザーへ確認したうえで正式仕様として採用した。
+
+| # | 項目 | 確定内容 | 関連章 |
+|---|---|---|---|
+| W | 「1枚でも使用したターンはPINできない」の“使用”の判定基準（COUNTERされたROUGH技を含むか） | 宣言時点の基準（使用ベース）で確定した。COUNTERされたROUGH技も対象になる | `combat_rules_v1.md` 15.1章 |
+| X | ROUGH技自体にdirectPin=trueが設定されている場合、DIRECT PIN自動遷移とROUGH-PIN不可ルールの関係 | 通常PIN（`declarePin`/`checkPinLegality`）のみを対象とし、DIRECT PINは対象外（技成功と同一Command内で自動遷移するためcheckPinLegalityを経由しない）で確定した。両立を許容し、禁止するCatalog validationも追加しない | `combat_rules_v1.md` 15.2章 |
+| Y | 「次の自ターンにTECHNIQUE最大1枚」の“1枚”の判定基準（COUNTERされた技を含むか） | 宣言時点の基準（使用ベース）で確定した。COUNTERされた技も1枚に含む | `combat_rules_v1.md` 15.3章 |
+| Z | 次ターン制限が有効なターンにTECHNIQUEを1枚も使わなかった場合の扱い | そのターンの終了とともに（消費の有無に関わらず）制限は消滅する。持ち越しはしない | `combat_rules_v1.md` 15.3章 |
+
+---
+
 ## 後続Phaseまで保留可能な項目
 
 ### 1. PINカード「共有4枚」の管理構造

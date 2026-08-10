@@ -30,6 +30,7 @@ class CombatV1RulesConfig {
     this.submissionHpThreshold = 50,
     this.submissionEscapeKocCost = 1,
     this.restHpRecovery = 10,
+    this.roughRestrictedTechniqueLimit = 1,
   });
 
   /// 全レスラー共通の初期HP（docs/combat_rules_v1.md 2・14章）。
@@ -98,6 +99,14 @@ class CombatV1RulesConfig {
   /// RESTによるHP回復量（docs/combat_rules_v1.md 11章「REST: HP+10回復
   /// （最大150を超えない）」、Phase 7）。`maxHp`を超えない範囲で回復する。
   final int restHpRecovery;
+
+  /// ROUGH技によって次ターン制限を受けたプレイヤーが、そのターンに宣言
+  /// できるTECHNIQUEの上限枚数（docs/combat_rules_v1.md 15章「相手は次の
+  /// 自ターンにTECHNIQUEを最大1枚しか使用できない」、Phase 8）。
+  /// COUNTER・REST・起き上がりはこの上限に含めない（宣言＝
+  /// `techniquesUsedThisTurn`と同じ「使用」基準でカウントする、Phase
+  /// 8セッションでユーザーが確定した方針）。
+  final int roughRestrictedTechniqueLimit;
 
   /// [category]の同名カード上限（docs/combat_rules_v1.md 3章）。
   /// Deck validation（[../combat_v1_deck_validation.dart]）が参照する

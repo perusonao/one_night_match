@@ -25,6 +25,8 @@ class CombatV1PlayerState {
     this.discardPile = const [],
     this.reshuffleCount = 0,
     this.techniquesUsedThisTurn = 0,
+    this.roughTechniqueUsedThisTurn = false,
+    this.roughTechniqueLimitActive = false,
   });
 
   final String wrestlerId;
@@ -61,6 +63,24 @@ class CombatV1PlayerState {
   /// 含めない、docs/combat_rules_v1.md 15章）。ターン開始時に0へ戻る。
   final int techniquesUsedThisTurn;
 
+  /// このターン、attribute==roughのTECHNIQUEを1枚でも宣言したか
+  /// （docs/combat_rules_v1.md 15章「ROUGH属性TECHNIQUEを1枚でも使用した
+  /// ターンはPINできない」、Phase 8）。COUNTERされても値は変化しない
+  /// （宣言＝`techniquesUsedThisTurn`と同じ「使用」基準、Phase
+  /// 8セッションでユーザーが確定した方針）。`checkPinLegality`
+  /// （通常PINのみ）が参照する。DIRECT PINはこの値を参照しない（Phase
+  /// 8で確定：DIRECT PINはROUGH-PIN不可ルールの対象外）。ターン開始時に
+  /// falseへ戻る。
+  final bool roughTechniqueUsedThisTurn;
+
+  /// このターン、ROUGHによる「TECHNIQUE最大1枚」制限を受けているか
+  /// （docs/combat_rules_v1.md 15章、Phase
+  /// 8）。相手が直前の自ターンをROUGH技の成功（`lastSuccessfulTechnique`）
+  /// で終えた場合にtrueとなる。COUNTER・REST・起き上がりはこの上限に
+  /// 含めない。そのターンの終了とともに（消費の有無に関わらず）falseへ
+  /// 戻る（Phase 8セッションでユーザーが確定した方針。持ち越しは行わない）。
+  final bool roughTechniqueLimitActive;
+
   /// 現在使用可能な（保有量から使用済みを引いた）指定属性のENERGY残量。
   int availableEnergyFor(CombatV1EnergyAttribute attribute) =>
       energyPool.amountFor(attribute) - (spentEnergy[attribute] ?? 0);
@@ -76,6 +96,8 @@ class CombatV1PlayerState {
     List<CombatV1DeckEntry>? discardPile,
     int? reshuffleCount,
     int? techniquesUsedThisTurn,
+    bool? roughTechniqueUsedThisTurn,
+    bool? roughTechniqueLimitActive,
   }) => CombatV1PlayerState(
     wrestlerId: wrestlerId,
     wrestlerName: wrestlerName,
@@ -92,6 +114,10 @@ class CombatV1PlayerState {
     reshuffleCount: reshuffleCount ?? this.reshuffleCount,
     techniquesUsedThisTurn:
         techniquesUsedThisTurn ?? this.techniquesUsedThisTurn,
+    roughTechniqueUsedThisTurn:
+        roughTechniqueUsedThisTurn ?? this.roughTechniqueUsedThisTurn,
+    roughTechniqueLimitActive:
+        roughTechniqueLimitActive ?? this.roughTechniqueLimitActive,
   );
 }
 

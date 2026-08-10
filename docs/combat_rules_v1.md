@@ -466,7 +466,41 @@ ROUGHは相手のコンボを切る妨害属性として扱う。反則カウン
   - **重要**: 「相手が技を一切使用できない」ではない。最大1枚である。
   - COUNTER、REST、起き上がりなどはこの「TECHNIQUE 1枚」に含めない。
 
-Phase 1ではROUGHの特殊処理（PIN不可・次ターン制限）は実装しない。
+Phase 1ではROUGHの特殊処理（PIN不可・次ターン制限）は実装しない。Phase 8で正式実装した。
+
+### 15.1 「使用」と「成功」の判定基準（Phase 8で確定）
+
+本章冒頭の2つのルールは、本文の用語どおり異なる判定基準を持つ:
+
+- 「1枚でも**使用**したターンはPINできない」（1点目）は**宣言時点の基準**（使用ベース）。
+  `techniquesUsedThisTurn`（7.1章）と同じ「宣言時点で確定し、COUNTERされても取り消さない」基準に
+  統一する。COUNTERされたROUGH技も、そのターンのPIN不可の対象になる。
+- 「最後に**成功**したTECHNIQUEがROUGH」（2点目）は**`lastSuccessfulTechnique`（成功ベース）の
+  基準**。COUNTERされたROUGH技は`lastSuccessfulTechnique`を更新しないため（7.1章）、次ターン制限の
+  トリガーにはならない。
+
+これら2つの判定基準・2つのstate（`CombatV1PlayerState.roughTechniqueUsedThisTurn`／
+`roughTechniqueLimitActive`）を混同しないこと。
+
+### 15.2 PIN不可ルールの対象範囲（Phase 8で確定）
+
+「1枚でも使用したターンはPINできない」は**通常PIN（`declarePin`/`checkPinLegality`）のみ**が対象。
+DIRECT PIN（8章）は技成功と同一Command内で自動遷移するため対象外——`checkPinLegality`を経由しない
+経路であり、ROUGH属性かつ`directPin==true`の技であっても、DIRECT PINは通常どおり自動的に成立する
+（両立を許容する。この組み合わせを禁止するCatalog validationは追加しない）。同様に、SUBMISSION
+自動遷移（10.1章）もROUGH使用フラグを一切参照しない——SUBMISSIONは「PIN」ではないため、本章の
+ルールの対象外である（23.4章の「attribute=rough・family=CHOKEの反則的な首絞め」のように、ROUGH技が
+`submissionHold=true`を持つ組み合わせも問題なく成立する）。
+
+### 15.3 次ターン制限の判定基準・消費・失効（Phase 8で確定）
+
+- 「TECHNIQUE最大1枚」の“1枚”も**宣言時点の基準**（使用ベース）。COUNTERされた技も1枚に含む
+  （15.1章と同じ基準に統一する）。
+- 次ターン制限は、攻撃ターンが終了する経路（`endTurn`・REST・PIN 1/2カウントkickout・SUBMISSION
+  ESCAPEのいずれも、8.3・10.1・11章で「endTurnと同じ内部処理」と明記されている）すべてで一様に
+  判定する。
+- 制限は、そのターンの終了とともに（TECHNIQUEを1枚使ったかどうかに関わらず）消滅する。次のさらに
+  次のターンへ持ち越さない。
 
 ---
 
@@ -836,3 +870,18 @@ Playtest Analytics、Simulatorの設計、Report、Diagnosticsなど、Ver.1へ�
   - 自分（active player）がDOWN状態のままでは、TECHNIQUE宣言・通常PIN宣言・`endTurn`のいずれも
     実行できない（`selfDown`）方針で確定した。COUNTERは自分のDOWN状態による制限を一切受けない
     （11章）。
+
+- **Phase 8（ROUGH）**: 一次資料・`combat_rules_v1.md`本文（15章）には「1枚でも使用したターンは
+  PINできない」「相手は次の自ターンにTECHNIQUE最大1枚」という2つのルールの存在自体は明記されて
+  いたが、「使用」と「成功」のどちらの基準で判定するか、COUNTERされたROUGH技の扱い、DIRECT
+  PINとの関係、次ターン制限の失効条件は明記されていなかったため、Phase
+  8実装セッション内でユーザーへ確認したうえで以下を正式仕様として採用した（15.1〜15.3章）。
+  - 「1枚でも使用したターンはPINできない」の“使用”は宣言時点の基準（使用ベース）。COUNTERされた
+    ROUGH技も対象になる（15.1章）。
+  - このPIN不可ルールは通常PIN（`declarePin`/`checkPinLegality`）のみが対象。DIRECT
+    PINは技成功と同一Command内で自動遷移するため対象外——両立を許容し、禁止するCatalog
+    validationも追加しない（15.2章）。
+  - 「次の自ターンにTECHNIQUE最大1枚」の“1枚”も宣言時点の基準（使用ベース）。COUNTERされた技も
+    1枚に含む（15.3章）。
+  - 次ターン制限は、そのターンの終了とともに（消費の有無に関わらず）消滅する。持ち越しはしない
+    （15.3章）。

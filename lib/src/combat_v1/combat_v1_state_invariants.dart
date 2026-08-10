@@ -307,6 +307,13 @@ enum CombatV1MatchStateInvariantErrorCode {
   /// `winnerPlayerIndex`が`null`/`0`/`1`のいずれでもない（Phase 5 Codex
   /// レビュー指摘H2）。
   winnerPlayerIndexOutOfRange,
+
+  /// 非手番プレイヤー（`state.opponent`）の`roughTechniqueLimitActive`が
+  /// trueになっている（Phase 8、docs/combat_rules_v1.md 15章）。この制限は
+  /// 「次の自ターン」限定の制約で、`_advanceTurnAfterEnd`が手番を渡す瞬間に
+  /// のみ手番プレイヤー側へセットし、そのターンの終了時に必ず解除する。
+  /// 非手番側でtrueのまま残ることは構造的に不整合。
+  roughTechniqueLimitActiveOnInactivePlayer,
 }
 
 /// [validateMatchStateInvariants]の1件のエラー。
@@ -455,6 +462,18 @@ CombatV1MatchStateInvariantResult validateMatchStateInvariants(
         code: CombatV1MatchStateInvariantErrorCode.winnerPlayerIndexOutOfRange,
         message: 'winnerPlayerIndexがnull/0/1のいずれでもありません'
             '（winnerPlayerIndex:$winner）',
+      ),
+    );
+  }
+
+  if (state.opponent.roughTechniqueLimitActive) {
+    errors.add(
+      CombatV1MatchStateInvariantError(
+        code: CombatV1MatchStateInvariantErrorCode
+            .roughTechniqueLimitActiveOnInactivePlayer,
+        message: '非手番プレイヤー（playerIndex:'
+            '${state.activePlayerIndex == 0 ? 1 : 0}）の'
+            'roughTechniqueLimitActiveがtrueです',
       ),
     );
   }

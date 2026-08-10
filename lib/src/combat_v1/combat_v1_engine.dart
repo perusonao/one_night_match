@@ -102,6 +102,14 @@ enum CombatV1TechniqueLegalityReasonCode {
   /// など）。通常のCommand呼び出しでは到達しないが、直接構築された
   /// malformed stateに対する防御的チェック（Phase 4 Codexレビュー指摘H1）。
   malformedPendingState,
+
+  /// ROUGHによる次ターン制限中（[CombatV1PlayerState.roughTechniqueLimitActive]
+  /// ==true）に、既にこのターンの上限枚数
+  /// （[CombatV1RulesConfig.roughRestrictedTechniqueLimit]、既定1）まで
+  /// TECHNIQUEを宣言済み（docs/combat_rules_v1.md 15章「相手は次の自ターンに
+  /// TECHNIQUEを最大1枚しか使用できない」、Phase 8）。COUNTER・REST・
+  /// 起き上がりはこの上限に含めないため、これらは制限されない。
+  roughTechniqueLimitReached,
 }
 
 /// [CombatV1Engine.checkTechniqueLegality] 等、読み取り専用の判定APIの結果。
@@ -259,6 +267,16 @@ enum CombatV1PinLegalityReasonCode {
   /// 相手がDOWN状態ではない（docs/combat_rules_v1.md 8章「通常PINは、
   /// 相手がDOWNで」）。
   opponentNotDown,
+
+  /// このターン、ROUGH属性TECHNIQUEを1枚でも宣言している
+  /// （[CombatV1PlayerState.roughTechniqueUsedThisTurn]==true、
+  /// docs/combat_rules_v1.md 15章「ROUGH属性TECHNIQUEを1枚でも使用した
+  /// ターンはPINできない」、Phase 8）。COUNTERされたROUGH技も対象
+  /// （宣言＝`techniquesUsedThisTurn`と同じ「使用」基準、Phase
+  /// 8セッションでユーザーが確定した方針）。通常PIN（本API）のみが対象で、
+  /// DIRECT PINは対象外（技成功と同一Command内で自動遷移するため、この
+  /// APIを経由しない）。
+  roughTechniqueUsedThisTurn,
 
   /// このターン中に自分（攻撃側）がTECHNIQUEを成功させていない
   /// （docs/combat_rules_v1.md 8章「その攻撃ターン中にTECHNIQUEを
@@ -492,6 +510,11 @@ class CombatV1Engine {
     final resetPlayer = state.active.copyWith(
       spentEnergy: const {},
       techniquesUsedThisTurn: 0,
+      // ROUGH-PIN不可判定（15章）はターンごとにリセットする。
+      // `roughTechniqueLimitActive`（次ターン制限）はここでは触れない——
+      // ターン遷移の呼び出し元（`_advanceTurnAfterEnd`）で既に確定済みの
+      // 値をそのまま引き継ぐ（Phase 8）。
+      roughTechniqueUsedThisTurn: false,
     );
     final (drawnPlayer, drawLogs) = _drawOne(resetPlayer, rng);
     return state
@@ -500,6 +523,54 @@ class CombatV1Engine {
           ...state.log,
           ...drawLogs,
         ]);
+  }
+
+  /// ターンを終了し、次のプレイヤーのターンへ進める共通処理
+  /// （[endTurn]／[rest]／PIN 1・2カウントkickout／SUBMISSION
+  /// ESCAPEが共通で使う内部処理。8.3・10.1・11章でいずれも「endTurnと
+  /// 同じ内部処理」と明記されている、Phase 8でヘルパーへ統合）。
+  ///
+  /// 手番交代・`turnNumber`加算・[_startTurn]呼び出しに加えて、ROUGHの
+  /// 次ターン制限（docs/combat_rules_v1.md 15章）をここで一括判定する:
+  /// - 手番を終えるプレイヤー（[CombatV1MatchState.active]）が抱えていた
+  ///   ROUGH次ターン制限（[CombatV1PlayerState.roughTechniqueLimitActive]）
+  ///   は、TECHNIQUEを実際に使い切ったかどうかに関わらず、このターンの
+  ///   終了とともに解除する（Phase 8セッションでユーザーが確定した方針。
+  ///   持ち越しはしない）。
+  /// - 手番を終えるプレイヤーの直近の成立技
+  ///   （[CombatV1MatchState.lastSuccessfulTechnique]、`attackerPlayerIndex`
+  ///   ・`turnNumber`が現在のターンと一致するものに限る＝stale
+  ///   snapshot対策）がROUGH属性であれば、次に手番を得るプレイヤーへ
+  ///   新たにROUGH次ターン制限をセットする。
+  static CombatV1MatchState _advanceTurnAfterEnd(
+    CombatV1MatchState state,
+    Random random,
+  ) {
+    final outgoingIndex = state.activePlayerIndex;
+    final nextActiveIndex = outgoingIndex == 0 ? 1 : 0;
+
+    final last = state.lastSuccessfulTechnique;
+    final outgoingEndedOnFreshRoughSuccess =
+        last != null &&
+        last.attackerPlayerIndex == outgoingIndex &&
+        last.turnNumber == state.turnNumber &&
+        last.attribute == CombatV1EnergyAttribute.rough;
+
+    var next = state.withActive(
+      state.active.copyWith(roughTechniqueLimitActive: false),
+    );
+    next = next.withOpponent(
+      next.opponent.copyWith(
+        roughTechniqueLimitActive: outgoingEndedOnFreshRoughSuccess,
+      ),
+    );
+
+    final flipped = next.copyWith(
+      activePlayerIndex: nextActiveIndex,
+      turnNumber: next.turnNumber + 1,
+      log: [...next.log, 'ターン終了'],
+    );
+    return _startTurn(flipped, random);
   }
 
   /// 山札から1枚引く。山札が空なら捨て札をシャッフルして山札を再構築する
@@ -599,8 +670,14 @@ class CombatV1Engine {
     CombatV1MatchState state,
     String instanceId, {
     required CombatV1CardCatalog catalog,
+    CombatV1RulesConfig rules = const CombatV1RulesConfig(),
   }) {
-    final prepared = _prepareTechniqueUse(state, instanceId, catalog: catalog);
+    final prepared = _prepareTechniqueUse(
+      state,
+      instanceId,
+      catalog: catalog,
+      rules: rules,
+    );
     return _commitTechniqueDeclaration(state, prepared);
   }
 
@@ -614,8 +691,14 @@ class CombatV1Engine {
     CombatV1MatchState state,
     String instanceId, {
     required CombatV1CardCatalog catalog,
+    CombatV1RulesConfig rules = const CombatV1RulesConfig(),
   }) {
-    final check = checkTechniqueLegality(state, instanceId, catalog: catalog);
+    final check = checkTechniqueLegality(
+      state,
+      instanceId,
+      catalog: catalog,
+      rules: rules,
+    );
     if (!check.legal) {
       throw CombatV1IllegalActionException(check.reason);
     }
@@ -662,6 +745,13 @@ class CombatV1Engine {
         spentEnergy: prepared.updatedSpentEnergy,
         hand: handAfterDeclare,
         techniquesUsedThisTurn: state.active.techniquesUsedThisTurn + 1,
+        // ROUGH属性技を宣言した事実はCOUNTERされても取り消さない
+        // （docs/combat_rules_v1.md 15章「使用」＝techniquesUsedThisTurnと
+        // 同じ基準、Phase 8セッションでユーザーが確定した方針）。
+        roughTechniqueUsedThisTurn:
+            technique.attribute == CombatV1EnergyAttribute.rough
+            ? true
+            : state.active.roughTechniqueUsedThisTurn,
       ),
     );
 
@@ -1043,12 +1133,7 @@ class CombatV1Engine {
       );
     }
     final rng = random ?? Random();
-    final flipped = state.copyWith(
-      activePlayerIndex: state.activePlayerIndex == 0 ? 1 : 0,
-      turnNumber: state.turnNumber + 1,
-      log: [...state.log, 'ターン終了'],
-    );
-    return _startTurn(flipped, rng);
+    return _advanceTurnAfterEnd(state, rng);
   }
 
   /// DOWN状態から、HPを回復せずに起き上がる（docs/combat_rules_v1.md 11章
@@ -1137,12 +1222,7 @@ class CombatV1Engine {
       ],
     );
 
-    final flipped = next.copyWith(
-      activePlayerIndex: next.activePlayerIndex == 0 ? 1 : 0,
-      turnNumber: next.turnNumber + 1,
-      log: [...next.log, 'ターン終了'],
-    );
-    return _startTurn(flipped, rng);
+    return _advanceTurnAfterEnd(next, rng);
   }
 
   /// 通常PINを宣言する（docs/combat_rules_v1.md 8章、Phase 5）。`phase ==
@@ -1288,12 +1368,7 @@ class CombatV1Engine {
     // 1/2カウント: 攻守交代・ターン終了寄り
     // （Phase 5セッションでユーザーが確定した方針）。endTurnと同じ内部処理
     // で防御側の新しいターンへ進める。
-    final flipped = next.copyWith(
-      activePlayerIndex: defenderIndex,
-      turnNumber: next.turnNumber + 1,
-      log: [...next.log, 'ターン終了'],
-    );
-    return _startTurn(flipped, random);
+    return _advanceTurnAfterEnd(next, random);
   }
 
   /// [index]（0=playerA、1=playerB）のプレイヤーへ[update]を適用した新しい
@@ -1376,12 +1451,7 @@ class CombatV1Engine {
     // ESCAPE成功後は攻撃側のターンを終了し、ESCAPEした側（防御側）の
     // 新しいターンへ進める（PIN 1/2カウントと同じ扱い、Phase 6セッションで
     // ユーザーが確定した方針）。
-    final flipped = next.copyWith(
-      activePlayerIndex: defenderIndex,
-      turnNumber: next.turnNumber + 1,
-      log: [...next.log, 'ターン終了'],
-    );
-    return _startTurn(flipped, random);
+    return _advanceTurnAfterEnd(next, random);
   }
 
   // ---- 読み取り専用の判定API ----
@@ -1420,6 +1490,7 @@ class CombatV1Engine {
     CombatV1MatchState state,
     String instanceId, {
     required CombatV1CardCatalog catalog,
+    CombatV1RulesConfig rules = const CombatV1RulesConfig(),
   }) {
     if (state.isOver) {
       return CombatV1ActionCheck.failure(
@@ -1448,6 +1519,17 @@ class CombatV1Engine {
         '自分がDOWN状態です。先にREST（rest）または起き上がり（standUp）を'
         '行ってください（docs/combat_rules_v1.md 11章、Phase 7）',
         CombatV1TechniqueLegalityReasonCode.selfDown,
+      );
+    }
+
+    if (state.active.roughTechniqueLimitActive &&
+        state.active.techniquesUsedThisTurn >=
+            rules.roughRestrictedTechniqueLimit) {
+      return CombatV1ActionCheck.failure(
+        '相手のROUGH技により、このターンのTECHNIQUE使用上限'
+        '（${rules.roughRestrictedTechniqueLimit}枚）に達しています'
+        '（docs/combat_rules_v1.md 15章）',
+        CombatV1TechniqueLegalityReasonCode.roughTechniqueLimitReached,
       );
     }
 
@@ -1656,6 +1738,7 @@ class CombatV1Engine {
   static bool hasAnyPlayableTechnique(
     CombatV1MatchState state, {
     required CombatV1CardCatalog catalog,
+    CombatV1RulesConfig rules = const CombatV1RulesConfig(),
   }) {
     if (state.phase != CombatV1MatchPhase.action) return false;
     for (final entry in state.active.hand) {
@@ -1663,6 +1746,7 @@ class CombatV1Engine {
         state,
         entry.instanceId,
         catalog: catalog,
+        rules: rules,
       );
       if (check.legal) return true;
     }
@@ -1763,6 +1847,14 @@ class CombatV1Engine {
       return CombatV1PinActionCheck.failure(
         '相手がDOWN状態ではありません',
         CombatV1PinLegalityReasonCode.opponentNotDown,
+      );
+    }
+
+    if (attacker.roughTechniqueUsedThisTurn) {
+      return CombatV1PinActionCheck.failure(
+        'このターン、ROUGH属性TECHNIQUEを使用しているためPINできません'
+        '（docs/combat_rules_v1.md 15章）',
+        CombatV1PinLegalityReasonCode.roughTechniqueUsedThisTurn,
       );
     }
 
