@@ -22,6 +22,7 @@ import 'combat_v1_enums.dart';
 import 'combat_v1_match_state.dart';
 import 'combat_v1_pending_attack.dart';
 import 'combat_v1_pin_rules.dart';
+import 'combat_v1_rest_rules.dart';
 import 'combat_v1_rules_config.dart';
 import 'combat_v1_state_invariants.dart';
 import 'combat_v1_submission_rules.dart';
@@ -60,6 +61,12 @@ enum CombatV1TechniqueLegalityReasonCode {
 
   /// `phase == action`ではない。
   wrongPhase,
+
+  /// 自分（active player）がDOWN状態のまま（docs/combat_rules_v1.md 11章
+  /// 「DOWN状態の自ターンでは、起き上がりまたはRESTを選択できる」、Phase
+  /// 7）。先に[CombatV1Engine.standUp]または[CombatV1Engine.rest]で
+  /// DOWNから復帰しない限り、TECHNIQUEは使用できない。
+  selfDown,
 
   /// 指定instanceIdがactive playerのhandに存在しない。
   cardNotInHand,
@@ -242,6 +249,13 @@ enum CombatV1PinLegalityReasonCode {
   /// `phase == action`ではない。
   wrongPhase,
 
+  /// 自分（active player＝攻撃側）がDOWN状態のまま（docs/combat_rules_v1.md
+  /// 11章、Phase 7）。通常のCommand経路では、TECHNIQUE宣言自体が
+  /// [CombatV1TechniqueLegalityReasonCode.selfDown]で先に拒否されるため
+  /// `noSuccessfulTechniqueThisTurn`より前に到達しないはずだが、防御的に
+  /// 判定する（他のmalformed state判定と同じ位置付け）。
+  selfDown,
+
   /// 相手がDOWN状態ではない（docs/combat_rules_v1.md 8章「通常PINは、
   /// 相手がDOWNで」）。
   opponentNotDown,
@@ -276,6 +290,97 @@ class CombatV1PinActionCheck {
   final bool legal;
   final String reason;
   final CombatV1PinLegalityReasonCode reasonCode;
+}
+
+/// [CombatV1Engine.checkStandUpLegality]が返す機械判定用の理由コード
+/// （Phase 7、docs/combat_rules_v1.md 11章「REST / DOWN」）。
+enum CombatV1StandUpLegalityReasonCode {
+  /// 起き上がり可能。
+  legal,
+
+  /// 試合が既に決着している（[CombatV1MatchState.isOver]）。
+  matchOver,
+
+  /// [CombatV1MatchState]自体が構造的に不整合
+  /// （[pendingStructuralConsistencyViolation]、他の判定APIと同じ防御的
+  /// チェック）。
+  malformedPendingState,
+
+  /// `phase == action`ではない。
+  wrongPhase,
+
+  /// 自分（active player）がDOWN状態ではない（docs/combat_rules_v1.md 11章
+  /// 「DOWN状態の自ターンでは」——起き上がり／RESTはDOWN限定）。
+  notDown,
+}
+
+/// [CombatV1Engine.checkStandUpLegality]の結果。他の`ActionCheck`系クラスと
+/// 同じ設計（`success`/`failure`ファクトリのみを公開する）。
+class CombatV1StandUpActionCheck {
+  const CombatV1StandUpActionCheck.success(this.reason)
+    : legal = true,
+      reasonCode = CombatV1StandUpLegalityReasonCode.legal;
+
+  CombatV1StandUpActionCheck.failure(this.reason, this.reasonCode)
+    : legal = false {
+    if (reasonCode == CombatV1StandUpLegalityReasonCode.legal) {
+      throw ArgumentError.value(
+        reasonCode,
+        'reasonCode',
+        'CombatV1StandUpActionCheck.failureにはlegal以外のreasonCodeを'
+        '指定してください',
+      );
+    }
+  }
+
+  final bool legal;
+  final String reason;
+  final CombatV1StandUpLegalityReasonCode reasonCode;
+}
+
+/// [CombatV1Engine.checkRestLegality]が返す機械判定用の理由コード（Phase 7、
+/// docs/combat_rules_v1.md 11章「REST / DOWN」）。
+enum CombatV1RestLegalityReasonCode {
+  /// REST可能。
+  legal,
+
+  /// 試合が既に決着している（[CombatV1MatchState.isOver]）。
+  matchOver,
+
+  /// [CombatV1MatchState]自体が構造的に不整合
+  /// （[pendingStructuralConsistencyViolation]、他の判定APIと同じ防御的
+  /// チェック）。
+  malformedPendingState,
+
+  /// `phase == action`ではない。
+  wrongPhase,
+
+  /// 自分（active player）がDOWN状態ではない（docs/combat_rules_v1.md 11章
+  /// 「DOWN状態の自ターンでは」——起き上がり／RESTはDOWN限定）。
+  notDown,
+}
+
+/// [CombatV1Engine.checkRestLegality]の結果。他の`ActionCheck`系クラスと
+/// 同じ設計（`success`/`failure`ファクトリのみを公開する）。
+class CombatV1RestActionCheck {
+  const CombatV1RestActionCheck.success(this.reason)
+    : legal = true,
+      reasonCode = CombatV1RestLegalityReasonCode.legal;
+
+  CombatV1RestActionCheck.failure(this.reason, this.reasonCode) : legal = false {
+    if (reasonCode == CombatV1RestLegalityReasonCode.legal) {
+      throw ArgumentError.value(
+        reasonCode,
+        'reasonCode',
+        'CombatV1RestActionCheck.failureにはlegal以外のreasonCodeを'
+        '指定してください',
+      );
+    }
+  }
+
+  final bool legal;
+  final String reason;
+  final CombatV1RestLegalityReasonCode reasonCode;
 }
 
 /// Combat Ver.1 Engine。
@@ -930,11 +1035,112 @@ class CombatV1Engine {
         'endTurnはactionフェーズでのみ呼び出せます（現在: ${state.phase.name}）',
       );
     }
+    if (state.active.posture == CombatV1WrestlerPosture.down) {
+      throw CombatV1IllegalActionException(
+        '自分がDOWN状態のため、REST（rest）または起き上がり（standUp）を'
+        '行ってからでなければendTurnを実行できません'
+        '（docs/combat_rules_v1.md 11章、Phase 7）',
+      );
+    }
     final rng = random ?? Random();
     final flipped = state.copyWith(
       activePlayerIndex: state.activePlayerIndex == 0 ? 1 : 0,
       turnNumber: state.turnNumber + 1,
       log: [...state.log, 'ターン終了'],
+    );
+    return _startTurn(flipped, rng);
+  }
+
+  /// DOWN状態から、HPを回復せずに起き上がる（docs/combat_rules_v1.md 11章
+  /// 「DOWN状態の自ターンでは、起き上がりまたはRESTを選択できる」、Phase
+  /// 7）。`phase == action`かつ自分（active player）がDOWN状態の場合のみ
+  /// 許可する。
+  ///
+  /// posture: down→standへ遷移する以外の副作用は無い（HP・KOC・ENERGY・
+  /// HEAT・hand/draw/discardのいずれも変化しない、`phase`・
+  /// `activePlayerIndex`・`turnNumber`も変化しない）。ターンは終了せず、
+  /// 起き上がった後は同一ターン内で通常のaction（TECHNIQUE使用等）へ進める
+  /// （REST（[rest]）とは異なり、`standUp`自体はそのターンの行動を消費しない）。
+  static CombatV1MatchState standUp(CombatV1MatchState state) {
+    if (state.isOver) {
+      throw CombatV1IllegalActionException(
+        '試合は既に終了しているためstandUpを実行できません',
+      );
+    }
+    final check = checkStandUpLegality(state);
+    if (!check.legal) {
+      throw CombatV1IllegalActionException(check.reason);
+    }
+
+    final player = state.active;
+    final updated = player.copyWith(posture: CombatV1WrestlerPosture.stand);
+    return state.withActive(updated).copyWith(
+      log: [...state.log, '${player.wrestlerName}が起き上がった'],
+    );
+  }
+
+  /// RESTする（docs/combat_rules_v1.md 11章「REST: HP+10回復（最大150を
+  /// 超えない）。RESTしたターンはTECHNIQUEを使用できないが、COUNTERは使用
+  /// 可能」、Phase 7）。`phase == action`かつ自分（active player）がDOWN
+  /// 状態の場合のみ許可する。
+  ///
+  /// 効果:
+  /// 1. HPを[CombatV1RulesConfig.restHpRecovery]回復する（`maxHp`を超えない、
+  ///    [restRecoveredHp]）。
+  /// 2. posture: down→standへ遷移する。
+  /// 3. そのターンの行動をRESTで確定し、`endTurn`と同じ内部処理
+  ///    （手番交代・turnNumber加算・新しい手番プレイヤーのターン開始処理）
+  ///    まで一括で進める。
+  ///
+  /// 「RESTしたターンはTECHNIQUEを使用できない」（11章）は、RESTがそのターン
+  /// を終了させること自体によって自然に満たされる——TECHNIQUE使用を個別に
+  /// 禁止するフラグは追加しない。「COUNTERは使用可能」（11章）についても、
+  /// RESTは自分（active player）の`spentEnergy`等を変更しないため、既存の
+  /// COUNTER legality判定（`checkCounterLegality`）へ一切影響しない
+  /// （追加コードは不要）。
+  ///
+  /// KOC・PINカード・HEAT・hand/draw/discardはRESTでは変化しない
+  /// （docs/combat_rules_v1.md 11章に明記が無いため変更しない、13・20・21章
+  /// の方針）。
+  static CombatV1MatchState rest(
+    CombatV1MatchState state, {
+    required CombatV1RulesConfig rules,
+    Random? random,
+  }) {
+    if (state.isOver) {
+      throw CombatV1IllegalActionException(
+        '試合は既に終了しているためrestを実行できません',
+      );
+    }
+    final check = checkRestLegality(state);
+    if (!check.legal) {
+      throw CombatV1IllegalActionException(check.reason);
+    }
+
+    final rng = random ?? Random();
+    final player = state.active;
+    final healedHp = restRecoveredHp(
+      currentHp: player.hp,
+      maxHp: player.maxHp,
+      recoveryAmount: rules.restHpRecovery,
+    );
+    final rested = player.copyWith(
+      hp: healedHp,
+      posture: CombatV1WrestlerPosture.stand,
+    );
+
+    var next = state.withActive(rested).copyWith(
+      log: [
+        ...state.log,
+        '${player.wrestlerName}がRESTしてHPを回復した'
+            '（+${rules.restHpRecovery}、HP:$healedHp）',
+      ],
+    );
+
+    final flipped = next.copyWith(
+      activePlayerIndex: next.activePlayerIndex == 0 ? 1 : 0,
+      turnNumber: next.turnNumber + 1,
+      log: [...next.log, 'ターン終了'],
     );
     return _startTurn(flipped, rng);
   }
@@ -1234,6 +1440,14 @@ class CombatV1Engine {
       return CombatV1ActionCheck.failure(
         'actionフェーズではありません（現在: ${state.phase.name}）',
         CombatV1TechniqueLegalityReasonCode.wrongPhase,
+      );
+    }
+
+    if (state.active.posture == CombatV1WrestlerPosture.down) {
+      return CombatV1ActionCheck.failure(
+        '自分がDOWN状態です。先にREST（rest）または起き上がり（standUp）を'
+        '行ってください（docs/combat_rules_v1.md 11章、Phase 7）',
+        CombatV1TechniqueLegalityReasonCode.selfDown,
       );
     }
 
@@ -1537,6 +1751,14 @@ class CombatV1Engine {
       );
     }
 
+    if (attacker.posture == CombatV1WrestlerPosture.down) {
+      return CombatV1PinActionCheck.failure(
+        '自分がDOWN状態です。先にREST（rest）または起き上がり（standUp）を'
+        '行ってください（docs/combat_rules_v1.md 11章、Phase 7）',
+        CombatV1PinLegalityReasonCode.selfDown,
+      );
+    }
+
     if (defender.posture != CombatV1WrestlerPosture.down) {
       return CombatV1PinActionCheck.failure(
         '相手がDOWN状態ではありません',
@@ -1566,6 +1788,101 @@ class CombatV1Engine {
     CombatV1MatchState state, {
     CombatV1RulesConfig rules = const CombatV1RulesConfig(),
   }) => checkPinLegality(state, rules: rules).legal;
+
+  /// [standUp]のlegalityを判定する（Phase 7、docs/combat_rules_v1.md 11章
+  /// 「REST / DOWN」）。UI/CPU/Simulatorが共通で使う読み取り専用API（例外を
+  /// 出さず`legal`/`reason`/`reasonCode`を返す、他のcheck系APIと同じ設計）。
+  ///
+  /// 少なくとも以下を順に判定する:
+  /// 1. 試合が決着していないか（[CombatV1MatchState.isOver]）
+  /// 2. [CombatV1MatchState]自体が構造的に不整合でないか
+  ///    （[pendingStructuralConsistencyViolation]）
+  /// 3. `phase == action`
+  /// 4. 自分（active player）がDOWN状態か（起き上がり／RESTはDOWN限定、
+  ///    STAND状態では選択できない）
+  static CombatV1StandUpActionCheck checkStandUpLegality(
+    CombatV1MatchState state,
+  ) {
+    if (state.isOver) {
+      return CombatV1StandUpActionCheck.failure(
+        '試合は既に終了しています',
+        CombatV1StandUpLegalityReasonCode.matchOver,
+      );
+    }
+
+    final invariantViolation = pendingStructuralConsistencyViolation(state);
+    if (invariantViolation != null) {
+      return CombatV1StandUpActionCheck.failure(
+        invariantViolation,
+        CombatV1StandUpLegalityReasonCode.malformedPendingState,
+      );
+    }
+
+    if (state.phase != CombatV1MatchPhase.action) {
+      return CombatV1StandUpActionCheck.failure(
+        'actionフェーズではありません（現在: ${state.phase.name}）',
+        CombatV1StandUpLegalityReasonCode.wrongPhase,
+      );
+    }
+
+    if (state.active.posture != CombatV1WrestlerPosture.down) {
+      return CombatV1StandUpActionCheck.failure(
+        '自分がDOWN状態ではありません',
+        CombatV1StandUpLegalityReasonCode.notDown,
+      );
+    }
+
+    return const CombatV1StandUpActionCheck.success('起き上がれます');
+  }
+
+  /// [standUp]で使用できる起き上がりが存在するか（[checkStandUpLegality]への
+  /// 委譲、docs/combat_rules_v1.md 11章、Phase 7）。判定ロジックを重複実装
+  /// しない（[hasPinOption]と同じ方針）。
+  static bool hasStandUpOption(CombatV1MatchState state) =>
+      checkStandUpLegality(state).legal;
+
+  /// [rest]のlegalityを判定する（Phase 7、docs/combat_rules_v1.md 11章
+  /// 「REST / DOWN」）。判定順序は[checkStandUpLegality]と同じ
+  /// （起き上がり／RESTはどちらもDOWN限定・`phase == action`限定で、条件が
+  /// 同一のため）。
+  static CombatV1RestActionCheck checkRestLegality(CombatV1MatchState state) {
+    if (state.isOver) {
+      return CombatV1RestActionCheck.failure(
+        '試合は既に終了しています',
+        CombatV1RestLegalityReasonCode.matchOver,
+      );
+    }
+
+    final invariantViolation = pendingStructuralConsistencyViolation(state);
+    if (invariantViolation != null) {
+      return CombatV1RestActionCheck.failure(
+        invariantViolation,
+        CombatV1RestLegalityReasonCode.malformedPendingState,
+      );
+    }
+
+    if (state.phase != CombatV1MatchPhase.action) {
+      return CombatV1RestActionCheck.failure(
+        'actionフェーズではありません（現在: ${state.phase.name}）',
+        CombatV1RestLegalityReasonCode.wrongPhase,
+      );
+    }
+
+    if (state.active.posture != CombatV1WrestlerPosture.down) {
+      return CombatV1RestActionCheck.failure(
+        '自分がDOWN状態ではありません',
+        CombatV1RestLegalityReasonCode.notDown,
+      );
+    }
+
+    return const CombatV1RestActionCheck.success('RESTできます');
+  }
+
+  /// [rest]で使用できるRESTが存在するか（[checkRestLegality]への委譲、
+  /// docs/combat_rules_v1.md 11章、Phase 7）。判定ロジックを重複実装しない
+  /// （[hasPinOption]と同じ方針）。
+  static bool hasRestOption(CombatV1MatchState state) =>
+      checkRestLegality(state).legal;
 
   static CombatV1DeckEntry? _findInHand(
     CombatV1PlayerState player,

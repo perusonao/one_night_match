@@ -840,3 +840,86 @@ modelおよび`CombatV1MatchPhase.submissionResponsePending`は追加してい�
 閾値以下まで落とせる）・`fx_counter_submission`（SUBMISSION groupを返せるCOUNTER）を追加した
 （いずれも`fixtureDeckSpec`には含めない——既存30枚デッキ構成テストへ影響を与えないため、Phase
 5の`fx_normal_direct_pin`と同じ方針）。
+
+---
+
+## 16. Phase 7での更新（REST / 起き上がり）
+
+Phase 7（REST / 起き上がり）で、本書のPhase 1〜6設計から以下を更新した。ゲームルール自体
+（`combat_rules_v1.md` 11章）の新規確定事項は同書11章・29章「変更履歴」を参照。ここでは実装内部の
+技術設計の差分を記す。
+
+### 16.1 新規ファイル
+
+`lib/src/combat_v1/combat_v1_rest_rules.dart`（§8で想定していた`combat_v1_rest_rules.dart`の役割を
+ほぼそのまま踏襲）を追加した。RESTのHP回復量計算（`restRecoveredHp`）を純粋関数として切り出し、
+`combat_v1_engine.dart`側のstate遷移配線と責務を分離した（`combat_v1_pin_rules.dart`・
+`combat_v1_submission_rules.dart`と同じ方針）。
+
+テストファイルとして`test/combat_v1/combat_v1_rest_test.dart`を追加した。
+
+### 16.2 `CombatV1MatchPhase`へ新規フェーズを追加しない設計判断
+
+§8では「REST | `CombatV1MatchPhase`にDOWN時の選択フェーズを追加」と想定していたが、Phase
+5（PIN）・Phase 6（SUBMISSION）で確定した「防御側の実質的な選択肢が無いCommandには専用の応答待ち
+フェーズを設けない」という方針と同様の判断により、REST/起き上がり専用の新規フェーズは追加しなかった。
+起き上がり（`standUp`）・REST（`rest`）はいずれも既存の`phase == action`から呼び出せるCommandとして
+実装し、`declarePin`と同じ位置付けとした（応答待ちではなく、active player自身の選択によるCommand）。
+
+### 16.3 Command API: `standUp`・`rest`の追加
+
+`CombatV1Engine`へ以下を追加した:
+
+- `standUp(state)`: DOWN状態からHPを回復せずに起き上がる。`checkStandUpLegality`
+  （`legal`/`reason`/`reasonCode`を返す読み取り専用API、他のcheck系APIと同じ設計）でlegalityを
+  検証したうえで、posture: down→standへ遷移させるのみ。`phase`/`activePlayerIndex`/`turnNumber`は
+  変化せず、ターンを消費しない。
+- `rest(state, {rules, random})`: RESTする。`checkRestLegality`でlegalityを検証したうえで、
+  `restRecoveredHp`でHPを回復し（`maxHp`を超えない）、posture:
+  down→standへ遷移させ、そのまま`endTurn`と同じ内部処理（手番交代・`turnNumber`加算・
+  `_startTurn`による新しい手番プレイヤーのターン開始処理）まで一括で進める。
+
+いずれも`checkTechniqueLegality`・`checkPinLegality`等と同じ「`success`/`failure`ファクトリのみを
+公開し、矛盾した`legal`/`reasonCode`の組み合わせを構築できない」設計の専用`ActionCheck`クラス
+（`CombatV1StandUpActionCheck`/`CombatV1RestActionCheck`）と、専用の`reasonCode`
+enum（`CombatV1StandUpLegalityReasonCode`/`CombatV1RestLegalityReasonCode`、
+`legal`/`matchOver`/`malformedPendingState`/`wrongPhase`/`notDown`の5値）を追加した。
+`hasStandUpOption`/`hasRestOption`（`checkXxxLegality`への委譲）も、`hasPinOption`と同じ方針で追加した。
+
+### 16.4 DOWN時のlegality gate: `selfDown`の追加
+
+`combat_rules_v1.md` 11章・4章で確定した「DOWN状態の自ターンでは、起き上がりまたはRESTを選択できる」
+（＝自分がDOWN状態のままでは他の行動へ進めない）を、既存の3つのlegality判定・Commandへ反映した:
+
+- `checkTechniqueLegality`: `wrongPhase`の直後に、`state.active.posture ==
+  down`なら`CombatV1TechniqueLegalityReasonCode.selfDown`で拒否するチェックを追加した。
+- `checkPinLegality`: `wrongPhase`の直後に、攻撃側（`state.active`）が`down`なら
+  `CombatV1PinLegalityReasonCode.selfDown`で拒否するチェックを追加した（通常のCommand経路では
+  `declareTechnique`自体が先に`selfDown`で拒否されるため到達しないはずだが、他のmalformed
+  state判定と同じ位置付けで防御的に追加した）。
+- `endTurn`: `phase != action`チェックの直後に、`state.active.posture ==
+  down`なら`CombatV1IllegalActionException`を送出するガードを追加した（`discardCard`と同じ、
+  reasonCode化されていない直接throwのスタイル）。
+
+`checkCounterLegality`には対応するガードを追加していない——`combat_rules_v1.md` 11章「RESTした
+ターンはCOUNTERは使用可能」により、自分のDOWN状態がCOUNTER可否に影響してはならないため（COUNTERは
+既存どおりpostureを一切参照しない）。
+
+### 16.5 `CombatV1RulesConfig`への追加
+
+`restHpRecovery`（既定10）を追加した（`combat_rules_v1.md` 11章「REST: HP+10回復」）。
+
+### 16.6 「RESTしたターンはTECHNIQUEを使用できない」を専用フラグなしで実現
+
+`combat_rules_v1.md` 11章の「RESTしたターンはTECHNIQUEを使用できない」は、`rest`
+Command自体がそのターンの行動を確定し即座にターンを終了させることによって自然に満たされる
+（RESTを実行した時点で`activePlayerIndex`が相手へ移り、`phase`も次の手番の`discard`へ進むため、
+RESTした側が同一ターン内で`declareTechnique`を呼べる余地がそもそも存在しない）。「このターンは
+TECHNIQUE禁止」のような専用フラグ・`techniquesUsedThisTurn`とは独立の新規状態は追加していない。
+
+### 16.7 draw/discard・`lastSuccessfulTechnique`への影響なし
+
+RESTのターン終了処理で発生する新しい手番プレイヤーの1ドローは、既存の`_startTurn`（Phase
+1〜6で使われているものと同一の内部関数）を再利用しただけであり、REST/起き上がり専用の追加
+draw/discardは無い。`lastSuccessfulTechnique`もREST/起き上がりでは一切参照・変更しない
+（`combat_rules_v1.md` 21章の方針どおり、根拠のないclear処理は追加しなかった）。
