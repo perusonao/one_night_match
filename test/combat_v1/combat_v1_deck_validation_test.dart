@@ -401,4 +401,64 @@ void main() {
       );
     });
   });
+
+  group('validateDeck — wrestlerId（Phase 10B Codexレビュー指摘対応）', () {
+    test('wrestlerId省略（null）時は既存挙動を維持し、有効なデッキはvalidのまま', () {
+      final result = validateDeck(
+        fixtureDeck('w'),
+        catalog: fixtureCatalog,
+        rules: fixtureRules,
+      );
+      expect(result.isValid, isTrue);
+      expect(result.errors, isEmpty);
+    });
+
+    test('wrestlerIdがdeck.wrestlerIdと一致すればvalid', () {
+      final result = validateDeck(
+        fixtureDeck('w'),
+        catalog: fixtureCatalog,
+        rules: fixtureRules,
+        wrestlerId: 'w',
+      );
+      expect(result.isValid, isTrue);
+      expect(result.errors, isEmpty);
+    });
+
+    test('wrestlerIdがdeck.wrestlerIdと不一致ならwrestlerMismatchでinvalid', () {
+      final result = validateDeck(
+        fixtureDeck('w'),
+        catalog: fixtureCatalog,
+        rules: fixtureRules,
+        wrestlerId: 'other-wrestler',
+      );
+      expect(result.isValid, isFalse);
+      expect(
+        result.errors.map((e) => e.code),
+        contains(CombatV1DeckValidationErrorCode.wrestlerMismatch),
+      );
+    });
+
+    test('wrestlerMismatchは他の検証項目（枚数・category等）とは独立して報告される', () {
+      // 合計枚数も壊れたデッキに対してwrestlerIdも不一致にすると、
+      // totalCountMismatchとwrestlerMismatchの両方が報告される。
+      final deck = CombatV1DeckDefinition(
+        wrestlerId: 'w',
+        entries: fixtureDeck('w').entries.take(29).toList(),
+      );
+      final result = validateDeck(
+        deck,
+        catalog: fixtureCatalog,
+        rules: fixtureRules,
+        wrestlerId: 'other-wrestler',
+      );
+      expect(result.isValid, isFalse);
+      expect(
+        result.errors.map((e) => e.code),
+        containsAll([
+          CombatV1DeckValidationErrorCode.totalCountMismatch,
+          CombatV1DeckValidationErrorCode.wrestlerMismatch,
+        ]),
+      );
+    });
+  });
 }

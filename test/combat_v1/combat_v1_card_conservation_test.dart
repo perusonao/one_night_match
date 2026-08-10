@@ -64,9 +64,9 @@ void main() {
     test('start直後は両者とも30枚', () {
       final state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('cc_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('cc_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(1),
@@ -81,9 +81,9 @@ void main() {
     test('宣言直後もpending所有カードを含めて両者とも30枚', () {
       var state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('cc2_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('cc2_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(2),
@@ -104,9 +104,9 @@ void main() {
     test('playCounter成功後も両者とも30枚（pending解消済み）', () {
       var state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('cc3_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('cc3_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(3),

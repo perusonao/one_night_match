@@ -413,6 +413,14 @@ class CombatV1Engine {
   /// 検証したうえでシャッフルし、初期手札を配り、先攻（playerA）のターン
   /// 開始処理（ENERGY全回復・1ドロー）まで行った状態を返す
   /// （`phase == discard`）。不正なカタログ・デッキではMatchを開始できない。
+  ///
+  /// [deckA]/[deckB]が宣言する[CombatV1DeckDefinition.wrestlerId]は、
+  /// それぞれ[wrestlerA.id]/[wrestlerB.id]と一致しなければならない
+  /// （Phase 10B Codexレビュー指摘対応。あるwrestler向けのデッキが別の
+  /// wrestlerへ渡される取り違えを、`wrestlerId`同士の汎用的な比較のみで
+  /// 検出する——特定のwrestler IDをハードコードしない）。一致しない場合は
+  /// [CombatV1IllegalActionException]を送出し、[CombatV1MatchState]は
+  /// 一切構築しない。
   static CombatV1MatchState start({
     required CombatV1Wrestler wrestlerA,
     required CombatV1DeckDefinition deckA,
@@ -423,8 +431,20 @@ class CombatV1Engine {
     Random? random,
   }) {
     _validateCatalogOrThrow(catalog);
-    _validateDeckOrThrow(wrestlerA.name, deckA, catalog: catalog, rules: rules);
-    _validateDeckOrThrow(wrestlerB.name, deckB, catalog: catalog, rules: rules);
+    _validateDeckOrThrow(
+      wrestlerA.name,
+      deckA,
+      catalog: catalog,
+      rules: rules,
+      wrestlerId: wrestlerA.id,
+    );
+    _validateDeckOrThrow(
+      wrestlerB.name,
+      deckB,
+      catalog: catalog,
+      rules: rules,
+      wrestlerId: wrestlerB.id,
+    );
 
     final rng = random ?? Random();
 
@@ -461,14 +481,22 @@ class CombatV1Engine {
 
   /// [deck]を[validateDeck]で検証し、不正なら
   /// [CombatV1IllegalActionException]を送出する（docs/combat_rules_v1.md
-  /// 4章）。複数のエラーがある場合はすべてメッセージへまとめる。
+  /// 4章）。複数のエラーがある場合はすべてメッセージへまとめる。[wrestlerId]は
+  /// [validateDeck]へそのまま渡し、`deck.wrestlerId`との不一致
+  /// （wrestlerMismatch）も同じ経路で検出する。
   static void _validateDeckOrThrow(
     String wrestlerName,
     CombatV1DeckDefinition deck, {
     required CombatV1CardCatalog catalog,
     required CombatV1RulesConfig rules,
+    String? wrestlerId,
   }) {
-    final result = validateDeck(deck, catalog: catalog, rules: rules);
+    final result = validateDeck(
+      deck,
+      catalog: catalog,
+      rules: rules,
+      wrestlerId: wrestlerId,
+    );
     if (!result.isValid) {
       throw CombatV1IllegalActionException(
         '$wrestlerNameのデッキが不正です: '

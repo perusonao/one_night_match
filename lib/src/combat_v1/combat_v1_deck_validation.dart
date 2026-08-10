@@ -61,6 +61,11 @@ enum CombatV1DeckValidationErrorCode {
 
   /// 同名カード枚数が上限を超えている。
   sameNameLimitExceeded,
+
+  /// [validateDeck]の`wrestlerId`引数が非nullで、かつ
+  /// [CombatV1DeckDefinition.wrestlerId]と一致しない（そのデッキが
+  /// 渡された`wrestlerId`のwrestler向けに作られたものではない）。
+  wrestlerMismatch,
 }
 
 /// Deck validationの1件のエラー。
@@ -99,6 +104,11 @@ class CombatV1DeckValidationResult {
 ///   （COUNTERとTECHNIQUEの誤分類の防止を含む）
 /// - 同名カード枚数がカテゴリ別上限（[CombatV1RulesConfig.sameNameLimitFor]）
 ///   以内であること
+/// - [wrestlerId]が非nullの場合、[CombatV1DeckDefinition.wrestlerId]と
+///   一致すること（Phase 10B Codexレビュー指摘対応。あるwrestler向けの
+///   デッキが別のwrestlerへ渡される取り違えを検出する。デフォルトは`null`
+///   ＝チェックをスキップし、wrestlerとの対応を検証する必要がない既存の
+///   呼び出し元・fixtureベースのテストは無変更で動作し続ける）
 ///
 /// UI／Deck Builder／[CombatV1Engine.start] のいずれからも呼べる読み取り
 /// 専用APIとする。
@@ -106,9 +116,20 @@ CombatV1DeckValidationResult validateDeck(
   CombatV1DeckDefinition deck, {
   required CombatV1CardCatalog catalog,
   required CombatV1RulesConfig rules,
+  String? wrestlerId,
 }) {
   final errors = <CombatV1DeckValidationError>[];
   final composition = rules.deckComposition;
+
+  if (wrestlerId != null && deck.wrestlerId != wrestlerId) {
+    errors.add(
+      CombatV1DeckValidationError(
+        code: CombatV1DeckValidationErrorCode.wrestlerMismatch,
+        message: 'このデッキは wrestlerId=$wrestlerId 向けではありません'
+            '（デッキが宣言するwrestlerId: ${deck.wrestlerId}）',
+      ),
+    );
+  }
 
   if (deck.size != composition.total) {
     errors.add(

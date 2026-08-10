@@ -618,9 +618,9 @@ void main() {
     test('25. ターン開始でspentEnergyが空へ戻る（全回復）', () {
       var state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('e_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('e_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(1),
@@ -642,9 +642,9 @@ void main() {
     test('26. 相手のENERGYは相手ターン開始まで回復しない', () {
       var state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('e2_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('e2_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(1),

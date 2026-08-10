@@ -340,13 +340,57 @@ Misaki(player-a) vs Jack(player-b)という異なるレスラー同士の組み�
 
 ---
 
-## 13. 変更履歴
+## 14. Production WrestlerとProduction Deckの対応関係（Phase 10B GitHub Codexレビュー指摘対応で確定）
+
+`CombatV1Engine.start(wrestlerA: jackWrestler, deckA: buildMisakiDeck(...), ...)`
+のような、あるwrestler向けのDeckを別のwrestlerへ渡す取り違えが、
+`validateDeck`・`CombatV1Engine.start`いずれからも拒否されずに成立してしまう
+不具合がGitHub Codex自動レビューで指摘された（PR #11、P2）。
+
+- **原因**: `CombatV1DeckDefinition.wrestlerId`（Phase 1から存在する汎用
+  Domainフィールド）と、`CombatV1Engine.start`に実際に渡された
+  `CombatV1Wrestler.id`を比較する仕組みが一度も実装されていなかった。
+- **修正**: `validateDeck`（`combat_v1_deck_validation.dart`）へ任意（既定
+  `null`）の`wrestlerId`引数を追加し、非nullかつ`deck.wrestlerId`と不一致
+  なら`CombatV1DeckValidationErrorCode.wrestlerMismatch`で拒否するよう
+  変更した。`CombatV1Engine.start`は、内部で行っている`deckA`/`deckB`の
+  `validateDeck`呼び出しへ、それぞれ`wrestlerA.id`/`wrestlerB.id`を渡す
+  よう変更した。これにより`Engine.start`を直接呼ぶ経路でも取り違えを
+  確実に拒否する。
+- **設計方針**: Misaki/Jack等の固有IDはCore Engine側に一切ハードコード
+  しない（`CombatV1Wrestler.id`と`CombatV1DeckDefinition.wrestlerId`という
+  既存の汎用String同士を比較するのみ）。Phase 10C以降に火神アカリ・白銀
+  レイナのProduction Deckを追加する場合も、同じ仕組みがそのまま機能する。
+- **後方互換性**: `wrestlerId`引数は既定`null`（チェックをスキップ）のため、
+  wrestlerとの対応関係を意図的に持たない既存の呼び出し元・fixtureベースの
+  テストは無変更のまま動作する。
+- **ownerIdとの関係（混同しないこと）**: `ownerId`（7章）はphysical card
+  instance namespace専用の識別子であり、Production Wrestler ID
+  （`CombatV1Wrestler.id`）とは別概念のまま維持する。`ownerId ==
+  wrestler.id`を要求する設計にはしていない——`buildMisakiDeck`/
+  `buildJackDeck`が返す`CombatV1DeckDefinition.wrestlerId`は、`ownerId`に
+  何を渡しても常にそのレスラー自身のID（`"misaki"`/`"jack"`）のまま変化
+  しない（`combat_v1_production_wrestler_deck_integrity_test.dart`で
+  直接検証済み）。
+
+検証は`test/combat_v1/combat_v1_production_wrestler_deck_integrity_test.dart`
+（Misaki/Jack正常系・mismatch双方向・owner namespace独立性・mirror
+match・cross-wrestler・既存validation回帰の各観点）と、
+`test/combat_v1/combat_v1_deck_validation_test.dart`（`wrestlerId`引数の
+単体テスト）で行った。
+
+---
+
+## 15. 変更履歴
 
 - **Phase 10-Precondition〜10A**: 本書を新規作成。上記1〜6章の内容を、Phase
   10Aセッション内でユーザーへ確認のうえ正式確定した。
 - **Phase 10A（GitHub Codexレビュー指摘対応）**: 7章を新規追加。Production
   Deck builderのinstanceId生成方式を、`wrestlerId`固定から必須`ownerId`
   パラメータ方式へ変更した経緯を記録した。
+- **Phase 10B（GitHub Codexレビュー指摘P2対応）**: 14章を新規追加。
+  Production WrestlerとProduction Deckの取り違えを`validateDeck`/
+  `CombatV1Engine.start`で拒否する仕組みを追加した経緯を記録した。
 - **Phase 10B**: 9〜12章を新規追加。黒蝶ジャックのProduction
   Wrestler／Technique（12種）／Counter（3種）／Deck（30枚）を、Phase
   10Aと同じowner namespace方式・広範囲/中範囲/専門Counterテンプレートで
