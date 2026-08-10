@@ -23,6 +23,7 @@ import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_match_state.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_pending_attack.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_successful_technique_snapshot.dart';
 
 import 'combat_v1_test_fixtures.dart';
 
@@ -50,8 +51,9 @@ class _FullStateSnapshot {
       pendingAttack = s.pendingAttack == null
           ? null
           : _PendingAttackSnapshot(s.pendingAttack!),
-      lastSuccessfulTechniqueCardInstanceId =
-          s.lastSuccessfulTechnique?.cardInstanceId,
+      lastSuccessfulTechnique = s.lastSuccessfulTechnique == null
+          ? null
+          : _LastSuccessfulTechniqueSnapshot(s.lastSuccessfulTechnique!),
       log = List.of(s.log);
 
   final String matchId;
@@ -62,7 +64,7 @@ class _FullStateSnapshot {
   final int turnNumber;
   final CombatV1MatchPhase phase;
   final _PendingAttackSnapshot? pendingAttack;
-  final String? lastSuccessfulTechniqueCardInstanceId;
+  final _LastSuccessfulTechniqueSnapshot? lastSuccessfulTechnique;
   final List<String> log;
 
   void expectUnchanged(CombatV1MatchState after, {String? reason}) {
@@ -79,12 +81,85 @@ class _FullStateSnapshot {
       expect(after.pendingAttack, isNotNull, reason: '$reason: pendingAttack');
       pendingAttack!.expectUnchanged(after.pendingAttack!, reason: reason);
     }
-    expect(
-      after.lastSuccessfulTechnique?.cardInstanceId,
-      lastSuccessfulTechniqueCardInstanceId,
-      reason: '$reason: lastSuccessfulTechnique',
-    );
+    if (lastSuccessfulTechnique == null) {
+      expect(
+        after.lastSuccessfulTechnique,
+        isNull,
+        reason: '$reason: lastSuccessfulTechnique',
+      );
+    } else {
+      expect(
+        after.lastSuccessfulTechnique,
+        isNotNull,
+        reason: '$reason: lastSuccessfulTechnique',
+      );
+      lastSuccessfulTechnique!.expectUnchanged(
+        after.lastSuccessfulTechnique!,
+        reason: reason,
+      );
+    }
     expect(List.of(after.log), log, reason: '$reason: log');
+  }
+}
+
+/// [CombatV1SuccessfulTechniqueSnapshot]の全10 fieldを比較するsnapshot
+/// （Phase 4 Codex再レビュー指摘M1対応。旧実装は`cardInstanceId`のみを
+/// 比較しており、他fieldの意図しない変化を検出できなかった）。
+class _LastSuccessfulTechniqueSnapshot {
+  _LastSuccessfulTechniqueSnapshot(CombatV1SuccessfulTechniqueSnapshot s)
+    : attackerPlayerIndex = s.attackerPlayerIndex,
+      cardInstanceId = s.cardInstanceId,
+      cardId = s.cardId,
+      category = s.category,
+      attribute = s.attribute,
+      family = s.family,
+      directPin = s.directPin,
+      submissionHold = s.submissionHold,
+      finisherType = s.finisherType,
+      resultOpponentState = s.resultOpponentState;
+
+  final int attackerPlayerIndex;
+  final String cardInstanceId;
+  final String cardId;
+  final CombatV1CardCategory category;
+  final CombatV1EnergyAttribute attribute;
+  final CombatV1TechniqueFamily family;
+  final bool directPin;
+  final bool submissionHold;
+  final CombatV1FinisherType? finisherType;
+  final CombatV1WrestlerPosture? resultOpponentState;
+
+  void expectUnchanged(CombatV1SuccessfulTechniqueSnapshot after, {String? reason}) {
+    expect(
+      after.attackerPlayerIndex,
+      attackerPlayerIndex,
+      reason: '$reason: lastSuccessfulTechnique.attackerPlayerIndex',
+    );
+    expect(
+      after.cardInstanceId,
+      cardInstanceId,
+      reason: '$reason: lastSuccessfulTechnique.cardInstanceId',
+    );
+    expect(after.cardId, cardId, reason: '$reason: lastSuccessfulTechnique.cardId');
+    expect(after.category, category, reason: '$reason: lastSuccessfulTechnique.category');
+    expect(after.attribute, attribute, reason: '$reason: lastSuccessfulTechnique.attribute');
+    expect(after.family, family, reason: '$reason: lastSuccessfulTechnique.family');
+    expect(after.directPin, directPin, reason: '$reason: lastSuccessfulTechnique.directPin');
+    expect(
+      after.submissionHold,
+      submissionHold,
+      reason: '$reason: lastSuccessfulTechnique.submissionHold',
+    );
+    expect(
+      after.finisherType,
+      finisherType,
+      reason: '$reason: lastSuccessfulTechnique.finisherType',
+    );
+    expect(
+      after.resultOpponentState,
+      resultOpponentState,
+      reason: '$reason: lastSuccessfulTechnique.resultOpponentState',
+    );
   }
 }
 
@@ -627,5 +702,110 @@ void main() {
         reason: 'phase=pending, pendingAttack=null (declineCounter)',
       );
     });
+  });
+
+  group('malformed pending card ownership — Command実行前ガード'
+      '（Phase 4 Codex再レビュー指摘H1残件: pendingAttackOwnershipViolation）', () {
+    // 各シナリオは「pendingが所有するはずの攻撃カードが、本来あり得ない
+    // ゾーンにも存在する（A〜F）」または「pending.attackCardInstance.category
+    // がpending.categoryと不一致（G）」という、宣言時のコミット処理が
+    // 本来到達させない不整合stateを直接構築する（テーブル駆動）。
+    final scenarios = <String, CombatV1MatchState Function(CombatV1MatchState pending)>{
+      'A: attacker handに残存': (pending) => pending.copyWith(
+        playerA: pending.playerA.copyWith(
+          hand: [...pending.playerA.hand, pending.pendingAttack!.attackCardInstance],
+        ),
+      ),
+      'B: attacker drawPileに残存': (pending) => pending.copyWith(
+        playerA: pending.playerA.copyWith(
+          drawPile: [...pending.playerA.drawPile, pending.pendingAttack!.attackCardInstance],
+        ),
+      ),
+      'C: attacker discardPileに残存': (pending) => pending.copyWith(
+        playerA: pending.playerA.copyWith(
+          discardPile: [...pending.playerA.discardPile, pending.pendingAttack!.attackCardInstance],
+        ),
+      ),
+      'D: defender handに重複instanceId': (pending) => pending.copyWith(
+        playerB: pending.playerB.copyWith(
+          hand: [...pending.playerB.hand, pending.pendingAttack!.attackCardInstance],
+        ),
+      ),
+      'E: defender drawPileに重複instanceId': (pending) => pending.copyWith(
+        playerB: pending.playerB.copyWith(
+          drawPile: [...pending.playerB.drawPile, pending.pendingAttack!.attackCardInstance],
+        ),
+      ),
+      'F: defender discardPileに重複instanceId': (pending) => pending.copyWith(
+        playerB: pending.playerB.copyWith(
+          discardPile: [...pending.playerB.discardPile, pending.pendingAttack!.attackCardInstance],
+        ),
+      ),
+      'G: attackCardInstance.categoryがpending.categoryと不一致': (pending) {
+        final original = pending.pendingAttack!;
+        final mismatched = CombatV1PendingAttack(
+          attackerPlayerIndex: original.attackerPlayerIndex,
+          defenderPlayerIndex: original.defenderPlayerIndex,
+          attackCardInstance: CombatV1DeckEntry(
+            instanceId: original.attackCardInstance.instanceId,
+            cardId: original.attackCardInstance.cardId,
+            category: CombatV1CardCategory.signature, // original.category(normal)と不一致
+          ),
+          category: original.category,
+          attribute: original.attribute,
+          family: original.family,
+          energyCost: original.energyCost,
+          damage: original.damage,
+          heatGain: original.heatGain,
+        );
+        return pending.copyWith(pendingAttack: mismatched);
+      },
+    };
+
+    for (final entry in scenarios.entries) {
+      test('${entry.key}: playCounter/declineCounterが拒否されstate完全不変'
+          '（既存のlastSuccessfulTechniqueも含め不変）', () {
+        // lastSuccessfulTechniqueがすでに非nullの状態から出発し、malformed
+        // ownership拒否がその値まで含めて完全に不変であることを検証する
+        // （M1: lastSuccessfulTechniqueの全field比較）。
+        var base = declareAndResolveTechnique(
+          buildMatchState(handA: const [
+            CombatV1DeckEntry(
+              instanceId: 'warmup',
+              cardId: 'fx_normal_strike',
+              category: CombatV1CardCategory.normal,
+            ),
+          ]),
+          'warmup',
+          catalog: fixtureCatalog,
+          random: Random(1),
+        );
+        expect(base.lastSuccessfulTechnique, isNotNull);
+
+        base = base.withActive(base.active.copyWith(hand: const [attack]));
+        base = base.withOpponent(base.opponent.copyWith(hand: const [matchingCounter]));
+        final pending = CombatV1Engine.declareTechnique(base, 'atk1', catalog: fixtureCatalog);
+
+        final malformedState = entry.value(pending);
+        final snapshot = _FullStateSnapshot(malformedState);
+
+        expect(
+          () => CombatV1Engine.playCounter(
+            malformedState,
+            'ctr1',
+            catalog: fixtureCatalog,
+            rules: fixtureRules,
+          ),
+          throwsA(isA<CombatV1IllegalActionException>()),
+        );
+        snapshot.expectUnchanged(malformedState, reason: '${entry.key} (playCounter)');
+
+        expect(
+          () => CombatV1Engine.declineCounter(malformedState),
+          throwsA(isA<CombatV1IllegalActionException>()),
+        );
+        snapshot.expectUnchanged(malformedState, reason: '${entry.key} (declineCounter)');
+      });
+    }
   });
 }

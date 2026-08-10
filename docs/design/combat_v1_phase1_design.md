@@ -527,3 +527,49 @@ validationの重複検出（`counterDuplicateFamily`/`counterDuplicateGroup`）�
 ### 13.5 新規ファイル
 
 `combat_v1_successful_technique_snapshot.dart`（`lib/src/combat_v1/`）を追加した。
+
+### 13.6 Codex再レビュー残件（H1残件・M1・M2）
+
+13.1〜13.5のCodexレビュー対応後、同じ変更セットへの再レビューで指摘された3件を追加修正した。
+ゲームルール（`combat_rules_v1.md`）・Phase 4 COUNTERの仕様そのものへの変更は無い。
+
+#### H1残件: pending card ownershipのCommandガード
+
+13.1の`pendingStructuralConsistencyViolation`（`phase`とpendingの存在・index整合性のみを見る）は、
+pendingが所有するはずの攻撃カードが誤ってhand/drawPile/discardPileにも存在する状態
+（宣言時のコミット処理を経ずに直接構築されたmalformed state）までは検出しなかった。
+`combat_v1_state_invariants.dart`へ`pendingAttackOwnershipViolation(state)`を追加した:
+
+- pendingが所有する攻撃カード（`attackCardInstance`）が攻撃側/防御側いずれかの
+  hand/drawPile/discardPileに存在しないこと、および`attackCardInstance.category`が
+  `pending.category`と一致することを検証する軽量チェック（pendingが所有する1枚のカードのみを
+  対象とし、両player全体のinstanceId重複スキャンは含まない——`validateMatchStateInvariants`との
+  役割分担は維持する）。
+- 判定ロジック自体は`_pendingOwnershipStatus`という内部ヘルパーへ切り出し、
+  `pendingAttackOwnershipViolation`と`validateMatchStateInvariants`の両方から呼び出すことで、
+  カードゾーン走査条件の重複実装を避けた。
+- `CombatV1Engine.checkCounterLegality`の先頭（`pendingStructuralConsistencyViolation`の直後）と、
+  `checkCounterLegality`を経由しない`declineCounter`の先頭に、それぞれ直接ガードとして配線した。
+  `playCounter`は`checkCounterLegality`経由のため自動的に保護される。`hasAnyPlayableCounter`は
+  従来どおり`checkCounterLegality`へ委譲するのみで、判定ロジックを重複させていない。
+  いずれも[state]を一切変更する前に検証するため、malformed stateに対するCommand呼び出しの
+  atomicityが保たれる。
+
+#### M1: atomicity snapshotでの`lastSuccessfulTechnique`全field比較
+
+`combat_v1_atomicity_test.dart`の`_FullStateSnapshot`は、`lastSuccessfulTechnique`について
+`cardInstanceId`のみを比較していたため、他9 fieldの意図しない変化を検出できなかった。
+`CombatV1SuccessfulTechniqueSnapshot`の全10 field（`attackerPlayerIndex`/`cardInstanceId`/
+`cardId`/`category`/`attribute`/`family`/`directPin`/`submissionHold`/`finisherType`/
+`resultOpponentState`）を比較する`_LastSuccessfulTechniqueSnapshot`を追加し、
+`_FullStateSnapshot.expectUnchanged`から利用するよう変更した。既存の`lastSuccessfulTechnique`が
+非nullの状態から出発し、malformed pending card ownership（上記H1残件）によるCommand拒否後も
+その値が完全に不変であることを検証するテストを追加した。
+
+#### M2: golden parity testの全field比較化
+
+`combat_v1_golden_parity_test.dart`の「full field-by-field比較」テストは、`matchId`・
+`lastSuccessfulTechnique`・`log`内容、およびplayerA/Bの`wrestlerId`/`wrestlerName`/`maxHp`/
+`koc`/`pinCardsHeld`/`energyPool`/`reshuffleCount`等を検証していなかった。これらすべてを含む
+真の全field比較へ拡張した（実装ヘルパーをoracleにせず、Phase 3確定仕様に基づくliteral値で
+比較する既存方針は維持）。STAND→STAND等の既存6シナリオは変更していない。

@@ -154,7 +154,9 @@ void main() {
     });
   });
 
-  group('golden parity — full field-by-field比較（決定的な単一シナリオ）', () {
+  group('golden parity — full field-by-field比較（決定的な単一シナリオ、'
+      'Phase 4 Codex再レビュー指摘M2対応: MatchStateの全field・'
+      'playerA/B双方の全field・log内容全体を含めた真の全field比較）', () {
     test('宣言→decline後のMatchState全fieldがPhase 3確定仕様どおりの値になる', () {
       final attack = const CombatV1DeckEntry(
         instanceId: 'a1',
@@ -178,27 +180,87 @@ void main() {
       final declared = CombatV1Engine.declareTechnique(state, 'a1', catalog: fixtureCatalog);
       final resolved = CombatV1Engine.declineCounter(declared, random: Random(42));
 
-      // playerA（攻撃側）: ENERGY消費・使用カードdiscard・1draw・
-      // techniquesUsedThisTurn+1。
-      expect(resolved.playerA.spentEnergy[CombatV1EnergyAttribute.throwing], 1);
-      expect(resolved.playerA.hand.map((e) => e.instanceId).toList(), ['reserve']);
-      expect(resolved.playerA.drawPile, isEmpty);
-      expect(resolved.playerA.discardPile.map((e) => e.instanceId).toList(), ['a1']);
-      expect(resolved.playerA.techniquesUsedThisTurn, 1);
-      expect(resolved.playerA.hp, 150); // 攻撃側は被弾しない
-
-      // playerB（防御側）: DMG適用・posture変化のみ。手札等は無変化。
-      expect(resolved.playerB.hp, 130);
-      expect(resolved.playerB.posture, CombatV1WrestlerPosture.down);
-      expect(resolved.playerB.hand, isEmpty);
-      expect(resolved.playerB.spentEnergy, isEmpty);
-
-      // MatchState全体。
-      expect(resolved.sharedHeat, 20);
-      expect(resolved.activePlayerIndex, 0);
+      // ---- MatchState全体（matchId・phase・activePlayerIndex・turnNumber・
+      // sharedHeat・pendingAttack・lastSuccessfulTechnique・log）----
+      expect(resolved.matchId, 'phase4-test-match');
       expect(resolved.phase, CombatV1MatchPhase.action);
-      expect(resolved.pendingAttack, isNull);
+      expect(resolved.activePlayerIndex, 0);
       expect(resolved.turnNumber, 1);
+      expect(resolved.sharedHeat, 20);
+      expect(resolved.pendingAttack, isNull);
+      expect(resolved.log, [
+        'テストファイターAがテストダウン投げ技を宣言した',
+        'テストファイターAの攻撃がCOUNTERされず成立した（DMG20、HEAT+20）',
+        'テストファイターAがカードを1枚引いた',
+      ]);
+
+      // ---- lastSuccessfulTechnique（全10 field）----
+      final snapshot = resolved.lastSuccessfulTechnique;
+      expect(snapshot, isNotNull);
+      expect(snapshot!.attackerPlayerIndex, 0);
+      expect(snapshot.cardInstanceId, 'a1');
+      expect(snapshot.cardId, 'fx_normal_throw_down');
+      expect(snapshot.category, CombatV1CardCategory.normal);
+      expect(snapshot.attribute, CombatV1EnergyAttribute.throwing);
+      expect(snapshot.family, CombatV1TechniqueFamily.slam);
+      expect(snapshot.directPin, isFalse);
+      expect(snapshot.submissionHold, isFalse);
+      expect(snapshot.finisherType, isNull);
+      expect(snapshot.resultOpponentState, CombatV1WrestlerPosture.down);
+
+      // ---- playerA（攻撃側）全field ----
+      final a = resolved.playerA;
+      expect(a.wrestlerId, 'fx_wrestler_a');
+      expect(a.wrestlerName, 'テストファイターA');
+      expect(a.maxHp, 150);
+      expect(a.hp, 150); // 攻撃側は被弾しない
+      expect(a.koc, 10);
+      expect(a.pinCardsHeld, 2);
+      expect(a.posture, CombatV1WrestlerPosture.stand);
+      expect(a.energyPool.amounts, {
+        CombatV1EnergyAttribute.strike: 3,
+        CombatV1EnergyAttribute.joint: 1,
+        CombatV1EnergyAttribute.throwing: 2,
+        CombatV1EnergyAttribute.aerial: 1,
+        CombatV1EnergyAttribute.rough: 1,
+        CombatV1EnergyAttribute.wild: 2,
+      });
+      expect(a.spentEnergy, {CombatV1EnergyAttribute.throwing: 1});
+      expect(
+        a.hand.map((e) => (e.instanceId, e.cardId, e.category)).toList(),
+        [('reserve', 'fx_normal_strike', CombatV1CardCategory.normal)],
+      );
+      expect(a.drawPile, isEmpty);
+      expect(
+        a.discardPile.map((e) => (e.instanceId, e.cardId, e.category)).toList(),
+        [('a1', 'fx_normal_throw_down', CombatV1CardCategory.normal)],
+      );
+      expect(a.reshuffleCount, 0);
+      expect(a.techniquesUsedThisTurn, 1);
+
+      // ---- playerB（防御側）全field ----
+      final b = resolved.playerB;
+      expect(b.wrestlerId, 'fx_wrestler_b');
+      expect(b.wrestlerName, 'テストファイターB');
+      expect(b.maxHp, 150);
+      expect(b.hp, 130); // 150-20
+      expect(b.koc, 10);
+      expect(b.pinCardsHeld, 2);
+      expect(b.posture, CombatV1WrestlerPosture.down);
+      expect(b.energyPool.amounts, {
+        CombatV1EnergyAttribute.strike: 2,
+        CombatV1EnergyAttribute.joint: 2,
+        CombatV1EnergyAttribute.throwing: 1,
+        CombatV1EnergyAttribute.aerial: 1,
+        CombatV1EnergyAttribute.rough: 0,
+        CombatV1EnergyAttribute.wild: 2,
+      });
+      expect(b.spentEnergy, isEmpty);
+      expect(b.hand, isEmpty);
+      expect(b.drawPile, isEmpty);
+      expect(b.discardPile, isEmpty);
+      expect(b.reshuffleCount, 0);
+      expect(b.techniquesUsedThisTurn, 0);
     });
   });
 }

@@ -172,7 +172,9 @@ enum CombatV1CounterLegalityReasonCode {
   insufficientEnergy,
 
   /// [CombatV1MatchState]自体が構造的に不整合（`pendingStructuralConsistencyViolation`
-  /// 参照、Phase 4 Codexレビュー指摘H1）。
+  /// 参照、Phase 4 Codexレビュー指摘H1）、または`pendingAttack`が所有する
+  /// カードの所有権が壊れている（`pendingAttackOwnershipViolation`参照、
+  /// Phase 4 Codex再レビュー指摘H1残件）。
   malformedPendingState,
 }
 
@@ -605,6 +607,13 @@ class CombatV1Engine {
   /// 許可。ゲーム結果としてはPhase 3の即時成功解決と同じになる
   /// （DMG→HP 0 clamp→shared HEAT→相手状態変化→使用カードdiscard→1
   /// draw）。
+  ///
+  /// `checkCounterLegality`を経由しないCommandのため、
+  /// `pendingStructuralConsistencyViolation`に加えて
+  /// `pendingAttackOwnershipViolation`も直接ガードする（malformedな
+  /// pending card ownership stateを処理しない、Phase 4 Codex再レビュー
+  /// 指摘H1残件）。いずれの違反も[state]を一切変更する前に検出するため、
+  /// atomicityは保たれる。
   static CombatV1MatchState declineCounter(
     CombatV1MatchState state, {
     Random? random,
@@ -612,6 +621,10 @@ class CombatV1Engine {
     final invariantViolation = pendingStructuralConsistencyViolation(state);
     if (invariantViolation != null) {
       throw CombatV1IllegalActionException(invariantViolation);
+    }
+    final ownershipViolation = pendingAttackOwnershipViolation(state);
+    if (ownershipViolation != null) {
+      throw CombatV1IllegalActionException(ownershipViolation);
     }
 
     if (state.phase != CombatV1MatchPhase.counterResponsePending) {
@@ -858,6 +871,12 @@ class CombatV1Engine {
   /// COUNTER使用のlegalityを判定する（Phase 4、docs/combat_rules_v1.md
   /// 7章「COUNTER」）。
   ///
+  /// `pendingStructuralConsistencyViolation`（構造整合性）に加えて
+  /// `pendingAttackOwnershipViolation`（pendingが所有するカードのゾーン
+  /// 所有権）も先頭で検証する（Phase 4 Codex再レビュー指摘H1残件）。
+  /// [hasAnyPlayableCounter]はこの関数へ委譲するだけで、判定ロジックを
+  /// 重複実装しない。
+  ///
   /// 少なくとも以下を順に判定する:
   /// 1. `phase == counterResponsePending`
   /// 2. pendingが存在するか
@@ -881,6 +900,13 @@ class CombatV1Engine {
     if (invariantViolation != null) {
       return CombatV1CounterActionCheck.failure(
         invariantViolation,
+        CombatV1CounterLegalityReasonCode.malformedPendingState,
+      );
+    }
+    final ownershipViolation = pendingAttackOwnershipViolation(state);
+    if (ownershipViolation != null) {
+      return CombatV1CounterActionCheck.failure(
+        ownershipViolation,
         CombatV1CounterLegalityReasonCode.malformedPendingState,
       );
     }
