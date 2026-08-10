@@ -298,12 +298,33 @@ class CombatV1CpuMatchRunner {
   /// player-level invariant違反を検出できないため（Codexレビュー指摘、
   /// docs/design/combat_v1_phase11b_cpu.md参照）。
   ///
+  /// さらに`state.activePlayerIndex`が0/1のいずれかであることも検証する
+  /// （Codex re-review指摘、GitHub PR #14 discussion_r3752367108）。
+  /// `validateMatchStateInvariants`は`pendingAttack`が存在する場合の
+  /// `attackerPlayerIndex`/`defenderPlayerIndex`・`winnerPlayerIndex`の
+  /// 範囲は検証するが、`pendingAttack`が`null`の場合（match開始直後・
+  /// `action`/`discard`フェーズ中等）は`activePlayerIndex`自体の範囲を
+  /// 検証しない。`CombatV1MatchState.active`/`opponent`は`activePlayerIndex
+  /// == 0`以外を無条件にplayerB側として扱うため、この検証が無いまま
+  /// [run]がactor選択（`actor == 0 ? policyA : policyB`）や
+  /// [CombatV1LegalActionEnumerator]・[CombatV1ActionExecutor]まで進んで
+  /// しまうと、範囲外のactivePlayerIndex（例: `-1`・`2`）がpolicyへ
+  /// silentにdispatchされてしまう。ここで検出することで、policy
+  /// dispatch・action実行へ進む前に必ず`invariantViolation`として停止
+  /// する。
+  ///
   /// 満たしていれば`null`、そうでなければ結合した人間可読メッセージ
   /// （[CombatV1CpuMatchResult.invariantViolationMessage]）を返す。
   /// Core Engine側のvalidator（`combat_v1_state_invariants.dart`）自体は
-  /// 変更しない——既存の2つのAPIをrunner側で組み合わせるだけの薄いhelper。
+  /// 変更しない——既存の2つのAPIをrunner側で組み合わせ、runner固有の
+  /// 追加チェックを1件加えるだけの薄いhelper。
   String? _validateRunnerInvariants(CombatV1MatchState state) {
     final messages = <String>[
+      if (state.activePlayerIndex != 0 && state.activePlayerIndex != 1)
+        'activePlayerIndexが0/1のいずれでもありません'
+            '（activePlayerIndex:${state.activePlayerIndex}）。'
+            'policy dispatch・action実行より前にrunner invariant違反として'
+            '検出しました。',
       ...validateMatchStateInvariants(state, rules: rules).errors.map(
         (e) => e.message,
       ),

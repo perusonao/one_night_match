@@ -107,6 +107,71 @@ void main() {
     });
   });
 
+  group('A2. activePlayerIndexが0/1以外の場合、policy dispatch前に'
+      'invariantViolationとして拒否する（Codex re-review指摘、'
+      'GitHub PR #14 discussion_r3752367108）', () {
+    void expectRejectedBeforeDispatch(int invalidActivePlayerIndex) {
+      final malformed = buildMatchState(
+        activePlayerIndex: invalidActivePlayerIndex,
+      );
+      final recordingA = _RecordingPolicy('A', const CombatV1FirstLegalPolicy());
+      final recordingB = _RecordingPolicy('B', const CombatV1FirstLegalPolicy());
+      final observer = _RecordingObserver();
+      final runner = CombatV1CpuMatchRunner(catalog: fixtureCatalog, rules: rules);
+
+      final result = runner.run(
+        malformed,
+        policyA: recordingA,
+        policyB: recordingB,
+        observer: observer,
+      );
+
+      expect(result.termination, CombatV1CpuMatchTermination.invariantViolation);
+      expect(result.actionCount, 0);
+      expect(result.lastAction, isNull);
+      expect(result.invariantViolationMessage, isNotNull);
+      // policy dispatchより前に拒否される
+      // （「0以外だから全てpolicyBへ流れる」regressionを直接防止する）。
+      expect(recordingA.statesSeen, isEmpty);
+      expect(recordingB.statesSeen, isEmpty);
+      expect(observer.observations, isEmpty);
+      // 不正なinitialStateからaction遷移していない
+      // （Engine actionが一切実行されていない）。
+      expect(result.finalState, same(malformed));
+    }
+
+    test('A. activePlayerIndex = -1', () {
+      expectRejectedBeforeDispatch(-1);
+    });
+
+    test('B. activePlayerIndex = 2', () {
+      expectRejectedBeforeDispatch(2);
+    });
+
+    test('C. activePlayerIndex = 0/1は既存正常系のままregressionしない', () {
+      for (final valid in [0, 1]) {
+        final state = buildMatchState(activePlayerIndex: valid);
+        final runner = CombatV1CpuMatchRunner(
+          catalog: fixtureCatalog,
+          rules: rules,
+          maxActions: 1,
+        );
+
+        final result = runner.run(
+          state,
+          policyA: const CombatV1FirstLegalPolicy(),
+          policyB: const CombatV1FirstLegalPolicy(),
+        );
+
+        expect(
+          result.termination,
+          isNot(CombatV1CpuMatchTermination.invariantViolation),
+          reason: 'activePlayerIndex=$valid',
+        );
+      }
+    });
+  });
+
   group('B. player-level invariant違反もinvariantViolationとして検出する'
       '（validateMatchStateInvariants単体では検出できないケース、'
       'Codexレビュー指摘対応）', () {
