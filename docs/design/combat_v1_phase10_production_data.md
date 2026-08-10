@@ -296,8 +296,11 @@ DOWN始動は#8（とどめの踏みつけ）のみ。
 COUNTERの正式割当は記載がなかった。Phase 10Aミサキ4章と同じ「広範囲/中範囲/専門」
 テンプレートで、Phase 10Bセッションでユーザーが確認のうえ以下を正式採用した。
 attribute（支払い属性）は、ジャックが保有量の多いENERGY属性（打3／ラフ4）の範囲内
-から選定した（関1／投1は乏しく、Counter属性に選ぶと常に支払い不能になるため除外、
-Phase 10Aミサキ4章と同じ理由）。
+から選定した。COUNTERは返すTECHNIQUEのENERGY Cost合計をCounter側の単一属性で
+支払う（`combat_rules_v1.md`7章）ため、関1／投1でもCost1のTECHNIQUEに対しては
+支払い可能だが、Cost2以上には対応できず、対象family/groupのCost分布次第では
+実用性が低い。そのためより保有量の多い打／ラフを選定した（関・飛の保有量が0で
+Counter属性に選ぶと常に支払い不能になるミサキ4章のケースとは異なる）。
 
 | # | 役割 | 名称 | ID | attribute | counterableFamilies | counterableGroups |
 |---|---|---|---|---|---|---|
