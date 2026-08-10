@@ -5,6 +5,8 @@ library;
 import 'combat_v1_deck.dart';
 import 'combat_v1_energy.dart';
 import 'combat_v1_enums.dart';
+import 'combat_v1_pending_attack.dart';
+import 'combat_v1_successful_technique_snapshot.dart';
 
 /// 1人のプレイヤー（レスラー）の試合内状態。不変オブジェクト。
 class CombatV1PlayerState {
@@ -107,13 +109,17 @@ class CombatV1MatchState {
     this.turnNumber = 1,
     this.phase = CombatV1MatchPhase.setup,
     this.log = const [],
+    this.pendingAttack,
+    this.lastSuccessfulTechnique,
   });
 
   final String matchId;
   final CombatV1PlayerState playerA;
   final CombatV1PlayerState playerB;
 
-  /// 0=playerA、1=playerBが手番プレイヤー。
+  /// 0=playerA、1=playerBが手番プレイヤー。COUNTER成立/decline問わず、
+  /// `phase == counterResponsePending`の間も含めて宣言した攻撃側のまま
+  /// 変化しない（docs/combat_rules_v1.md 7.1章）。
   final int activePlayerIndex;
 
   /// 両者共有のHEAT（docs/combat_rules_v1.md 12章）。消費されない。
@@ -125,12 +131,31 @@ class CombatV1MatchState {
   /// 人間可読なログ（既存①②③と同じ慣習）。
   final List<String> log;
 
+  /// 宣言済みだが未解決の攻撃TECHNIQUE（`phase ==
+  /// counterResponsePending`の間のみ非null、docs/combat_rules_v1.md
+  /// 7.1章「PendingAttack・counterResponsePending」）。
+  final CombatV1PendingAttack? pendingAttack;
+
+  /// 直近で成立した（COUNTERされずにdeclineで解決した）TECHNIQUEの
+  /// snapshot（Phase 4 Codexレビュー指摘H2/H3対応）。試合開始時null、
+  /// declineによる攻撃成立ごとに更新される。COUNTER成立時は更新しない
+  /// （既存値も上書きしない）。ターン開始時にもclearしない
+  /// （match-level情報として保持し、Phase 5/6/9等が解決直後に参照できる
+  /// ようにするため。`combat_v1_successful_technique_snapshot.dart`
+  /// 参照）。
+  final CombatV1SuccessfulTechniqueSnapshot? lastSuccessfulTechnique;
+
   CombatV1PlayerState get active =>
       activePlayerIndex == 0 ? playerA : playerB;
 
   CombatV1PlayerState get opponent =>
       activePlayerIndex == 0 ? playerB : playerA;
 
+  /// [pendingAttack]は明示的に渡した値だけを反映する（省略時は既存値を
+  /// 維持）。`counterResponsePending`を抜けてpendingを消す場合は
+  /// [clearPendingAttack]を使う（`null`を「省略」と区別できないため）。
+  /// [lastSuccessfulTechnique]は一方向（null→非null）にのみ更新するため
+  /// （13章）、同じ`??`パターンで問題ない（クリア用の別メソッドは不要）。
   CombatV1MatchState copyWith({
     CombatV1PlayerState? playerA,
     CombatV1PlayerState? playerB,
@@ -139,6 +164,8 @@ class CombatV1MatchState {
     int? turnNumber,
     CombatV1MatchPhase? phase,
     List<String>? log,
+    CombatV1PendingAttack? pendingAttack,
+    CombatV1SuccessfulTechniqueSnapshot? lastSuccessfulTechnique,
   }) => CombatV1MatchState(
     matchId: matchId,
     playerA: playerA ?? this.playerA,
@@ -148,6 +175,25 @@ class CombatV1MatchState {
     turnNumber: turnNumber ?? this.turnNumber,
     phase: phase ?? this.phase,
     log: log ?? this.log,
+    pendingAttack: pendingAttack ?? this.pendingAttack,
+    lastSuccessfulTechnique:
+        lastSuccessfulTechnique ?? this.lastSuccessfulTechnique,
+  );
+
+  /// [pendingAttack]を`null`へ戻した新しいstateを返す（COUNTER成功/decline
+  /// でpendingを解消する際に使う）。[lastSuccessfulTechnique]など他の
+  /// fieldはすべて維持する。
+  CombatV1MatchState clearPendingAttack() => CombatV1MatchState(
+    matchId: matchId,
+    playerA: playerA,
+    playerB: playerB,
+    activePlayerIndex: activePlayerIndex,
+    sharedHeat: sharedHeat,
+    turnNumber: turnNumber,
+    phase: phase,
+    log: log,
+    pendingAttack: null,
+    lastSuccessfulTechnique: lastSuccessfulTechnique,
   );
 
   /// 手番プレイヤー（[active]）を更新した新しいstateを返す。

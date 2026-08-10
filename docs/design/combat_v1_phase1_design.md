@@ -387,3 +387,189 @@ immutableモデルのコンストラクタには重いruntime validationを追�
 ### 11.6 新規ファイル
 
 `combat_v1_state_invariants.dart`（`lib/src/combat_v1/`）を追加した。
+
+---
+
+## 12. Phase 4での更新（技術設計の差分）
+
+Phase 4（COUNTER）で、本書のPhase 1〜3設計から以下を更新した。ゲームルール自体
+（`combat_rules_v1.md`）の変更点は同書7章・23章を参照。ここでは実装内部の技術設計の差分を記す。
+
+### 12.1 新規ファイル
+
+`lib/src/combat_v1/`直下に以下を追加した（§1で想定していた`combat_v1_counter_rules.dart`の
+役割をほぼそのまま踏襲）。
+
+- `combat_v1_pending_attack.dart`: `CombatV1PendingAttack`（public immutable Domain model）。
+- `combat_v1_counter_rules.dart`: family/groupマッチング（`techniqueFamilyMatchesCounter`）・
+  動的ENERGY COST算出（`counterSyntheticCost`）の純粋関数群。
+- `combat_v1_catalog_validation.dart`: `validateCatalog`（Technique/Counter Definitionの
+  整合性検証）。`combat_v1_deck_validation.dart`の`validateDeck`（デッキ構成検証）とは責務を
+  分離した別ファイル。
+
+### 12.2 `CombatV1Technique.familyId: String?` → `family: CombatV1TechniqueFamily`（必須）
+
+Phase 1で「後から正式なTechniqueFamilyへ移行できるようにする」としていた予約フィールドを、
+Phase 4で正式taxonomy確定にあわせて型付きenum・必須フィールドへ移行した。旧String
+ID互換レイヤーは設けていない。既存Phase 1〜3フィクスチャ・ローカルテスト技はすべて`family`を
+明示的に追加した。
+
+### 12.3 `CombatV1Counter`のフィールド拡張
+
+Phase 1の`counterableFamilyIds: List<String>`（空リスト既定）を、`counterableFamilies:
+List<CombatV1TechniqueFamily>`・`counterableGroups: List<CombatV1TechniqueFamilyGroup>`
+の2フィールドへ置き換えた。あえて`Set`ではなく`List`のままにしている
+（`combat_v1_counter.dart`のクラスコメント参照——`Set`にすると重複が構造的に不可能になり、
+Catalog validationの`counterDuplicateFamily`/`counterDuplicateGroup`エラー種別が到達不能に
+なってしまうため）。
+
+### 12.4 `CombatV1MatchPhase`への`counterResponsePending`追加
+
+Phase 1〜3では`setup`/`discard`/`action`/`turnEnd`の4値だったが、Phase
+4で`counterResponsePending`を追加した。`declareTechnique`（Phase
+3の`playTechnique`から改称）はこのフェーズへ入るだけで即座には解決しない。
+
+### 12.5 `playTechnique`→`declareTechnique`への改称、即時解決の廃止
+
+Phase 3までの`playTechnique`は宣言と同時に即座に成功解決していたが（Phase
+3設計時点で§11.3に「Phase4挿入点」として予告していた通り）、Phase
+4では宣言（`declareTechnique`）と解決（[playCounter]/[declineCounter]）を完全に分離した。
+Phase 3のprivate`_PreparedTechniqueUse`は`_prepareTechniqueUse`の戻り値として維持しつつ、
+新たにprivate`_commitTechniqueDeclaration`（宣言のコミット）と`_resolvePendingAttack`
+（pending攻撃の成立解決、Phase 3の`_resolveSuccessfulTechnique`を`CombatV1PendingAttack`
+ベースへ書き換えたもの）を追加した。
+
+`playTechnique`という名前のAPIは削除した（互換レイヤーは設けない）。Phase
+1〜3の全テストは、宣言後に`declineCounter`を呼んで解決させる薄いテスト専用ヘルパー
+`declareAndResolveTechnique`（`test/combat_v1/combat_v1_test_fixtures.dart`）を介して
+Phase 3当時の「宣言→即時解決」という結果に相当する状態を得るよう更新した。
+
+### 12.6 `CombatV1ActionCheck`/`CombatV1CounterActionCheck`のfactory化
+
+Phase 3レビュー指摘（M2）を受け、`CombatV1ActionCheck`の位置引数コンストラクタ
+（`legal`/`reason`/`reasonCode`を独立して渡せた）を廃止し、`.success(reason)`/
+`.failure(reason, reasonCode)`の名前付きコンストラクタのみを公開する設計へ変更した。
+`failure`側は`assert(reasonCode != legal)`で矛盾した組み合わせの構築を防ぐ。新規追加した
+`CombatV1CounterActionCheck`（COUNTER legality用）も同じ設計で最初から実装した。
+
+### 12.7 `notTechnique`reasonCodeの削除
+
+Phase 3レビュー指摘（M3）を受け、`checkTechniqueLegality`内の到達不能だった
+`notTechnique`分岐（`CombatV1TechniqueLegalityReasonCode.notTechnique`）を削除した。
+`catalog.categoryOf`の実装上、`counter`以外の非null categoryを返した時点で
+`catalog.techniques[cardId]`は必ず非nullであることが構造的に保証されるため、この分岐は
+到達不能だった（`combat_v1_engine.dart`のコメント参照）。
+
+### 12.8 `validatePlayerStateInvariants`の拡張
+
+Phase 3レビュー指摘（M1）を受け、`CombatV1PlayerStateInvariantErrorCode`へ
+`negativeSpentEnergy`（spentEnergyが負数）・`invalidEnergyPool`
+（energyPool自体が`CombatV1EnergyPool.isValid`でない）の2種を追加した。
+
+### 12.9 `CombatV1MatchState.pendingAttack`と`clearPendingAttack()`
+
+`CombatV1MatchState`へ`pendingAttack: CombatV1PendingAttack?`フィールドを追加した。既存の
+`copyWith`パターンでは「明示的にnullへ戻す」ことと「省略（既存値維持）」を区別できないため、
+`pendingAttack`のクリア専用に`clearPendingAttack()`メソッドを追加した（`copyWith`の
+`pendingAttack`引数は非nullの差し替えにのみ使う）。
+
+---
+
+## 13. Phase 4 Codexレビュー修正（技術設計の差分）
+
+Phase 4実装のCodex第三者レビュー（BLOCKED判定はレビュー環境が古いbranchを参照したことが原因、
+実質判定はC. CHANGES REQUIRED）を受け、以下の技術的修正を行った。ゲームルール自体
+（`combat_rules_v1.md`）の新規追加はなく、Domain modelの不変条件強化・型安全性強化・後続Phaseが
+参照するためのDomain境界整備のみ。Phase 5/6/8/9の「処理」はこのレビュー対応でも一切実装していない。
+
+### 13.1 H1: PendingAttack/MatchState invariant
+
+`combat_v1_state_invariants.dart`へ2つの関数を追加した。
+
+- `pendingStructuralConsistencyViolation(state)`: pending/state間の安価な構造整合性チェック
+  （`phase`と`pendingAttack`存在の整合性、`attackerPlayerIndex`/`defenderPlayerIndex`の整合性）。
+  カードゾーンの走査は含まない。`CombatV1Engine`の`checkTechniqueLegality`/`checkCounterLegality`/
+  `declineCounter`の先頭で呼び出し、malformed pendingが誤ったplayerへ作用することを防ぐ
+  （毎Commandで全カードを重くvalidateする設計は避け、cheap invariantとdiagnostic
+  invariantを分離した）。
+- `validateMatchStateInvariants(state)`: カードゾーンの全件スキャンを含む完全な診断
+  （pending cardの二重所持、instanceIdの重複、pending
+  カードのcategory整合性）。Engine本体には自動配線せず、CPU/Simulator/テストからオプトインで
+  呼び出す想定（`validatePlayerStateInvariants`と同じ方針）。
+
+### 13.2 H2/H3: 成功Technique metadata
+
+`CombatV1PendingAttack`へ`directPin`/`submissionHold`/`finisherType`を追加した
+（`CombatV1Technique`の同名フィールドから宣言時点でスナップショットする）。新規ファイル
+`combat_v1_successful_technique_snapshot.dart`に`CombatV1SuccessfulTechniqueSnapshot`
+（immutable value object）を追加し、`CombatV1MatchState.lastSuccessfulTechnique`
+（nullable、match-level・ターン開始時にclearしない）として保持する。declineによる攻撃成立時
+（`_resolvePendingAttack`）にのみ更新し、`playCounter`（COUNTER成立）では更新しない。これらの値に
+よる分岐処理（PIN移行・SUBMISSION判定・FINISHER解禁等）はPhase 5/6/9まで実装しない。
+
+### 13.3 H4: `CombatV1ActionCheck`/`CombatV1CounterActionCheck`のassert非依存化
+
+`failure`ファクトリの`legal=false`/`reasonCode=legal`矛盾防止を、`assert`（release
+buildで無効化される）から、コンストラクタ本体内の無条件`ArgumentError`送出へ変更した。この
+検証のため`failure`は`const`コンストラクタではなくなった（`success`は矛盾しようがないため
+引き続き`const`）。呼び出し側の`const CombatV1ActionCheck.failure(...)`/
+`const CombatV1CounterActionCheck.failure(...)`はすべて`const`を外して更新した。
+
+### 13.4 M3: `CombatV1Counter`の防御的コピー
+
+`counterableFamilies`/`counterableGroups`をコンストラクタで`List.unmodifiable(List.of(...))`
+によりコピーするよう変更した。呼び出し側が渡した元のmutableなListを構築後に変更しても定義内容が
+変わらない。`List.of`は重複を保持したままコピーするため、Catalog
+validationの重複検出（`counterDuplicateFamily`/`counterDuplicateGroup`）は引き続き機能する。この
+変更により`CombatV1Counter`は`const`コンストラクタではなくなった（フィクスチャの
+`fixtureCounters`/`fixtureCatalog`を`const`から`final`へ変更した）。
+
+### 13.5 新規ファイル
+
+`combat_v1_successful_technique_snapshot.dart`（`lib/src/combat_v1/`）を追加した。
+
+### 13.6 Codex再レビュー残件（H1残件・M1・M2）
+
+13.1〜13.5のCodexレビュー対応後、同じ変更セットへの再レビューで指摘された3件を追加修正した。
+ゲームルール（`combat_rules_v1.md`）・Phase 4 COUNTERの仕様そのものへの変更は無い。
+
+#### H1残件: pending card ownershipのCommandガード
+
+13.1の`pendingStructuralConsistencyViolation`（`phase`とpendingの存在・index整合性のみを見る）は、
+pendingが所有するはずの攻撃カードが誤ってhand/drawPile/discardPileにも存在する状態
+（宣言時のコミット処理を経ずに直接構築されたmalformed state）までは検出しなかった。
+`combat_v1_state_invariants.dart`へ`pendingAttackOwnershipViolation(state)`を追加した:
+
+- pendingが所有する攻撃カード（`attackCardInstance`）が攻撃側/防御側いずれかの
+  hand/drawPile/discardPileに存在しないこと、および`attackCardInstance.category`が
+  `pending.category`と一致することを検証する軽量チェック（pendingが所有する1枚のカードのみを
+  対象とし、両player全体のinstanceId重複スキャンは含まない——`validateMatchStateInvariants`との
+  役割分担は維持する）。
+- 判定ロジック自体は`_pendingOwnershipStatus`という内部ヘルパーへ切り出し、
+  `pendingAttackOwnershipViolation`と`validateMatchStateInvariants`の両方から呼び出すことで、
+  カードゾーン走査条件の重複実装を避けた。
+- `CombatV1Engine.checkCounterLegality`の先頭（`pendingStructuralConsistencyViolation`の直後）と、
+  `checkCounterLegality`を経由しない`declineCounter`の先頭に、それぞれ直接ガードとして配線した。
+  `playCounter`は`checkCounterLegality`経由のため自動的に保護される。`hasAnyPlayableCounter`は
+  従来どおり`checkCounterLegality`へ委譲するのみで、判定ロジックを重複させていない。
+  いずれも[state]を一切変更する前に検証するため、malformed stateに対するCommand呼び出しの
+  atomicityが保たれる。
+
+#### M1: atomicity snapshotでの`lastSuccessfulTechnique`全field比較
+
+`combat_v1_atomicity_test.dart`の`_FullStateSnapshot`は、`lastSuccessfulTechnique`について
+`cardInstanceId`のみを比較していたため、他9 fieldの意図しない変化を検出できなかった。
+`CombatV1SuccessfulTechniqueSnapshot`の全10 field（`attackerPlayerIndex`/`cardInstanceId`/
+`cardId`/`category`/`attribute`/`family`/`directPin`/`submissionHold`/`finisherType`/
+`resultOpponentState`）を比較する`_LastSuccessfulTechniqueSnapshot`を追加し、
+`_FullStateSnapshot.expectUnchanged`から利用するよう変更した。既存の`lastSuccessfulTechnique`が
+非nullの状態から出発し、malformed pending card ownership（上記H1残件）によるCommand拒否後も
+その値が完全に不変であることを検証するテストを追加した。
+
+#### M2: golden parity testの全field比較化
+
+`combat_v1_golden_parity_test.dart`の「full field-by-field比較」テストは、`matchId`・
+`lastSuccessfulTechnique`・`log`内容、およびplayerA/Bの`wrestlerId`/`wrestlerName`/`maxHp`/
+`koc`/`pinCardsHeld`/`energyPool`/`reshuffleCount`等を検証していなかった。これらすべてを含む
+真の全field比較へ拡張した（実装ヘルパーをoracleにせず、Phase 3確定仕様に基づくliteral値で
+比較する既存方針は維持）。STAND→STAND等の既存6シナリオは変更していない。

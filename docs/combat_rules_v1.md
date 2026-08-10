@@ -149,9 +149,24 @@ TECHNIQUE COST:   打2 / 投1
 ＊2があるため使用可能。
 ```
 
-**COUNTERでの＊ENERGYの扱いはPhase 4まで保留する**。Phase 1のENERGY支払いロジックは、
-COUNTER用の別ポリシーへ後から差し替えられる構造にする（技術設計は
-[`combat_v1_phase1_design.md`](design/combat_v1_phase1_design.md) 参照）。
+### 5.2 COUNTERでの＊(ワイルド)ENERGYの扱い（Phase 4で確定）
+
+TECHNIQUE支払い（5.1章）とは別に、COUNTER支払い（動的ENERGY COST、7章）専用のポリシーを
+`CombatV1RulesConfig.counterAllowsWildSubstitution`として持つ。**既定値は`false`**——COUNTERの
+synthetic cost支払いでは、既定で＊による補完を許可しない。
+
+例（必要「投3」の場合）:
+
+| 実際の支払い | Config=false | Config=true |
+|---|---|---|
+| 投3 | 成功 | 成功 |
+| 投2 + ＊1 | 失敗 | 成功 |
+| 投1 + ＊2 | 失敗 | 成功 |
+| 投0 + ＊3 | 失敗 | 成功 |
+
+支払いアルゴリズム自体（属性ごとの不足分合算→＊で補完、5.1章の解決手順）は新規実装せず、
+`resolveEnergyPayment(..., allowWildSubstitution: rules.counterAllowsWildSubstitution)`として
+既存ロジックをそのまま再利用する。
 
 ---
 
@@ -160,7 +175,8 @@ COUNTER用の別ポリシーへ後から差し替えられる構造にする（�
 TECHNIQUEには属性、技系統、ENERGY COST、DMG、HEAT、使用可能状態などを定義する。
 
 - 技ごとに、STAND→STAND／STAND→DOWN／DOWN→DOWN のような状態変化を表現できる。
-- 技系統（TechniqueFamily）は将来COUNTERの成立判定に使う概念だが、正式taxonomyは未確定（23章）。
+- 技系統（TechniqueFamily）はCOUNTERの成立判定に使う概念。正式taxonomyはPhase 4で確定した（23章）。
+- ENERGY COSTの合計（`CombatV1EnergyCost.total`）は必ず0より大きい（zero-cost技は禁止、Phase 4確定）。
 - DIRECT PIN（PIN不要で成功後に自動的にPINへ移行する性質）は、**FINISHER限定ではなく技全般に付与できる**
   汎用フラグとして扱う（8章、13章とあわせて参照）。
 - 技自体が「SUBMISSIONホールド技である」という性質（例: 鳳凰固め、白銀ロック）と、
@@ -168,17 +184,49 @@ TECHNIQUEには属性、技系統、ENERGY COST、DMG、HEAT、使用可能状�
 
 ---
 
-## 7. COUNTER（概念定義、本実装はPhase 4）
+## 7. COUNTER（Phase 4で正式実装）
 
 COUNTERカード自体には固定ENERGY COSTを設定しない。
 
-- 返し必要コストは、**返される側のTECHNIQUEのENERGY COSTと同値**とする。
-- COUNTER側は、そのCOUNTERに定義された属性ENERGYを必要量支払う。
+- 返し必要コストは、**返される側のTECHNIQUEのENERGY COST「総量」
+  （`CombatV1EnergyCost.total`）と同値**とする。攻撃Costの属性構成
+  （例: 投2＋打1）をCOUNTER側へコピーするのではなく、COUNTERに定義された
+  **単一の属性**でその総量を支払う（例: 攻撃Cost合計3・COUNTER属性=投なら
+  「投3」を要求する）。
 - このため高COST技は高火力であるだけでなく、COUNTER側にも多くのENERGYを要求し、自然に返されにくくなる。
-- さらに、技系統・COUNTER可能な技系統・使用可能ENERGYを確認して成立判定する想定（23章、技系統の正式化待ち）。
-- COUNTER時の＊ENERGYの扱いはPhase 4まで保留（5.1章）。
+- 技系統・技系統グループを確認して成立判定する（4章参照）。attribute（ENERGY属性）の一致だけでは
+  COUNTER成立にはしない。
+- COUNTER時の＊(wild)ENERGYの扱いは`CombatV1RulesConfig.counterAllowsWildSubstitution`
+  （既定値`false`）で確定した（9章参照）。
 
-Phase 1ではCOUNTERの判定・実行ロジックは実装しない。デッキ内にCOUNTERカードのカテゴリは保持する（3章）。
+### 7.1 PendingAttack・counterResponsePending（State Machine）
+
+TECHNIQUE宣言（`declareTechnique`）は即座に成功解決しない。宣言時点ではlegality検証・ENERGY支払い確定・
+使用カードのhandからの除去・`techniquesUsedThisTurn`の加算のみを行い、DMG・HEAT・相手posture変化・discard・
+drawはすべて据え置く。宣言された攻撃内容は`CombatV1PendingAttack`（immutableなDomain
+model）として保持し、`CombatV1MatchPhase.counterResponsePending`へ遷移する。
+
+```
+action ──(declareTechnique)──▶ counterResponsePending ──┬─(playCounter)──▶ action
+                                                          └─(declineCounter)──▶ action
+```
+
+- `counterResponsePending`の間、`activePlayerIndex`は宣言した攻撃側のまま変化しない。COUNTER成立でも
+  攻守交代しない。
+- `playCounter`（COUNTER成立）: 攻撃の効果を完全に無効化する（DMGなし・HEATなし・posture変更なし）。
+  攻撃カードは攻撃側のdiscardへ、使用したCOUNTERカードは防御側のdiscardへ移動し、**攻撃側・防御側の
+  双方が1枚ずつdraw**する（手札循環を維持し、COUNTERを手札破壊効果にしないため）。
+- `declineCounter`（COUNTERしない）: 攻撃を通常通り成立させる（DMG→HP 0
+  clamp→shared HEAT→相手posture変化→攻撃カードを攻撃側discardへ→攻撃側1
+  draw）。ゲーム結果としてはPhase 3の即時成功解決と同じになる。
+- COUNTERはTECHNIQUEではないため、`techniquesUsedThisTurn`には含めない（15章）。
+- 防御側が支払ったCOUNTER ENERGYは、防御側の次の自ターン開始時（通常のENERGY全回復）まで自動回復しない。
+
+### 7.2 CombatV1EnergyCost.total
+
+`CombatV1EnergyCost`に、具体ENERGY属性のCost合計を返す`total`（`int`）を追加した。COUNTER必要量の算出
+（7章）に使う。Technique Costは`total > 0`をPhase 4正式ルールとする——zero-cost
+TECHNIQUEは禁止する。Cost側にwild要求を設定することも禁止（5.1章の既存不変条件のまま）、負数のCostも禁止。
 
 ---
 
@@ -436,16 +484,91 @@ Phase 1ではこの正式デッキ内容は使用せず、テスト用フィク�
 
 ---
 
-## 23. 技系統（TechniqueFamily）
+## 23. 技系統（TechniqueFamily）— Phase 4で正式確定
 
-将来COUNTERの成立判定で、攻撃TECHNIQUEの技系統とCOUNTERが返せる技系統を比較する想定。
+COUNTERの成立判定で、攻撃TECHNIQUEの技系統（family）とCOUNTERが返せる技系統／技系統グループを比較する
+（23.4章）。Phase 1の`familyId`（自由文字列、nullable）という暫定構造は、Phase
+4で正式な型付き`CombatV1TechniqueFamily`（必須・非nullable）へ移行した。旧String
+ID互換レイヤーは設けていない。
 
-例（イメージ、確定ではない）: バックドロップ系、スープレックス系、パワーボム系、ラリアット系、キック系、
-関節系、飛び技系 など。
+### 23.1 attribute／family／groupは別概念
 
-**正式taxonomyは未確定**。Phase 1では技モデル上に `familyId`（自由文字列、nullable）程度の暫定構造を
-持たせるに留め、後から正式なTechniqueFamilyへ移行できるようにする（詳細は
-[`combat_v1_phase1_design.md`](design/combat_v1_phase1_design.md) 参照）。
+- **attribute**（`CombatV1EnergyAttribute`）: ENERGY支払い・技属性（5章）。
+- **family**（`CombatV1TechniqueFamily`）: COUNTERで「何系の技か」を判定する具体分類（本章）。
+- **group**（`CombatV1TechniqueFamilyGroup`）: familyをまとめるCOUNTER用上位分類（23.2章）。
+
+Technique自身はgroupを保持しない。groupは常にfamilyから導出する。
+
+### 23.2 Family Group
+
+`CombatV1TechniqueFamilyGroup`は閉じた型（enum）。5種:
+
+**STRIKE／AERIAL／THROW／SUBMISSION／FOUL**
+
+**重要**: `FOUL` group（COUNTER分類上のgroup）と`CombatV1EnergyAttribute.rough`（ENERGY属性のラフ）は
+**別概念**であり、同一視しない。
+
+### 23.3 Technique Family（正式taxonomy）
+
+`CombatV1TechniqueFamily`は閉じた型（enum）。以下30 family（groupごとの内訳）:
+
+| group | family |
+|---|---|
+| STRIKE | ELBOW／CHOP／KICK／KNEE／LARIAT／TACKLE／STOMP／GUILLOTINE_DROP |
+| AERIAL | DROP_KICK／BODY_PRESS／SPLASH |
+| THROW | ARM_DRAG／DDT／LEG_TAKEDOWN／SLAM／BACKDROP／SUPLEX／POWERBOMB／DRIVER |
+| SUBMISSION | ARMBAR／HEADLOCK／LEG_LOCK／FIGURE_FOUR／CROSSFACE／STRETCH／CHOKE／CLAW／NECK_LOCK |
+| FOUL | LOW_BLOW／WEAPON |
+
+補足:
+- `BACKDROP`と`SUPLEX`は別family（同じTHROW groupだが異なるfamily）。
+- `FIGURE_FOUR`は`LEG_LOCK`へ統合しない（別family）。
+- `STOMP`はSTRIKE group（踏みつけは通常技として扱う、20章の踏みつけ方針と整合）。
+- `FOUL_FINISH`はfamilyとして定義しない。
+
+`CHOKE`はattribute横断（23.4章参照）。
+
+### 23.4 CHOKEはattribute横断
+
+familyはattributeへ従属させない。同じ`CHOKE` familyでも、attribute（joint／rough等）は技ごとに異なりうる
+（例: attribute=joint・family=CHOKEの絞め技と、attribute=rough・family=CHOKEの反則的な首絞めが両立する）。
+
+### 23.5 COUNTER matching
+
+成立条件: `familyMatch || groupMatch`。
+
+```
+familyMatch = counter.counterableFamilies contains attack.family
+groupMatch  = counter.counterableGroups contains attack.family.group
+```
+
+attribute（ENERGY属性）の一致だけではCOUNTER成立にしない。例: `attack.attribute == strike` かつ
+`counter.attribute == strike` でも、family/groupが非対応ならCOUNTER不可。
+
+### 23.6 Catalog validation（Technique／Counter Definitionの整合性検証）
+
+デッキ構成（30枚・category等、4章）の検証（Deck validation）とは別に、Technique／Counter
+**Definitionそのもの**の整合性を検証するCatalog validationを設ける（責務を分離する）。
+
+`CombatV1Counter`は最低限、id／name／attribute／counterableFamilies／counterableGroupsを持つ。以下は
+Catalog validationエラーとする:
+
+**Technique側**:
+- ENERGY COSTが不正（負数、またはwildを要求している）
+- ENERGY COSTの合計（`total`）が0以下（zero-cost技禁止、7.2章）
+- attributeがwild
+- damage／heatGainが負数
+
+**Counter側**:
+- counterableFamiliesとcounterableGroupsの両方空
+- family重複／group重複
+- `Counter.attribute == wild`
+- groupと、そのgroupに完全包含されるfamilyの冗長同時指定（例: `counterableGroups: [STRIKE]`かつ
+  `counterableFamilies: [KICK]`はKICKがSTRIKEに含まれるため冗長）
+
+**Catalog横断**:
+- Technique／Counter間でのcardId衝突
+- カタログMapのキーと定義の`id`の不一致
 
 ---
 
@@ -554,3 +677,16 @@ Playtest Analytics、Simulatorの設計、Report、Diagnosticsなど、Ver.1へ�
   - Combo Speedを不採用とし、ENERGYで攻撃継続回数を制御する方針の確定（4章）
   - `CombatV1FinisherType`を独立enumとして定義し、技のSUBMISSIONフラグとは別概念とする方針（13章）
   - 開発ロードマップ（Phase 0〜16）とLegacy Engine Removal Gateの正式条件（26・27章）
+
+- **Phase 4（COUNTER）**: 以下を新規確定した。
+  - 技系統（TechniqueFamily、30 family）・技系統グループ（TechniqueFamilyGroup、5
+    group）の正式taxonomyを確定し、Phase 1の`familyId: String?`から型付きenumへ移行（23章）
+  - COUNTER matching（family/groupのいずれか一致で成立、attribute一致だけでは不成立）の確定（23.5章）
+  - COUNTER動的ENERGY COST（返される攻撃Costの総量を、COUNTER側は単一属性で支払う）の確定（7章）
+  - COUNTER時の＊(wild)ENERGY使用ポリシー（`counterAllowsWildSubstitution`、既定`false`）の確定（5.2章）
+  - `CombatV1EnergyCost.total`の追加とTechnique Cost `total > 0`（zero-cost技禁止）の正式ルール化（7.2章）
+  - `CombatV1PendingAttack`（public immutable Domain
+    model）・`counterResponsePending`フェーズを追加したState Machineの確定（7.1章）
+  - `declareTechnique`（Phase
+    3までの`playTechnique`を改称、宣言のみを行い即時解決しない）・`playCounter`・`declineCounter`
+    Command APIの確定（7.1章）

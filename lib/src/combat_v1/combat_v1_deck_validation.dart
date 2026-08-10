@@ -12,14 +12,17 @@ import 'combat_v1_enums.dart';
 import 'combat_v1_rules_config.dart';
 import 'combat_v1_technique.dart';
 
-/// TECHNIQUE／COUNTER両方のカード定義を横断参照するための薄いラッパー。
+/// TECHNIQUE／COUNTER両方のカード定義を横断参照するための薄いラッパー
+/// （Phase 4でコメントを更新。Catalog validationとの責務分離は
+/// docs/combat_rules_v1.md「23.6章」参照）。
 ///
-/// Deck validationはcardId存在確認・category一致確認のためTECHNIQUEと
-/// COUNTER双方のカタログを必要とするが、既存の`CombatV1Engine.playTechnique`
-/// 等は`Map<String, CombatV1Technique>`のみを扱う設計のままにしたいため
-/// （Phase 1のCommand APIを不要に変更しないため）、Deck validation専用の
-/// 最小ラッパーとしてここに導入する（過剰な抽象化を避けるため、技カタログ
-/// を置き換えるものではなくvalidation専用の読み取りビューとする）。
+/// `CombatV1Engine`（`combat_v1_engine.dart`）・`validateDeck`
+/// （Deck validation）・`validateCatalog`（Catalog validation、
+/// `combat_v1_catalog_validation.dart`）が共通して使う、cardId存在確認・
+/// category一致確認・Technique/Counter定義lookupのための横断ビュー。
+/// 責務はlookupに留め、戦闘resolutionや検証ロジックそのものは持たせない
+/// （巨大なRepositoryへ肥大化させない、docs/combat_rules_v1.md
+/// 「10-5」）。
 class CombatV1CardCatalog {
   const CombatV1CardCatalog({required this.techniques, required this.counters});
 

@@ -18,9 +18,9 @@ class CombatV1Technique {
     required this.energyCost,
     required this.damage,
     required this.heatGain,
+    required this.family,
     this.requiredOpponentState,
     this.resultOpponentState,
-    this.familyId,
     this.directPin = false,
     this.submissionHold = false,
     this.finisherType,
@@ -58,9 +58,12 @@ class CombatV1Technique {
   /// `resultOpponentState: CombatV1WrestlerPosture.down`）。
   final CombatV1WrestlerPosture? resultOpponentState;
 
-  /// 技系統（Phase 4のCOUNTER判定用の予約フィールド。正式taxonomyは未確定
-  /// のため自由文字列とする、docs/design/combat_v1_open_questions.md 4番）。
-  final String? familyId;
+  /// 技系統（docs/combat_rules_v1.md 23章、Phase
+  /// 4で正式taxonomyへ移行済み）。COUNTERの成立判定（family/group
+  /// マッチング）に使う。Production向けTechniqueでは必須（Phase 1の
+  /// `familyId: String?`暫定構造は廃止し、旧String ID互換レイヤーは
+  /// 設けない）。
+  final CombatV1TechniqueFamily family;
 
   /// PIN不要で成功後に自動的にPINへ移行する性質（docs/combat_rules_v1.md
   /// 8章）。FINISHER限定ではなく技全般に付与できる汎用フラグ。
@@ -79,11 +82,25 @@ class CombatV1Technique {
   /// 実装しない（Phase 1では値を保持するのみ）。
   final CombatV1FinisherType? finisherType;
 
-  /// 静的データvalidation（Phase 3、docs/combat_rules_v1.md 6章）:
-  /// [energyCost]が有効か（負数を含まない、wildを要求していない）。
+  /// 静的データvalidation（Phase 3で導入、Phase
+  /// 4でTechnique全体の責務として範囲を明確化、docs/combat_rules_v1.md
+  /// 6・7章）:
+  ///
+  /// - [energyCost]が有効（負数を含まない、wildを要求していない）
+  /// - [energyCost.total]が0より大きい（zero-cost技は禁止、
+  ///   docs/combat_rules_v1.md「7.2章 CombatV1EnergyCost.total」）
+  /// - [attribute]がwildではない（コンストラクタのassertと同じ不変条件を、
+  ///   assertが無効化されるビルドでも検出できるようにする）
+  /// - [damage]/[heatGain]が負数ではない（負のDMG/HEATはSSOT上想定されて
+  ///   いないデータ不正として扱う）
   ///
   /// [CombatV1Engine.checkTechniqueLegality]が
-  /// `invalidTechniqueData`reasonCodeの判定に使う
-  /// （lib/src/combat_v1/combat_v1_engine.dart）。
-  bool get isStaticDataValid => energyCost.isValid;
+  /// `invalidTechniqueData`reasonCodeの判定に使う（`combat_v1_engine.dart`）。
+  /// [family]はenumのため型システムで常に有効（無効値を構築できない）。
+  bool get isStaticDataValid =>
+      energyCost.isValid &&
+      energyCost.total > 0 &&
+      attribute != CombatV1EnergyAttribute.wild &&
+      damage >= 0 &&
+      heatGain >= 0;
 }

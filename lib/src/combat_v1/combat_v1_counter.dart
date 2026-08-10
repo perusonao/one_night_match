@@ -1,26 +1,54 @@
 /// COUNTERカード定義モデル（docs/combat_rules_v1.md 7章）。
 ///
-/// Phase 1ではCOUNTER判定そのものを実装しない（Phase 4予定）。デッキ内に
-/// COUNTERカードのカテゴリを保持できる最小限のモデルのみ用意する。
+/// Phase 1〜3ではCOUNTER判定そのものを実装しなかった（Phase 4で正式化）。
+/// COUNTERカード自身は固定ENERGY COSTを持たない（返される攻撃TECHNIQUEの
+/// ENERGY COST総量が必要支払い量になる、docs/combat_rules_v1.md「7.
+/// COUNTER ENERGY」、判定・支払いロジックは
+/// `combat_v1_counter_rules.dart`/`combat_v1_engine.dart`参照）。
 library;
 
 import 'combat_v1_enums.dart';
 
-/// COUNTERカード1枚の静的定義（Phase 1は最小形）。
+/// COUNTERカード1枚の静的定義。
+///
+/// [counterableFamilies]/[counterableGroups]はどちらか一方でも空でない
+/// ことをCatalog validation（`combat_v1_catalog_validation.dart`）が要求する。
+/// 意図的に重複・冗長な指定を含むテスト用データも構築できるよう、`List`
+/// のまま保持し、値の一意性・冗長性はCatalog validationが検出する
+/// （immutableなSetへ変換すると重複自体が構造的に不可能になり、Catalog
+/// validationの対応するエラー種別が到達不能になってしまうため、あえて
+/// `List`のままにしている）。
+///
+/// コンストラクタで防御的コピー（`List.of`で複製した上で
+/// `List.unmodifiable`にラップ）を行い、呼び出し側が渡したmutableな
+/// Listを構築後に外部から変更してもこの定義の内容が変わらないようにする
+/// （Phase 4 Codexレビュー指摘M3）。`List.of`は重複を保持したままコピー
+/// するため、Catalog validationの重複検出は引き続き機能する。
 class CombatV1Counter {
-  const CombatV1Counter({
+  CombatV1Counter({
     required this.id,
     required this.name,
     required this.attribute,
-    this.counterableFamilyIds = const [],
-  });
+    List<CombatV1TechniqueFamily> counterableFamilies = const [],
+    List<CombatV1TechniqueFamilyGroup> counterableGroups = const [],
+  }) : counterableFamilies = List.unmodifiable(List.of(counterableFamilies)),
+       counterableGroups = List.unmodifiable(List.of(counterableGroups));
 
   final String id;
   final String name;
+
+  /// このCOUNTERを使用するために支払うENERGYの属性。返される攻撃
+  /// TECHNIQUEのENERGY属性構成をコピーするのではなく、単一属性で必要量
+  /// （攻撃Costのtotal）を支払う（docs/combat_rules_v1.md「7. COUNTER
+  /// ENERGY」）。wildはCatalog validationで拒否する（Counter.attribute
+  /// != wild）。
   final CombatV1EnergyAttribute attribute;
 
-  /// このCOUNTERが返せる技系統のID一覧（Phase 4の技系統マッチング用の
-  /// 予約フィールド。正式taxonomy未確定のため空リストが既定値、
-  /// docs/design/combat_v1_open_questions.md 4番）。
-  final List<String> counterableFamilyIds;
+  /// このCOUNTERが返せる技系統（具体分類）一覧
+  /// （docs/combat_rules_v1.md「23.3章 Technique Family」）。
+  final List<CombatV1TechniqueFamily> counterableFamilies;
+
+  /// このCOUNTERが返せる技系統グループ（上位分類）一覧
+  /// （docs/combat_rules_v1.md「23.2章 Family Group」）。
+  final List<CombatV1TechniqueFamilyGroup> counterableGroups;
 }

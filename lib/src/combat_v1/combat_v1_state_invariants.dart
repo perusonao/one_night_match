@@ -1,24 +1,43 @@
-/// Match State不変条件の検証（Phase 3、docs/combat_rules_v1.md 5章）。
+/// Match State不変条件の検証（Phase 3、docs/combat_rules_v1.md 5章。Phase
+/// 4でpendingAttack/MatchState間の整合性検証を追加、Codexレビュー指摘H1）。
 ///
 /// [CombatV1EnergyPool]/[CombatV1EnergyCost]/[CombatV1Technique]の静的データ
 /// validation（`isValid`/`isStaticDataValid`）とは別に、試合が進行した後の
-/// `CombatV1PlayerState`スナップショットが不変条件を満たしているかを検証する
-/// 読み取り専用ヘルパー。
+/// `CombatV1PlayerState`/`CombatV1MatchState`スナップショットが不変条件を
+/// 満たしているかを検証する読み取り専用ヘルパー。
 ///
 /// immutableモデルのコンストラクタに重いruntime validationを持たせる方針は
 /// 取らない（`combat_v1_energy.dart`のコンストラクタコメント参照）。この
-/// ファイルの関数は、CPU/Simulator/テストなど必要な箇所からオプトインで
-/// 呼び出す想定で、Engine本体のCommand APIには自動配線しない。
+/// ファイルの関数の大半（[validatePlayerStateInvariants]、
+/// [validateMatchStateInvariants]）は、CPU/Simulator/テストなど必要な
+/// 箇所からオプトインで呼び出す想定で、Engine本体のCommand
+/// APIには自動配線しない。例外は[pendingStructuralConsistencyViolation]と
+/// [pendingAttackOwnershipViolation]—— pending/state間の構造整合性、および
+/// pendingが所有する1枚のカードのゾーン所有権チェックのみを
+/// `CombatV1Engine`のCommand実行前ガードとして直接利用する（両player全体の
+/// instanceId重複スキャン等、より重い検証は含まないため、毎Command呼び出し
+/// でも許容できるコストに留めている）。
 library;
 
 import 'combat_v1_enums.dart';
 import 'combat_v1_match_state.dart';
+import 'combat_v1_pending_attack.dart';
 
 /// [validatePlayerStateInvariants]のエラー種別。
 enum CombatV1PlayerStateInvariantErrorCode {
   /// spentEnergy（今サイクルの使用済みENERGY）が、対応する属性の
   /// energyPool（保有ENERGY）を超えている。
   spentExceedsPool,
+
+  /// spentEnergyの値が負数（Phase 4、Phase 3 Codexレビュー指摘「10-1」）。
+  /// defenderが自ターン外にCOUNTER ENERGYを消費するようになるため、
+  /// spentEnergyの不正な負値を検出できることがPhase 4以降より重要になる。
+  negativeSpentEnergy,
+
+  /// [CombatV1PlayerState.energyPool]自体が[CombatV1EnergyPool.isValid]
+  /// でない（負数のENERGY量を含む、Phase 4、Phase 3 Codexレビュー指摘
+  /// 「10-1」）。
+  invalidEnergyPool,
 }
 
 /// [validatePlayerStateInvariants]の1件のエラー。
@@ -46,15 +65,39 @@ class CombatV1PlayerStateInvariantResult {
   bool get isValid => errors.isEmpty;
 }
 
-/// [player]の`spentEnergy`が各属性の`energyPool`を超えていないか検証する
-/// （docs/combat_rules_v1.md 5章）。
+/// [player]の`spentEnergy`/`energyPool`が不変条件を満たしているか検証する
+/// （docs/combat_rules_v1.md 5章、Phase 4でnegativeSpentEnergy/
+/// invalidEnergyPoolを追加）。
 CombatV1PlayerStateInvariantResult validatePlayerStateInvariants(
   CombatV1PlayerState player,
 ) {
   final errors = <CombatV1PlayerStateInvariantError>[];
 
+  if (!player.energyPool.isValid) {
+    errors.add(
+      CombatV1PlayerStateInvariantError(
+        code: CombatV1PlayerStateInvariantErrorCode.invalidEnergyPool,
+        message: '${player.wrestlerName}のenergyPoolに負数のENERGY量が'
+            '含まれています',
+      ),
+    );
+  }
+
   for (final attribute in CombatV1EnergyAttribute.values) {
     final spent = player.spentEnergy[attribute] ?? 0;
+
+    if (spent < 0) {
+      errors.add(
+        CombatV1PlayerStateInvariantError(
+          code: CombatV1PlayerStateInvariantErrorCode.negativeSpentEnergy,
+          message:
+              '${player.wrestlerName}の${attribute.displayLabel}ENERGYの'
+              'spentEnergyが負数です（spent:$spent）',
+        ),
+      );
+      continue;
+    }
+
     final pool = player.energyPool.amountFor(attribute);
     if (spent > pool) {
       errors.add(
@@ -69,4 +112,326 @@ CombatV1PlayerStateInvariantResult validatePlayerStateInvariants(
   }
 
   return CombatV1PlayerStateInvariantResult(errors);
+}
+
+/// pending/state間の構造的整合性（`phase`と`pendingAttack`存在の整合性、
+/// `attackerPlayerIndex`/`defenderPlayerIndex`の整合性）を検証する軽量
+/// チェック（Phase 4 Codexレビュー指摘H1対応）。
+///
+/// カードゾーンの走査（hand/drawPile/discardPileの全件スキャン）は含まない
+/// —— この関数は`CombatV1Engine`のCommand実行前ガードとしても使われる
+/// ため、意図的に安価な検証のみに限定している（毎Commandで全30枚を重く
+/// validateする設計にはしない）。カードゾーン走査を含む完全な診断は
+/// [validateMatchStateInvariants]を使う。
+///
+/// 不整合があれば人間可読な理由を、無ければ`null`を返す。
+String? pendingStructuralConsistencyViolation(CombatV1MatchState state) {
+  final pending = state.pendingAttack;
+  final isPendingPhase = state.phase == CombatV1MatchPhase.counterResponsePending;
+
+  if (isPendingPhase && pending == null) {
+    return 'phase==counterResponsePendingですが、pendingAttackが存在しません';
+  }
+  if (!isPendingPhase && pending != null) {
+    return 'pendingAttackが存在しますが、phase==counterResponsePendingでは'
+        'ありません（現在: ${state.phase.name}）';
+  }
+  if (pending == null) return null;
+
+  final validIndex =
+      (pending.attackerPlayerIndex == 0 || pending.attackerPlayerIndex == 1) &&
+      (pending.defenderPlayerIndex == 0 || pending.defenderPlayerIndex == 1);
+  if (!validIndex) {
+    return 'pendingAttackのattackerPlayerIndex'
+        '(${pending.attackerPlayerIndex})/defenderPlayerIndex'
+        '(${pending.defenderPlayerIndex})が0/1の範囲外です';
+  }
+  if (pending.attackerPlayerIndex == pending.defenderPlayerIndex) {
+    return 'pendingAttackのattackerPlayerIndexとdefenderPlayerIndexが'
+        '同じです（${pending.attackerPlayerIndex}）';
+  }
+  if (pending.attackerPlayerIndex != state.activePlayerIndex) {
+    return 'pendingAttack.attackerPlayerIndex(${pending.attackerPlayerIndex})が'
+        'state.activePlayerIndex(${state.activePlayerIndex})と一致しません';
+  }
+  final expectedDefender = state.activePlayerIndex == 0 ? 1 : 0;
+  if (pending.defenderPlayerIndex != expectedDefender) {
+    return 'pendingAttack.defenderPlayerIndex(${pending.defenderPlayerIndex})が'
+        '期待値($expectedDefender)と一致しません';
+  }
+  return null;
+}
+
+/// [validateMatchStateInvariants]のエラー種別（Phase 4 Codexレビュー指摘
+/// H1対応）。
+enum CombatV1MatchStateInvariantErrorCode {
+  /// `phase == counterResponsePending`と`pendingAttack != null`の整合性が
+  /// 崩れている。
+  pendingPhaseMismatch,
+
+  /// `pendingAttack.attackerPlayerIndex`/`defenderPlayerIndex`が0/1の
+  /// 範囲外。
+  pendingPlayerIndexOutOfRange,
+
+  /// `pendingAttack.attackerPlayerIndex == defenderPlayerIndex`。
+  pendingAttackerEqualsDefender,
+
+  /// `pendingAttack.attackerPlayerIndex`が`state.activePlayerIndex`と
+  /// 一致しない。
+  pendingAttackerIndexMismatch,
+
+  /// `pendingAttack.defenderPlayerIndex`が期待値（`1 -
+  /// activePlayerIndex`）と一致しない。
+  pendingDefenderIndexMismatch,
+
+  /// pendingが所有するはずの攻撃カードが、攻撃側のhand/drawPile/
+  /// discardPileのいずれかにも同時に存在する（カード保存則違反）。
+  pendingCardStillInAttackerZone,
+
+  /// pendingが所有する攻撃カードのinstanceIdが、防御側のhand/drawPile/
+  /// discardPileのいずれかにも存在する。
+  pendingCardInDefenderZone,
+
+  /// 同一instanceIdが、両player全ゾーン（＋pending）を通じて重複している。
+  duplicateCardInstanceId,
+
+  /// `pendingAttack.attackCardInstance.category`が
+  /// `pendingAttack.category`と一致しない。
+  pendingCardCategoryMismatch,
+}
+
+/// [validateMatchStateInvariants]の1件のエラー。
+class CombatV1MatchStateInvariantError {
+  const CombatV1MatchStateInvariantError({
+    required this.code,
+    required this.message,
+  });
+
+  final CombatV1MatchStateInvariantErrorCode code;
+
+  /// 人間可読な説明（ログ・簡易UI用）。
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// [validateMatchStateInvariants]の結果。
+class CombatV1MatchStateInvariantResult {
+  const CombatV1MatchStateInvariantResult(this.errors);
+
+  final List<CombatV1MatchStateInvariantError> errors;
+
+  bool get isValid => errors.isEmpty;
+}
+
+/// [pendingAttackOwnershipViolation]・[validateMatchStateInvariants]の両方が
+/// 参照する、pendingが所有するカードのゾーン所有権判定（Phase 4 Codex再
+/// レビュー指摘H1残件対応）。カードゾーン走査ロジックを1箇所にまとめ、
+/// 安価なCommandガードと重い全体診断とで同じ判定条件を重複実装しない。
+class _PendingOwnershipStatus {
+  const _PendingOwnershipStatus({
+    required this.categoryMismatch,
+    required this.inAttackerZone,
+    required this.inDefenderZone,
+  });
+
+  final bool categoryMismatch;
+  final bool inAttackerZone;
+  final bool inDefenderZone;
+
+  bool get isValid => !categoryMismatch && !inAttackerZone && !inDefenderZone;
+}
+
+_PendingOwnershipStatus _pendingOwnershipStatus(
+  CombatV1MatchState state,
+  CombatV1PendingAttack pending,
+) {
+  final attacker = pending.attackerPlayerIndex == 0 ? state.playerA : state.playerB;
+  final defender = pending.defenderPlayerIndex == 0 ? state.playerA : state.playerB;
+  final pendingId = pending.attackCardInstance.instanceId;
+
+  final inAttackerZone =
+      attacker.hand.any((e) => e.instanceId == pendingId) ||
+      attacker.drawPile.any((e) => e.instanceId == pendingId) ||
+      attacker.discardPile.any((e) => e.instanceId == pendingId);
+  final inDefenderZone =
+      defender.hand.any((e) => e.instanceId == pendingId) ||
+      defender.drawPile.any((e) => e.instanceId == pendingId) ||
+      defender.discardPile.any((e) => e.instanceId == pendingId);
+
+  return _PendingOwnershipStatus(
+    categoryMismatch: pending.attackCardInstance.category != pending.category,
+    inAttackerZone: inAttackerZone,
+    inDefenderZone: inDefenderZone,
+  );
+}
+
+/// pendingが所有するはずの攻撃カードの所有権（攻撃側/防御側のいずれの
+/// hand/drawPile/discardPileにも存在しないこと、
+/// `attackCardInstance.category`が`pending.category`と一致すること）を
+/// 検証する軽量チェック（Phase 4 Codex再レビュー指摘H1残件対応）。
+///
+/// [pendingStructuralConsistencyViolation]と同じ位置付け——カードゾーンの
+/// 全件重複スキャン（[validateMatchStateInvariants]の
+/// `duplicateCardInstanceId`）は行わず、pendingが所有する1枚のカードに
+/// 関する所有権のみを判定する。malformedなpending
+/// card ownership state（宣言時に本来除去されるはずの攻撃カードが手札等に
+/// 残ったまま、または他ゾーンのカードとinstanceIdが衝突している状態）を
+/// `playCounter`/`declineCounter`/`checkCounterLegality`が処理しないよう、
+/// これらのCommand実行前ガードとして直接呼び出す。
+///
+/// [pendingStructuralConsistencyViolation]で有効と確認されたindexを前提に
+/// するため、先にそちらを呼んでいない場合はindex不整合の理由を返す
+/// （内部で呼び出し、null以外ならそのまま返す）。
+///
+/// 不整合があれば人間可読な理由を、無ければ`null`を返す。
+String? pendingAttackOwnershipViolation(CombatV1MatchState state) {
+  final pending = state.pendingAttack;
+  if (pending == null) return null;
+
+  final structuralViolation = pendingStructuralConsistencyViolation(state);
+  if (structuralViolation != null) return structuralViolation;
+
+  final status = _pendingOwnershipStatus(state, pending);
+  if (status.categoryMismatch) {
+    return 'pendingAttack.attackCardInstance.category'
+        '(${pending.attackCardInstance.category.name})がpending.category'
+        '(${pending.category.name})と一致しません';
+  }
+  if (status.inAttackerZone) {
+    return 'pendingAttackが所有するはずのカード'
+        '(${pending.attackCardInstance.instanceId})が、攻撃側の'
+        'hand/drawPile/discardPileにも存在します';
+  }
+  if (status.inDefenderZone) {
+    return 'pendingAttackが所有するカード'
+        '(${pending.attackCardInstance.instanceId})のinstanceIdが、'
+        '防御側のhand/drawPile/discardPileにも存在します';
+  }
+  return null;
+}
+
+/// [state]全体（`pendingAttack`とplayerA/playerBのカードゾーン）の整合性を
+/// 検証する読み取り専用の診断ヘルパー（Phase 4 Codexレビュー指摘H1対応）。
+///
+/// [pendingStructuralConsistencyViolation]（Engine Commandガードにも使う
+/// 安価なチェック）に加え、カードゾーンの全件スキャンを要する検証
+/// （pending cardの二重所持、instanceIdの重複、pending
+/// カードのcategory整合性）を行う。コストが高いため、Engine本体のCommand
+/// APIには自動配線しない——CPU/Simulator/テストからオプトインで呼び出す
+/// 想定（`validatePlayerStateInvariants`と同じ方針）。
+CombatV1MatchStateInvariantResult validateMatchStateInvariants(
+  CombatV1MatchState state,
+) {
+  final errors = <CombatV1MatchStateInvariantError>[];
+  final pending = state.pendingAttack;
+  final isPendingPhase = state.phase == CombatV1MatchPhase.counterResponsePending;
+
+  if (isPendingPhase != (pending != null)) {
+    errors.add(
+      CombatV1MatchStateInvariantError(
+        code: CombatV1MatchStateInvariantErrorCode.pendingPhaseMismatch,
+        message: pendingStructuralConsistencyViolation(state) ??
+            'phaseとpendingAttackの整合性が崩れています',
+      ),
+    );
+  }
+
+  bool validIndex = false;
+  if (pending != null) {
+    validIndex =
+        (pending.attackerPlayerIndex == 0 || pending.attackerPlayerIndex == 1) &&
+        (pending.defenderPlayerIndex == 0 || pending.defenderPlayerIndex == 1);
+    if (!validIndex) {
+      errors.add(
+        CombatV1MatchStateInvariantError(
+          code: CombatV1MatchStateInvariantErrorCode.pendingPlayerIndexOutOfRange,
+          message: 'pendingAttackのplayerIndexが0/1の範囲外です'
+              '（attacker:${pending.attackerPlayerIndex}, '
+              'defender:${pending.defenderPlayerIndex}）',
+        ),
+      );
+    } else {
+      if (pending.attackerPlayerIndex == pending.defenderPlayerIndex) {
+        errors.add(
+          const CombatV1MatchStateInvariantError(
+            code: CombatV1MatchStateInvariantErrorCode.pendingAttackerEqualsDefender,
+            message: 'pendingAttackのattackerPlayerIndexとdefenderPlayerIndexが'
+                '同じです',
+          ),
+        );
+      }
+      if (pending.attackerPlayerIndex != state.activePlayerIndex) {
+        errors.add(
+          CombatV1MatchStateInvariantError(
+            code: CombatV1MatchStateInvariantErrorCode.pendingAttackerIndexMismatch,
+            message: 'pendingAttack.attackerPlayerIndexがstate.'
+                'activePlayerIndexと一致しません',
+          ),
+        );
+      }
+      final expectedDefender = state.activePlayerIndex == 0 ? 1 : 0;
+      if (pending.defenderPlayerIndex != expectedDefender) {
+        errors.add(
+          CombatV1MatchStateInvariantError(
+            code: CombatV1MatchStateInvariantErrorCode.pendingDefenderIndexMismatch,
+            message: 'pendingAttack.defenderPlayerIndexが期待値と一致しません',
+          ),
+        );
+      }
+      // pending所有カードのzone/category判定は[_pendingOwnershipStatus]
+      // （[pendingAttackOwnershipViolation]と共通）に委譲し、判定ロジックの
+      // 重複を避ける（Phase 4 Codex再レビュー指摘H1残件対応）。
+      final ownership = _pendingOwnershipStatus(state, pending);
+      if (ownership.categoryMismatch) {
+        errors.add(
+          const CombatV1MatchStateInvariantError(
+            code: CombatV1MatchStateInvariantErrorCode.pendingCardCategoryMismatch,
+            message: 'pendingAttack.attackCardInstance.categoryがpending.'
+                'categoryと一致しません',
+          ),
+        );
+      }
+      if (ownership.inAttackerZone) {
+        errors.add(
+          const CombatV1MatchStateInvariantError(
+            code: CombatV1MatchStateInvariantErrorCode.pendingCardStillInAttackerZone,
+            message: 'pendingAttackが所有するはずのカードが、攻撃側の'
+                'hand/drawPile/discardPileにも存在します',
+          ),
+        );
+      }
+      if (ownership.inDefenderZone) {
+        errors.add(
+          const CombatV1MatchStateInvariantError(
+            code: CombatV1MatchStateInvariantErrorCode.pendingCardInDefenderZone,
+            message: 'pendingAttackが所有するカードのinstanceIdが、防御側の'
+                'hand/drawPile/discardPileにも存在します',
+          ),
+        );
+      }
+    }
+  }
+
+  final allIds = <String>[
+    ...state.playerA.hand.map((e) => e.instanceId),
+    ...state.playerA.drawPile.map((e) => e.instanceId),
+    ...state.playerA.discardPile.map((e) => e.instanceId),
+    ...state.playerB.hand.map((e) => e.instanceId),
+    ...state.playerB.drawPile.map((e) => e.instanceId),
+    ...state.playerB.discardPile.map((e) => e.instanceId),
+    if (pending != null) pending.attackCardInstance.instanceId,
+  ];
+  if (allIds.toSet().length != allIds.length) {
+    errors.add(
+      const CombatV1MatchStateInvariantError(
+        code: CombatV1MatchStateInvariantErrorCode.duplicateCardInstanceId,
+        message: '両playerの全カードゾーン（およびpending）を通じて'
+            'instanceIdが重複しています',
+      ),
+    );
+  }
+
+  return CombatV1MatchStateInvariantResult(errors);
 }

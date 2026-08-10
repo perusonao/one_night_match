@@ -45,6 +45,13 @@ class CombatV1EnergyCost {
 
   static const CombatV1EnergyCost zero = CombatV1EnergyCost({});
 
+  /// 具体ENERGY属性のCost合計（docs/combat_rules_v1.md 7・8章、Phase 4）。
+  ///
+  /// COUNTERの動的必要量（「返される攻撃TECHNIQUEのENERGY COST総量」）の
+  /// 算出に使う。[isValid]なCostであればwildは含まれないため、単純に全属性
+  /// を合算するだけでよい。
+  int get total => amounts.values.fold(0, (sum, amount) => sum + amount);
+
   /// 静的データvalidation（Phase 3、docs/combat_rules_v1.md 5.1・7章）:
   /// 負数のCostを持たず、かつwildを要求Costとして持たないか。
   ///
