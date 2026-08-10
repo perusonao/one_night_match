@@ -76,6 +76,23 @@ Phase 1のCore Skeleton実装は、現在のSSOT（`combat_rules_v1.md`）と技
 
 ---
 
+## Phase 7時点で解決した項目（Phase 7セッションで確定）
+
+以下は前回（Phase 0）時点で「Phase 7着手前に決める必要がある」としていたが、Phase 7セッションで
+明示的に確定した。`combat_rules_v1.md`本文（一次資料由来）には「起き上がりまたはRESTを選択できる」
+という選択の存在自体は記載があったが、Command構造・posture遷移・ターン終了処理などの実装上の詳細は
+記載がなかったため、Phase 7実装セッション内でユーザーへ確認したうえで正式仕様として採用した。
+
+| # | 項目 | 確定内容 | 関連章 |
+|---|---|---|---|
+| R | 起き上がり（RESTしない場合の復帰）の実装方法 | 明示的なCommand（`standUp`）として実装する。posture: down→standへ遷移するのみで、他のフィールドは一切変化せず、`phase`/`activePlayerIndex`/`turnNumber`も変化しない（ターンを消費しない） | `combat_rules_v1.md` 11章 |
+| S | REST実行後のposture | STANDへ復帰する（posture: down→standへ遷移し、同時にHPを`restHpRecovery`回復する） | `combat_rules_v1.md` 11章 |
+| T | REST実行後のターンの扱い | RESTがそのターンの行動を確定し、`endTurn`と同じ内部処理（手番交代・turnNumber加算・新しい手番プレイヤーのターン開始処理）まで一括で進める | `combat_rules_v1.md` 11章 |
+| U | REST/起き上がりが選択可能なposture | DOWN状態限定（`phase == action`かつ自分がDOWN状態の場合のみ選択できる。STAND状態では選択できない） | `combat_rules_v1.md` 11章 |
+| V | DOWN状態でのTECHNIQUE宣言・通常PIN宣言・`endTurn`の可否 | 自分（active player）がDOWN状態のままではいずれも実行できない（`selfDown`）。COUNTERは自分のDOWN状態による制限を一切受けない | `combat_rules_v1.md` 11章 |
+
+---
+
 ## 後続Phaseまで保留可能な項目
 
 ### 1. PINカード「共有4枚」の管理構造

@@ -363,7 +363,39 @@ DOWN状態の自ターンでは、起き上がりまたはRESTを選択できる
 - ダブルダウンはVer.1では採用しない。
 
 Phase 1ではSTAND／DOWNの基本状態モデル（状態の保持と、技によるSTAND→DOWN等の遷移）のみを扱う。
-起き上がり／REST選択のロジック自体はPhase 7で実装する。
+起き上がり／REST選択のロジック自体はPhase 7で実装した。
+
+Phase 7で以下を正式実装した（一次資料・本章の記載には「起き上がりまたはRESTを選択できる」という
+選択の存在自体は明記されていたが、Command構造・posture遷移・ターン終了処理などの実装上の詳細は
+明記されていなかったため、Phase 7実装セッション内でユーザーへ確認したうえで正式仕様として採用した。
+技術設計の詳細は[`combat_v1_phase1_design.md`](design/combat_v1_phase1_design.md)「Phase
+7での更新」節参照）。
+
+- **起き上がり（Phase 7で確定）**: RESTしない場合の復帰は、明示的なCommand
+  `standUp`として実装する。posture: down→standへ遷移するのみで、HP・KOC・PINカード・ENERGY・
+  HEAT・hand/draw/discardのいずれも変化しない。`phase`／`activePlayerIndex`／`turnNumber`も
+  変化せず、そのターンの行動を消費しない（起き上がった後、同一ターン内で通常のTECHNIQUE使用等へ
+  進められる）。
+- **REST（Phase 7で確定）**: `rest`として実装する。posture: down→standへ遷移し、HPを
+  `CombatV1RulesConfig.restHpRecovery`（既定10）回復する（`maxHp`を超えない）。RESTはそのターンの
+  行動を確定し、`endTurn`と同じ内部処理（手番交代・turnNumber加算・新しい手番プレイヤーのターン
+  開始処理）まで一括で進める。KOC・PINカード・HEATはRESTでは変化しない。
+- **選択可能条件（Phase 7で確定）**: 起き上がり／RESTはいずれも`phase == action`かつ自分（active
+  player）がDOWN状態の場合のみ選択できる。STAND状態では選択できない（DOWN限定）。
+- **DOWN時の合法行動（Phase 7で確定）**: 自分（active player）がDOWN状態のままでは、TECHNIQUE
+  宣言（`declareTechnique`）・通常PIN宣言（`declarePin`）・`endTurn`のいずれも実行できない
+  （legality reasonCode: `selfDown`）。先に`rest`または`standUp`でDOWNから復帰する必要がある。
+  COUNTER（`playCounter`/`declineCounter`）は自分がDOWN状態でも一切制限されない（本章「RESTした
+  ターンはCOUNTERは使用可能」に対応する。防御側のCOUNTER legality判定はpostureを参照しないため、
+  追加の制限を設けていない）。
+- **「RESTしたターンはTECHNIQUEを使用できない」の実現方法（Phase 7で確定）**: RESTがそのターンの
+  行動を確定し即座にターンを終了させること自体によって自然に満たされる。TECHNIQUE使用を個別に
+  禁止するフラグは追加しない。
+- **draw/discard・`lastSuccessfulTechnique`への影響（Phase 7で確定）**: 起き上がり／RESTはいずれも
+  hand/draw/discardを直接操作しない（RESTのターン終了処理に伴う新しい手番プレイヤーの1ドローは、
+  既存の`_startTurn`と同じ処理を再利用しただけであり、REST/起き上がり専用の追加draw/discardは無い）。
+  `lastSuccessfulTechnique`も起き上がり／RESTでは一切変更しない（21章の方針、根拠のないclear処理は
+  追加しない）。
 
 ---
 
@@ -789,3 +821,18 @@ Playtest Analytics、Simulatorの設計、Report、Diagnosticsなど、Ver.1へ�
     （PIN 1／2カウントと同じ扱い、10.1章）。
   - `directPin`と`submissionHold`の排他: 同一TECHNIQUEに両方trueを設定することをCatalog
     validationで禁止する（`category==finisher`の技は対象外、10.1章・23.6章）。
+
+- **Phase 7（REST / 起き上がり）**: 以下を新規確定した（一次資料・`combat_rules_v1.md`本文には
+  「起き上がりまたはRESTを選択できる」という選択の存在自体は明記されていたが、Command構造・
+  posture遷移・ターン終了処理などの実装上の詳細は明記されていなかったため、Phase 7実装セッション内
+  でユーザーへ確認したうえで正式仕様として採用した）。
+  - 起き上がり（RESTしない場合の復帰）は明示的なCommand（`standUp`）として実装する。posture:
+    down→standへ遷移するのみで、他のフィールドは一切変化せず、ターンを消費しない（11章）。
+  - RESTは`rest`として実装する。posture: down→standへ遷移し、HPを`restHpRecovery`（既定10）
+    回復する（`maxHp`を超えない）。RESTはそのターンの行動を確定し、`endTurn`と同じ内部処理で
+    ターンを終了する（11章）。
+  - 起き上がり／RESTはいずれもDOWN状態限定（`phase == action`かつ自分がDOWN状態の場合のみ選択
+    可能、STAND状態では選択不可）で確定した（11章）。
+  - 自分（active player）がDOWN状態のままでは、TECHNIQUE宣言・通常PIN宣言・`endTurn`のいずれも
+    実行できない（`selfDown`）方針で確定した。COUNTERは自分のDOWN状態による制限を一切受けない
+    （11章）。
