@@ -28,6 +28,7 @@ import 'package:one_night_match/src/combat_v1/combat_v1_engine.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_match_state.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rest_rules.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_state_invariants.dart';
 
 import 'combat_v1_test_fixtures.dart';
@@ -54,13 +55,15 @@ void main() {
 
   group('A. restRecoveredHp（combat_v1_rest_rules.dart、純粋関数）', () {
     test('通常回復: maxHpを超えない範囲でrecoveryAmount分回復する', () {
+      // Given: hp=50, restHpRecovery=10 → Then: hp==60
       expect(
-        restRecoveredHp(currentHp: 100, maxHp: 150, recoveryAmount: 10),
-        110,
+        restRecoveredHp(currentHp: 50, maxHp: 150, recoveryAmount: 10),
+        60,
       );
     });
 
-    test('clamp: maxHpを超える分は切り詰められる', () {
+    test('clamp（上限）: maxHp付近では超える分が切り詰められる', () {
+      // Given: hp=maxHp-5, restHpRecovery=10 → Then: hp==maxHp
       expect(
         restRecoveredHp(currentHp: 145, maxHp: 150, recoveryAmount: 10),
         150,
@@ -71,6 +74,32 @@ void main() {
       expect(
         restRecoveredHp(currentHp: 150, maxHp: 150, recoveryAmount: 10),
         150,
+      );
+    });
+
+    test(
+      'clamp（下限）: 負のrecoveryAmountでもHPは0未満にならない（Codexレビュー指摘対応）',
+      () {
+        // Given: hp=5, restHpRecovery=-10 → Then: hp==0（5-10=-5をclamp）
+        expect(
+          restRecoveredHp(currentHp: 5, maxHp: 150, recoveryAmount: -10),
+          0,
+        );
+      },
+    );
+
+    test('clamp（下限）: 大きな負のrecoveryAmountでもHPは0未満にならない', () {
+      // Given: hp=5, restHpRecovery=-100 → Then: hp==0
+      expect(
+        restRecoveredHp(currentHp: 5, maxHp: 150, recoveryAmount: -100),
+        0,
+      );
+    });
+
+    test('境界: 計算結果がちょうど0ならhp==0（0未満へは切り詰めない）', () {
+      expect(
+        restRecoveredHp(currentHp: 10, maxHp: 150, recoveryAmount: -10),
+        0,
       );
     });
   });
@@ -253,6 +282,28 @@ void main() {
       final result = CombatV1Engine.rest(state, rules: fixtureRules, random: Random(1));
       expect(result.playerA.hp, 150);
     });
+
+    test(
+      'Codexレビュー指摘対応: 負のrestHpRecovery（malformed rules）でもREST解決後のHPは'
+      '0未満にならない',
+      () {
+        const negativeRecoveryRules = CombatV1RulesConfig(restHpRecovery: -100);
+        final state = buildMatchState(
+          postureA: CombatV1WrestlerPosture.down,
+          hpA: 5,
+        );
+        final result = CombatV1Engine.rest(
+          state,
+          rules: negativeRecoveryRules,
+          random: Random(1),
+        );
+        expect(result.playerA.hp, 0);
+        expect(
+          validatePlayerStateInvariants(result.playerA).isValid,
+          isTrue,
+        );
+      },
+    );
 
     test('KOC/PINカード/HEATは変化しない（SSOTに明記が無いため）', () {
       final state = buildMatchState(
