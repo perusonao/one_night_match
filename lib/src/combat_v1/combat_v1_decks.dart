@@ -1,7 +1,7 @@
-/// Production 30枚Deck定義（docs/combat_rules_v1.md 3・21章、Phase 10A/10B）。
+/// Production 30枚Deck定義（docs/combat_rules_v1.md 3・21章、Phase 10A/10B/10C）。
 ///
-/// Phase 10Aで豪田ミサキ、Phase 10Bで黒蝶ジャックの正式30枚デッキを追加した
-/// （火神アカリ・白銀レイナは今回実装しない）。ミサキの配分は`combat_rules_v1.md`21章の方針
+/// Phase 10Aで豪田ミサキ、Phase 10Bで黒蝶ジャック、Phase 10Cで火神アカリ・
+/// 白銀レイナの正式30枚デッキを追加した。ミサキの配分は`combat_rules_v1.md`21章の方針
 /// （基本NORMAL×3・その他NORMAL×2、SIGNATURE各×2、FINISHER各×1、COUNTER各×2）を
 /// そのまま正式採用した（docs/design/combat_v1_phase10_production_data.md 5章）。
 ///
@@ -141,4 +141,78 @@ CombatV1DeckDefinition buildJackDeck({required String ownerId}) =>
     CombatV1DeckDefinition(
       wrestlerId: jackWrestler.id,
       entries: _buildEntries(ownerId, jackDeckSpec),
+    );
+
+/// 火神アカリ Production Deck 30枚の内訳
+/// （NORMAL18・SIGNATURE4・FINISHER2・COUNTER6、Phase 10C Production Data
+/// Final Specification 4章）。基本NORMAL（エルボースマッシュ・ミドルキック）は
+/// `combat_rules_v1.md`21章の方針どおり×3、残り6種は×2とした。
+const List<(String, CombatV1CardCategory, int)> akariDeckSpec = [
+  // NORMAL 18枚: 基本技（エルボースマッシュ・ミドルキック）×3、その他×2。
+  ('akari_elbow_smash', CombatV1CardCategory.normal, 3),
+  ('akari_middle_kick', CombatV1CardCategory.normal, 3),
+  ('akari_dropkick', CombatV1CardCategory.normal, 2),
+  ('akari_running_knee', CombatV1CardCategory.normal, 2),
+  ('akari_arm_whip', CombatV1CardCategory.normal, 2),
+  ('akari_flying_crossbody', CombatV1CardCategory.normal, 2),
+  ('akari_swing_ddt', CombatV1CardCategory.normal, 2),
+  ('akari_arm_catch', CombatV1CardCategory.normal, 2),
+
+  // SIGNATURE 4枚: 2種×2枚。
+  ('akari_phoenix_armdrag', CombatV1CardCategory.signature, 2),
+  ('akari_soul_highkick', CombatV1CardCategory.signature, 2),
+
+  // FINISHER 2枚: 2種×1枚。
+  ('akari_phoenix_splash', CombatV1CardCategory.finisher, 1),
+  ('akari_red_flare_kick', CombatV1CardCategory.finisher, 1),
+
+  // COUNTER 6枚: 3種×2枚。
+  ('counter_akari_crimson_guard', CombatV1CardCategory.counter, 2),
+  ('counter_akari_phoenix_throw_reversal', CombatV1CardCategory.counter, 2),
+  ('counter_akari_sky_intercept', CombatV1CardCategory.counter, 2),
+];
+
+/// 火神アカリ Production Deck（30枚）。[ownerId]の位置付けは
+/// [buildMisakiDeck]／[buildJackDeck]と同一（7章参照）。
+CombatV1DeckDefinition buildAkariDeck({required String ownerId}) =>
+    CombatV1DeckDefinition(
+      wrestlerId: akariWrestler.id,
+      entries: _buildEntries(ownerId, akariDeckSpec),
+    );
+
+/// 白銀レイナ Production Deck 30枚の内訳
+/// （NORMAL18・SIGNATURE4・FINISHER2・COUNTER6、Phase 10C Production Data
+/// Final Specification 8章）。基本NORMAL（サイドヘッドロック・足四の字）は
+/// `combat_rules_v1.md`21章の方針どおり×3、残り6種は×2とした。
+const List<(String, CombatV1CardCategory, int)> reinaDeckSpec = [
+  // NORMAL 18枚: 基本技（サイドヘッドロック・足四の字）×3、その他×2。
+  ('reina_side_headlock', CombatV1CardCategory.normal, 3),
+  ('reina_leg_figure_four', CombatV1CardCategory.normal, 3),
+  ('reina_dragon_screw', CombatV1CardCategory.normal, 2),
+  ('reina_drop_toehold', CombatV1CardCategory.normal, 2),
+  ('reina_elbow', CombatV1CardCategory.normal, 2),
+  ('reina_abdominal_stretch', CombatV1CardCategory.normal, 2),
+  ('reina_arm_breaker', CombatV1CardCategory.normal, 2),
+  ('reina_ude_hishigi', CombatV1CardCategory.normal, 2),
+
+  // SIGNATURE 4枚: 2種×2枚。
+  ('reina_silver_crossface', CombatV1CardCategory.signature, 2),
+  ('reina_figure_four_lock', CombatV1CardCategory.signature, 2),
+
+  // FINISHER 2枚: 2種×1枚。
+  ('reina_ice_lock', CombatV1CardCategory.finisher, 1),
+  ('reina_eternal_cross', CombatV1CardCategory.finisher, 1),
+
+  // COUNTER 6枚: 3種×2枚。
+  ('counter_reina_leg_catch_guard', CombatV1CardCategory.counter, 2),
+  ('counter_reina_silver_lock_reversal', CombatV1CardCategory.counter, 2),
+  ('counter_reina_silver_flash_counter', CombatV1CardCategory.counter, 2),
+];
+
+/// 白銀レイナ Production Deck（30枚）。[ownerId]の位置付けは
+/// [buildMisakiDeck]／[buildJackDeck]と同一（7章参照）。
+CombatV1DeckDefinition buildReinaDeck({required String ownerId}) =>
+    CombatV1DeckDefinition(
+      wrestlerId: reinaWrestler.id,
+      entries: _buildEntries(ownerId, reinaDeckSpec),
     );

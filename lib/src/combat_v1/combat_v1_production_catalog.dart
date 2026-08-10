@@ -6,16 +6,27 @@
 /// Domain構造とし、責務はlookupに留める（本ファイル自身は戦闘resolutionや検証ロジックを
 /// 持たない）。
 ///
-/// Phase 10Aで豪田ミサキ、Phase 10Bで黒蝶ジャックを追加した
-/// （火神アカリ・白銀レイナは今回実装しない）。
+/// Phase 10Aで豪田ミサキ、Phase 10Bで黒蝶ジャック、Phase 10Cで火神アカリ・
+/// 白銀レイナを追加した（4人構成完成）。
 library;
 
 import 'combat_v1_counter_catalog.dart';
 import 'combat_v1_deck_validation.dart';
 import 'combat_v1_technique_catalog.dart';
 
-/// 現時点のProduction Card Catalog（Phase 10B: 豪田ミサキ＋黒蝶ジャック）。
+/// 現時点のProduction Card Catalog
+/// （Phase 10C: 豪田ミサキ＋黒蝶ジャック＋火神アカリ＋白銀レイナ、4人構成）。
 final CombatV1CardCatalog productionCardCatalog = CombatV1CardCatalog(
-  techniques: {...misakiTechniques, ...jackTechniques},
-  counters: {...misakiCounters, ...jackCounters},
+  techniques: {
+    ...misakiTechniques,
+    ...jackTechniques,
+    ...akariTechniques,
+    ...reinaTechniques,
+  },
+  counters: {
+    ...misakiCounters,
+    ...jackCounters,
+    ...akariCounters,
+    ...reinaCounters,
+  },
 );

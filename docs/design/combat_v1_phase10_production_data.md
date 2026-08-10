@@ -1,6 +1,6 @@
 # Combat Ver.1 Phase 10 — Production Data 設計・確定値記録
 
-- ステータス: Phase 10B（黒蝶ジャック）完了時点
+- ステータス: Phase 10C（火神アカリ・白銀レイナ）完了時点。4人Production Catalog完成。
 - 関連: [`../combat_rules_v1.md`](../combat_rules_v1.md)（SSOT） /
   [`combat_v1_open_questions.md`](combat_v1_open_questions.md)
 
@@ -381,7 +381,266 @@ match・cross-wrestler・既存validation回帰の各観点）と、
 
 ---
 
-## 15. 変更履歴
+## 16. 火神アカリ — Production Wrestler（Phase 10C）
+
+| フィールド | 値 |
+|---|---|
+| id | `akari` |
+| name | 火神アカリ |
+
+### 16.1 ENERGY Pool（Phase 10C Production Data Final Specification 1章で確定）
+
+`combat_rules_v1.md`18章の検証値を、Phase 10C-0.5セッション（A1）でユーザーが確認のうえ
+そのままProduction値として正式採用した。
+
+| 属性 | 値 |
+|---|---|
+| 打（strike） | 5 |
+| 関（joint） | 1 |
+| 投（throwing） | 2 |
+| 飛（aerial） | 2 |
+| ラフ（rough） | 0 |
+| ＊（wild） | 1 |
+| **合計** | **11** |
+
+---
+
+## 17. 火神アカリ — Production Technique（12種、Phase 10C）
+
+`combat_rules_v1.md`22章は「一次資料に記載がなく未確定」としていた全12技を、Phase
+10C-0（調査）→Phase 10C-0.5（仕様案作成・A1〜A10・A7最終回答）→本Phase（実装）の3段階で
+確定した。旧Excel（`docs/data/one_night_match_techniques.xlsx`「技一覧」シートの
+`td_p7a_akari_*`候補）は、Misaki（Phase 10A 6章）と同じ理由（Speed/KO等の旧仕様
+フィールドを持つ別系統）で数値そのものは不採用としたが、技名・family分類の一部は
+参考にした（下表参照）。
+
+| # | 技名 | ID | category | attribute | family | Cost | DMG | HEAT | 状態 | 備考 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | エルボースマッシュ | `akari_elbow_smash` | NORMAL | strike | elbow | 打1 | 10 | 10 | STAND→STAND | SSOT21章確定名 |
+| 2 | ミドルキック | `akari_middle_kick` | NORMAL | strike | kick | 打1 | 10 | 10 | STAND→STAND | SSOT21章確定名 |
+| 3 | ドロップキック | `akari_dropkick` | NORMAL | aerial | dropKick | 飛1 | 10 | 20 | STAND→DOWN | |
+| 4 | ランニングニー | `akari_running_knee` | NORMAL | strike | knee | 打2 | 20 | 20 | STAND→DOWN | |
+| 5 | アームホイップ | `akari_arm_whip` | NORMAL | throwing | armDrag | 投1 | 10 | 10 | STAND→STAND | |
+| 6 | フライングクロスボディ | `akari_flying_crossbody` | NORMAL | aerial | bodyPress | 飛2 | 20 | 20 | DOWN→DOWN | required: DOWN |
+| 7 | スイングDDT | `akari_swing_ddt` | NORMAL | throwing | ddt | 投2 | 20 | 20 | STAND→DOWN | |
+| 8 | アームキャッチ | `akari_arm_catch` | NORMAL | joint | armbar | 関1 | 10 | 10 | STAND→STAND | submissionHold=true（17.3章参照） |
+| 9 | フェニックス・アームドラッグ | `akari_phoenix_armdrag` | SIGNATURE | throwing | armDrag | 投2 | 20 | 30 | STAND→DOWN | |
+| 10 | ソウルハイキック | `akari_soul_highkick` | SIGNATURE | strike | kick | 打3 | 30 | 40 | STAND→DOWN | |
+| 11 | フェニックススプラッシュ | `akari_phoenix_splash` | FINISHER | aerial | splash | 飛3 | 30 | 40 | DOWN→DOWN | finisherType=directPin、required: DOWN |
+| 12 | レッドフレアキック | `akari_red_flare_kick` | FINISHER | strike | kick | 打3 | 30 | 50 | STAND→DOWN | finisherType=normal |
+
+### 17.1 候補技構成からの変更点（Phase 10C-0.5 A2で確定）
+
+Phase 10C-0で発見したExcel候補12技（`akari_forearm`相当の「フォアアーム」を含む）のうち、
+「フォアアーム」を削除し、候補に存在しなかった新規技「アームキャッチ」を追加した。理由:
+Akariの関節（joint）ENERGYは1しかなく、候補12技のどれも関節attributeを使用していない
+ため、そのまま実装すると関1が一切使われない死に属性になる。Jackが唯一の関節技
+「アームロック」（Phase 10B）でjoint1を使い切ったのと同じパターンで、Akari用にも
+唯一の関節技を新設した。
+
+### 17.2 requiredOpponentState==down の設計理由（Phase 10C-0.5で確定）
+
+フライングクロスボディ・フェニックススプラッシュの2技はrequiredOpponentState==down
+とした。理由は「実際のプロレスでは主にグラウンドの相手へ使うため」という実技上の理由
+**ではなく**、「Akariのダウンを奪う→飛び技へ繋ぐ、というコンボ構造を作るため」という
+ゲームデザイン上の理由である（Phase 10C-0.5セッションでユーザーが明示的に修正・確定
+した記述）。フェニックススプラッシュはCombat Ver.1 Production初のDOWN始動FINISHERで
+あり、既存Misaki/Jackの4 FINISHERはいずれもSTAND始動だった点との差別化。
+
+### 17.3 submissionHold設計（Phase 10C-0.5 A2・A3で確定）
+
+`akari_arm_catch`（アームキャッチ）にのみ`submissionHold=true`を付与した。Misaki/Jackは
+これまでsubmissionHold=trueの技を1つも持たず、本技がCombat Ver.1 Productionにおける
+SUBMISSION機構の初採用となる。Akariの決着方針は「PIN＋SUBMISSION」（PIN主・SUBMISSION
+副）であり、関1という極小プールを踏まえ、SUBMISSION専用FINISHERは設けず、低頻度・
+低コストのNORMAL技1種のみでSUBMISSION勝ち筋を表現する設計とした（「主な決着に
+SUBMISSIONと書いてあるから機械的にSUBMISSION FINISHERにする」という判断は行っていない）。
+
+### 17.4 finisherType確定経緯（Phase 10C-0.5 A3で確定）
+
+- **フェニックススプラッシュ**: `finisherType = directPin`。飛属性のCost3は保有プール
+  （飛2）を超えるため、宣言時に＊(wild)1で不足分を補う（`resolveEnergyPayment`の既存
+  ロジックがそのまま処理する）。
+- **レッドフレアキック**: `finisherType = normal`（成功後、攻撃側が任意でPINを選択できる）。
+
+---
+
+## 18. 火神アカリ — Production Counter（3種、Phase 10C）
+
+Phase 10Aミサキ・Phase 10Bジャックと同じ「広範囲/中範囲/専門」テンプレートで、Phase
+10C-0.5セッション（A5）でユーザーが確認のうえ以下を正式採用した。attribute（支払い属性）
+は、Akariが実際に保有するENERGY属性（打5／投2／飛2）の範囲内から選定した（関1・ラフ0は
+除外した——関1は「Cost1攻撃しか返せない極端に狭いCounter」になってしまうため、Misaki
+4章と同じ理由で不採用とした）。
+
+| # | 役割 | 名称 | ID | attribute | counterableFamilies | counterableGroups |
+|---|---|---|---|---|---|---|
+| 1 | 広範囲型 | 紅蓮ガード | `counter_akari_crimson_guard` | strike（打） | — | [STRIKE] |
+| 2 | 中範囲型 | フェニックス投げ返し | `counter_akari_phoenix_throw_reversal` | throwing（投） | [BACKDROP, SUPLEX] | — |
+| 3 | 専門型 | スカイインターセプト | `counter_akari_sky_intercept` | aerial（飛） | [SPLASH] | — |
+
+②は既存`counter_suplex_reversal`（Misaki）と支払い属性・target familyが機械的に同一
+だが、Phase 10C-0.5 A5でユーザーが「レスラー固有のカードとして扱う（新規flavor名・
+新規definitionとする）」方針を明示的に選択したため、共有definitionへの統合は行わず
+新規IDで実装した。
+
+---
+
+## 19. 火神アカリ — Production Deck（30枚、Phase 10C）
+
+`combat_rules_v1.md`21章の配分方針（基本NORMAL＝エルボースマッシュ×3・ミドルキック×3、
+その他NORMALは原則×2、SIGNATURE各×2、FINISHER各×1、COUNTER各×2）をそのまま正式採用した。
+
+| category | 内訳 | 枚数 |
+|---|---|---|
+| NORMAL | エルボースマッシュ×3、ミドルキック×3、ドロップキック×2、ランニングニー×2、アームホイップ×2、フライングクロスボディ×2、スイングDDT×2、アームキャッチ×2 | 18 |
+| SIGNATURE | フェニックス・アームドラッグ×2、ソウルハイキック×2 | 4 |
+| FINISHER | フェニックススプラッシュ×1、レッドフレアキック×1 | 2 |
+| COUNTER | 紅蓮ガード×2、フェニックス投げ返し×2、スカイインターセプト×2 | 6 |
+| **合計** | | **30** |
+
+`buildAkariDeck({required String ownerId})`は`buildMisakiDeck`/`buildJackDeck`と同じ
+owner namespace方式を踏襲する（7章参照）。
+
+---
+
+## 20. 白銀レイナ — Production Wrestler（Phase 10C）
+
+| フィールド | 値 |
+|---|---|
+| id | `reina` |
+| name | 白銀レイナ |
+
+### 20.1 ENERGY Pool（Phase 10C Production Data Final Specification 5章で確定）
+
+`combat_rules_v1.md`18章の検証値をそのまま採用した（A6）。
+
+| 属性 | 値 |
+|---|---|
+| 打（strike） | 2 |
+| 関（joint） | 4 |
+| 投（throwing） | 3 |
+| 飛（aerial） | 0 |
+| ラフ（rough） | 0 |
+| ＊（wild） | 1 |
+| **合計** | **10** |
+
+---
+
+## 21. 白銀レイナ — Production Technique（12種、Phase 10C）
+
+### 21.1 候補技構成からの変更点（Phase 10C-0.5 A7で確定、複数ラウンドの検討を経た最終回答）
+
+Phase 10C-0で発見したExcel候補12技は、family重複が多く（figureFourが3回、headlockが
+2回）、NORMALの選択肢が単調になる懸念があった。ユーザーから「関節技に明確に偏った
+レスラーで構わない（Misaki=投げ／Jack=ラフ／Akari=打撃＋飛び／Reina=関節＋投げ、という
+4人差別化を優先）」という方針が示され、以下を最終確定した。
+
+- 「ヘッドロック」（サイドヘッドロックとfamily完全重複の劣化コピー）を削除し、
+  「アブドミナルストレッチ」（joint、family=`stretch`）を新規採用した。`stretch`
+  familyはCombat Ver.1 Production全体で初採用（Misaki/Jackとも未使用）。
+- 「アイスロック」（FINISHER）のfamilyを、当初案のfigureFour（足四の字/フィギュア
+  フォーとの三重重複）から`legLock`へ変更した。
+
+比較検討では「ニーストライク（strike）を採用する案」「ヘッドロックを残す案」
+「アブドミナルストレッチ（joint/stretch）を採用する案」の3案を提示し、Reinaを
+「関節に明確に偏らせる」方針を最も直接的に満たす3番目の案が最終的に採用された。
+
+### 21.2 Technique一覧
+
+| # | 技名 | ID | category | attribute | family | Cost | DMG | HEAT | 状態 | 備考 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | サイドヘッドロック | `reina_side_headlock` | NORMAL | joint | headlock | 関1 | 10 | 10 | STAND→STAND | SSOT21章確定名 |
+| 2 | 足四の字 | `reina_leg_figure_four` | NORMAL | joint | figureFour | 関1 | 10 | 10 | STAND→STAND | SSOT21章確定名 |
+| 3 | ドラゴンスクリュー | `reina_dragon_screw` | NORMAL | throwing | legTakedown | 投1 | 10 | 20 | STAND→DOWN | SSOT21章記載技 |
+| 4 | ドロップトーホールド | `reina_drop_toehold` | NORMAL | throwing | legTakedown | 投1 | 10 | 20 | STAND→DOWN | |
+| 5 | エルボー | `reina_elbow` | NORMAL | strike | elbow | 打1 | 10 | 10 | STAND→STAND | |
+| 6 | アブドミナルストレッチ | `reina_abdominal_stretch` | NORMAL | joint | **stretch** | 関1 | 10 | 10 | STAND→STAND | Phase 10C-0.5 A7で新規確定。resultOpponentState=null |
+| 7 | アームブリーカー | `reina_arm_breaker` | NORMAL | joint | armbar | 関1 | 10 | 10 | STAND→STAND | |
+| 8 | 腕ひしぎ | `reina_ude_hishigi` | NORMAL | joint | armbar | 関2 | 20 | 20 | DOWN→DOWN | submissionHold=true |
+| 9 | 白銀クロスフェイス | `reina_silver_crossface` | SIGNATURE | joint | crossface | 関2 | 20 | 30 | STAND→DOWN | submissionHold=true |
+| 10 | フィギュアフォー | `reina_figure_four_lock` | SIGNATURE | joint | figureFour | 関3 | 30 | 40 | STAND→DOWN | submissionHold=false |
+| 11 | アイスロック | `reina_ice_lock` | FINISHER | joint | legLock | 関3 | 30 | 40 | STAND→DOWN | finisherType=submission、family変更経緯は21.1章参照 |
+| 12 | エターナルクロス | `reina_eternal_cross` | FINISHER | joint | crossface | 関4 | 40 | 50 | STAND→DOWN | finisherType=normal |
+
+### 21.3 submissionHold設計（Phase 10C-0.5 A9で確定）
+
+`submissionHold=true`は`reina_ude_hishigi`（腕ひしぎ）・`reina_silver_crossface`
+（白銀クロスフェイス）の2種のみ。最頻出NORMAL（足四の字・サイドヘッドロック、各×3枚）
+には付与しない方針を明示的に確定した（SUBMISSION自動判定の過度な頻発を避けるため）。
+Reinaの決着方針「SUBMISSION＋PIN」（SUBMISSION主・PIN副）を反映し、Akari（副）より
+明確に厚い構成としたが、FINISHERのfinisherType=submissionと合わせても、いずれも
+「相手HP50以下」という閾値条件を経由するため、試合序盤からの連続SUBMISSION終了は
+起きにくい。
+
+### 21.4 finisherType確定経緯（Phase 10C-0.5 A8で確定）
+
+- **アイスロック**: `finisherType = submission`。Reinaの決着方針「SUBMISSION＋PIN」の
+  うちSUBMISSIONを主決着として表現する。
+- **エターナルクロス**: `finisherType = normal`。関4（保有プール全量）を使い切る
+  最大火力技。成功後、攻撃側が任意でPINを選択できる。
+
+---
+
+## 22. 白銀レイナ — Production Counter（3種、Phase 10C）
+
+Phase 10Aミサキ・Phase 10Bジャックと同じテンプレートで、Phase 10C-0.5セッション
+（A10）でユーザーが確認のうえ以下を正式採用した。attributeは、Reinaが実際に保有する
+ENERGY属性（投3／関4／打2）の範囲内から選定した（飛0・ラフ0は除外した）。広範囲型に
+投3（中間値）、中範囲型に関4（最大値、本格関節技への深い対応力）、専門型に打2
+（最小値、Cost2級のLARIATに限定）を割り当てることで、各Counterが実際に支払い可能な
+範囲に対象を絞り込んだ。
+
+| # | 役割 | 名称 | ID | attribute | counterableFamilies | counterableGroups |
+|---|---|---|---|---|---|---|
+| 1 | 広範囲型 | 足取りガード | `counter_reina_leg_catch_guard` | throwing（投） | — | [THROW] |
+| 2 | 中範囲型 | 白銀ロックリバーサル | `counter_reina_silver_lock_reversal` | joint（関） | [CROSSFACE, FIGURE_FOUR] | — |
+| 3 | 専門型 | 銀閃カウンター | `counter_reina_silver_flash_counter` | strike（打） | [LARIAT] | — |
+
+`stretch` family（アブドミナルストレッチ）を専門targetするCounterは現状存在しない。
+これはPhase 10C-0.5 A7最終回答でユーザーが明示的に許容した仕様であり、Counter
+coverageを補うための新規Counter追加は行っていない（将来のSimulatorによる勝率・
+使用率検証後に必要なら調整する方針）。
+
+---
+
+## 23. 白銀レイナ — Production Deck（30枚、Phase 10C）
+
+`combat_rules_v1.md`21章の配分方針（基本NORMAL＝サイドヘッドロック×3・足四の字×3、
+その他NORMALは原則×2、SIGNATURE各×2、FINISHER各×1、COUNTER各×2）をそのまま正式採用した。
+
+| category | 内訳 | 枚数 |
+|---|---|---|
+| NORMAL | サイドヘッドロック×3、足四の字×3、ドラゴンスクリュー×2、ドロップトーホールド×2、エルボー×2、アブドミナルストレッチ×2、アームブリーカー×2、腕ひしぎ×2 | 18 |
+| SIGNATURE | 白銀クロスフェイス×2、フィギュアフォー×2 | 4 |
+| FINISHER | アイスロック×1、エターナルクロス×1 | 2 |
+| COUNTER | 足取りガード×2、白銀ロックリバーサル×2、銀閃カウンター×2 | 6 |
+| **合計** | | **30** |
+
+`buildReinaDeck({required String ownerId})`は`buildMisakiDeck`/`buildJackDeck`/
+`buildAkariDeck`と同じowner namespace方式を踏襲する（7章参照）。
+
+---
+
+## 24. 4人Production Catalog完成（Phase 10C）
+
+`combat_v1_production_catalog.dart`の`productionCardCatalog`は、Misaki・Jack・
+Akari・Reinaの4人分のTechnique（12種×4＝48）・Counter（3種×4＝12）を統合する。
+14章で確定した`validateDeck`の`wrestlerId`引数によるWrestler/Deck整合性チェック
+（`wrestlerMismatch`）は、Core Engine側の変更なしにAkari/Reinaへもそのまま機能する
+（`CombatV1Wrestler.id`と`CombatV1DeckDefinition.wrestlerId`という既存の汎用String
+同士の比較のみのため）。
+
+検証は`test/combat_v1/combat_v1_production_akari_test.dart`・
+`combat_v1_production_reina_test.dart`（各レスラー単体のProduction Data、Phase
+10A/10Bと同型）、`combat_v1_production_wrestler_deck_integrity_test.dart`
+（4人roster全組み合わせのmismatch・cross-wrestler Engine.start、既存Misaki/Jack
+groupは無変更のまま拡張）、`combat_v1_production_akari_vs_reina_command_test.dart`
+（異なるレスラー同士のdeclareTechnique→declineCounter/playCounter経路）で行った。
+
+---
+
+## 25. 変更履歴
 
 - **Phase 10-Precondition〜10A**: 本書を新規作成。上記1〜6章の内容を、Phase
   10Aセッション内でユーザーへ確認のうえ正式確定した。
@@ -396,3 +655,18 @@ match・cross-wrestler・既存validation回帰の各観点）と、
   10Aと同じowner namespace方式・広範囲/中範囲/専門Counterテンプレートで
   正式確定した。`combat_v1_open_questions.md`未解決項目#2（ジャックのデッキ
   配分）を解決した。
+- **Phase 10C-0（調査）**: 火神アカリ・白銀レイナの既存情報（SSOT・旧Engine・
+  Excel候補・現行taxonomy）を調査し、未確定事項を整理した（コード変更なし）。
+- **Phase 10C-0.5（仕様案作成）**: 「Phase 10C Production Data Final
+  Specification」を作成し、A1〜A10（ENERGY・Technique 24種・Counter
+  6種・FINISHER・submissionHold・state mapping・4人バランス比較）についてユーザー
+  承認を得た。A7（Reina NORMAL第6枠）のみ複数案比較を経て最終確定した
+  （アブドミナルストレッチ、family=stretch）。実装はまだ行わなかった。
+- **Phase 10C（実装）**: 16〜24章を新規追加。火神アカリ・白銀レイナのProduction
+  Wrestler／Technique（12種×2）／Counter（3種×2）／Deck（30枚×2）を、Final
+  Specificationの値を厳密に反映して実装した。`combat_v1_production_catalog.dart`が
+  Misaki・Jack・Akari・Reinaの4人構成になった。既存Misaki/Jackの
+  Production Data・テストは変更していない。Core
+  Engine／Domain model／既存enum taxonomyの変更は不要だった（`stretch`
+  familyは既存enumの値をアカリ・レイナで初めて使用したのみ）。
+  `combat_v1_open_questions.md`未解決項目#3（アカリ・レイナの技データ）を解決した。
