@@ -38,6 +38,10 @@ import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_state_invariants.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_wrestler_catalog.dart';
 
+// Phase 10C: 火神アカリ・白銀レイナ追加後もMisaki/Jackの既存integrity test
+// （groups A〜H、上記import含む）は一切変更していない。以下は火神アカリ・
+// 白銀レイナを対象とした追加テスト（groups I〜K）。
+
 const CombatV1RulesConfig rules = CombatV1RulesConfig();
 
 /// 両playerの全カードゾーン＋pendingが所有する攻撃カードのinstanceIdを
@@ -348,4 +352,255 @@ void main() {
       expect(result.isValid, isTrue, reason: result.errors.join(' / '));
     });
   });
+
+  group('I. Phase 10C: 正常系（Akari/Reina Production Deckを渡すとEngine.startが成功する）', () {
+    test('Akari wrestler + Akari Production Deck → valid', () {
+      final state = CombatV1Engine.start(
+        wrestlerA: akariWrestler,
+        deckA: buildAkariDeck(ownerId: 'player-a'),
+        wrestlerB: akariWrestler,
+        deckB: buildAkariDeck(ownerId: 'player-b'),
+        rules: rules,
+        catalog: productionCardCatalog,
+      );
+      expect(state.playerA.wrestlerId, 'akari');
+      expect(state.playerB.wrestlerId, 'akari');
+      expect(state.phase, CombatV1MatchPhase.discard);
+    });
+
+    test('Reina wrestler + Reina Production Deck → valid', () {
+      final state = CombatV1Engine.start(
+        wrestlerA: reinaWrestler,
+        deckA: buildReinaDeck(ownerId: 'player-a'),
+        wrestlerB: reinaWrestler,
+        deckB: buildReinaDeck(ownerId: 'player-b'),
+        rules: rules,
+        catalog: productionCardCatalog,
+      );
+      expect(state.playerA.wrestlerId, 'reina');
+      expect(state.playerB.wrestlerId, 'reina');
+      expect(state.phase, CombatV1MatchPhase.discard);
+    });
+
+    test('D. 正しいAkari vs Reina → start成功', () {
+      final state = CombatV1Engine.start(
+        wrestlerA: akariWrestler,
+        deckA: buildAkariDeck(ownerId: 'player-a'),
+        wrestlerB: reinaWrestler,
+        deckB: buildReinaDeck(ownerId: 'player-b'),
+        rules: rules,
+        catalog: productionCardCatalog,
+      );
+      expect(state.playerA.wrestlerId, 'akari');
+      expect(state.playerB.wrestlerId, 'reina');
+      expect(state.phase, CombatV1MatchPhase.discard);
+      final result = validateMatchStateInvariants(state, rules: rules);
+      expect(result.isValid, isTrue, reason: result.errors.join(' / '));
+    });
+  });
+
+  group(
+    'J. Phase 10C: mismatch（Akari/Reinaの取り違えをEngine.startが拒否する）',
+    () {
+      test('A. playerAのみmismatch: Akari wrestler + Reina deck（playerBは正常）→ 拒否', () {
+        expect(
+          () => CombatV1Engine.start(
+            wrestlerA: akariWrestler,
+            deckA: buildReinaDeck(ownerId: 'player-a'),
+            wrestlerB: reinaWrestler,
+            deckB: buildReinaDeck(ownerId: 'player-b'),
+            rules: rules,
+            catalog: productionCardCatalog,
+          ),
+          throwsA(isA<CombatV1IllegalActionException>()),
+        );
+      });
+
+      test('B. playerBのみmismatch: Reina wrestler + Akari deck（playerAは正常）→ 拒否', () {
+        expect(
+          () => CombatV1Engine.start(
+            wrestlerA: akariWrestler,
+            deckA: buildAkariDeck(ownerId: 'player-a'),
+            wrestlerB: reinaWrestler,
+            deckB: buildAkariDeck(ownerId: 'player-b'),
+            rules: rules,
+            catalog: productionCardCatalog,
+          ),
+          throwsA(isA<CombatV1IllegalActionException>()),
+        );
+      });
+
+      test('C. 両者同時にmismatch: Akari wrestler+Reina deck / Reina wrestler+Akari deck → 拒否', () {
+        expect(
+          () => CombatV1Engine.start(
+            wrestlerA: akariWrestler,
+            deckA: buildReinaDeck(ownerId: 'player-a'),
+            wrestlerB: reinaWrestler,
+            deckB: buildAkariDeck(ownerId: 'player-b'),
+            rules: rules,
+            catalog: productionCardCatalog,
+          ),
+          throwsA(isA<CombatV1IllegalActionException>()),
+        );
+      });
+
+      test('Akari wrestler + Misaki deck → 拒否（Misaki/Jack roster跨ぎのmismatchも検出）', () {
+        expect(
+          () => CombatV1Engine.start(
+            wrestlerA: akariWrestler,
+            deckA: buildMisakiDeck(ownerId: 'player-a'),
+            wrestlerB: jackWrestler,
+            deckB: buildJackDeck(ownerId: 'player-b'),
+            rules: rules,
+            catalog: productionCardCatalog,
+          ),
+          throwsA(isA<CombatV1IllegalActionException>()),
+        );
+      });
+
+      test('Reina wrestler + Jack deck → 拒否（Misaki/Jack roster跨ぎのmismatchも検出）', () {
+        expect(
+          () => CombatV1Engine.start(
+            wrestlerA: misakiWrestler,
+            deckA: buildMisakiDeck(ownerId: 'player-a'),
+            wrestlerB: reinaWrestler,
+            deckB: buildJackDeck(ownerId: 'player-b'),
+            rules: rules,
+            catalog: productionCardCatalog,
+          ),
+          throwsA(isA<CombatV1IllegalActionException>()),
+        );
+      });
+
+      test('buildAkariDeck()にwrestlerId=reinaを渡すとwrestlerMismatchでinvalid', () {
+        final result = validateDeck(
+          buildAkariDeck(ownerId: 'player-a'),
+          catalog: productionCardCatalog,
+          rules: rules,
+          wrestlerId: reinaWrestler.id,
+        );
+        expect(result.isValid, isFalse);
+        expect(
+          result.errors.map((e) => e.code),
+          contains(CombatV1DeckValidationErrorCode.wrestlerMismatch),
+        );
+      });
+
+      test('buildReinaDeck()にwrestlerId=akariを渡すとwrestlerMismatchでinvalid', () {
+        final result = validateDeck(
+          buildReinaDeck(ownerId: 'player-a'),
+          catalog: productionCardCatalog,
+          rules: rules,
+          wrestlerId: akariWrestler.id,
+        );
+        expect(result.isValid, isFalse);
+        expect(
+          result.errors.map((e) => e.code),
+          contains(CombatV1DeckValidationErrorCode.wrestlerMismatch),
+        );
+      });
+    },
+  );
+
+  group(
+    'K. Phase 10C: 4人roster全組み合わせのcross-wrestler Engine.start（正しい組み合わせ）',
+    () {
+      /// 両playerの全カードゾーン＋pendingが所有する攻撃カードのinstanceId
+      /// をすべて集めたリスト（`combat_v1_production_akari_test.dart`の
+      /// `_allInstanceIds`と同じ方針）。
+      List<String> allInstanceIds(CombatV1MatchState state) {
+        final pending = state.pendingAttack;
+        return [
+          ...state.playerA.hand.map((e) => e.instanceId),
+          ...state.playerA.drawPile.map((e) => e.instanceId),
+          ...state.playerA.discardPile.map((e) => e.instanceId),
+          ...state.playerB.hand.map((e) => e.instanceId),
+          ...state.playerB.drawPile.map((e) => e.instanceId),
+          ...state.playerB.discardPile.map((e) => e.instanceId),
+          if (pending != null) pending.attackCardInstance.instanceId,
+        ];
+      }
+
+      void expectValidCrossWrestlerStart(CombatV1MatchState state) {
+        final result = validateMatchStateInvariants(state, rules: rules);
+        expect(result.isValid, isTrue, reason: result.errors.join(' / '));
+        expect(allInstanceIds(state).toSet().length, 60);
+        final totalA =
+            state.playerA.hand.length +
+            state.playerA.drawPile.length +
+            state.playerA.discardPile.length;
+        final totalB =
+            state.playerB.hand.length +
+            state.playerB.drawPile.length +
+            state.playerB.discardPile.length;
+        expect(totalA, 30);
+        expect(totalB, 30);
+      }
+
+      test('Akari(player-a) vs Misaki(player-b) → valid、cardconservation・instanceId一意', () {
+        final state = CombatV1Engine.start(
+          wrestlerA: akariWrestler,
+          deckA: buildAkariDeck(ownerId: 'player-a'),
+          wrestlerB: misakiWrestler,
+          deckB: buildMisakiDeck(ownerId: 'player-b'),
+          rules: rules,
+          catalog: productionCardCatalog,
+        );
+        expectValidCrossWrestlerStart(state);
+      });
+
+      test('Akari(player-a) vs Jack(player-b) → valid、cardconservation・instanceId一意', () {
+        final state = CombatV1Engine.start(
+          wrestlerA: akariWrestler,
+          deckA: buildAkariDeck(ownerId: 'player-a'),
+          wrestlerB: jackWrestler,
+          deckB: buildJackDeck(ownerId: 'player-b'),
+          rules: rules,
+          catalog: productionCardCatalog,
+        );
+        expectValidCrossWrestlerStart(state);
+      });
+
+      test('Reina(player-a) vs Misaki(player-b) → valid、cardconservation・instanceId一意', () {
+        final state = CombatV1Engine.start(
+          wrestlerA: reinaWrestler,
+          deckA: buildReinaDeck(ownerId: 'player-a'),
+          wrestlerB: misakiWrestler,
+          deckB: buildMisakiDeck(ownerId: 'player-b'),
+          rules: rules,
+          catalog: productionCardCatalog,
+        );
+        expectValidCrossWrestlerStart(state);
+      });
+
+      test('Reina(player-a) vs Jack(player-b) → valid、cardconservation・instanceId一意', () {
+        final state = CombatV1Engine.start(
+          wrestlerA: reinaWrestler,
+          deckA: buildReinaDeck(ownerId: 'player-a'),
+          wrestlerB: jackWrestler,
+          deckB: buildJackDeck(ownerId: 'player-b'),
+          rules: rules,
+          catalog: productionCardCatalog,
+        );
+        expectValidCrossWrestlerStart(state);
+      });
+
+      test('Akari(player-a) vs Reina(player-b) → valid、cardconservation・instanceId一意', () {
+        final state = CombatV1Engine.start(
+          wrestlerA: akariWrestler,
+          deckA: buildAkariDeck(ownerId: 'player-a'),
+          wrestlerB: reinaWrestler,
+          deckB: buildReinaDeck(ownerId: 'player-b'),
+          rules: rules,
+          catalog: productionCardCatalog,
+        );
+        expectValidCrossWrestlerStart(state);
+      });
+
+      test('4人構成productionCardCatalogはvalidateCatalogを通過する', () {
+        final result = validateCatalog(productionCardCatalog);
+        expect(result.isValid, isTrue, reason: result.errors.join(' / '));
+      });
+    },
+  );
 }

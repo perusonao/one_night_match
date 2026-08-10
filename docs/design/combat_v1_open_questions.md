@@ -164,6 +164,24 @@ Production Dataとして確定しきれなかった項目。Phase 10A実装セ�
 
 ---
 
+## Phase 10C時点で解決した項目（火神アカリ・白銀レイナ Production Data実装セッションで確定）
+
+以下は`combat_rules_v1.md`22章（アカリ・レイナの技データ、未確定）だけではProduction
+Dataとして確定しきれなかった項目。Phase 10C-0（調査）→Phase 10C-0.5（仕様案作成・
+ユーザー承認）→Phase 10C（実装）の3セッションを経て正式仕様として採用した。詳細・
+全データは[`combat_v1_phase10_production_data.md`](combat_v1_phase10_production_data.md)
+16〜24章を参照。
+
+| # | 項目 | 確定内容 | 関連章 |
+|---|---|---|---|
+| KK | アカリ・レイナのENERGY Pool検証値→Production値への昇格 | 18章の検証値（アカリ: 打5/関1/投2/飛2/ラフ0/＊1＝11、レイナ: 打2/関4/投3/飛0/ラフ0/＊1＝10）をそのままProduction値として正式採用した | `combat_v1_phase10_production_data.md` 16.1・20.1章 |
+| LL | アカリ・レイナ24技（各12種）の名称・数値・family・state mapping・finisherType・submissionHold | 一次資料・SSOT本文（22章）に記載がなかったため、Claudeが完全な叩き台を提示し、ユーザーが複数ラウンドの確認・修正指示（A1〜A10、A7は追加の比較検討を経て最終回答）を経て正式確定した | `combat_v1_phase10_production_data.md` 17・21章 |
+| MM | アカリ・レイナ用COUNTER各3種の正式割当 | Phase 10A/10Bと同じ広範囲/中範囲/専門テンプレートで、各レスラーが実際に保有するENERGY属性の範囲内から支払い属性を選定した。Reinaの`stretch` family専用Counterは現状存在しないことを明示的に許容した | `combat_v1_phase10_production_data.md` 18・22章 |
+| NN | アカリ・レイナのDeck配分（30枚、SIGNATURE/FINISHER/COUNTER内訳含む） | SSOT21章の基本NORMAL（アカリ: エルボースマッシュ・ミドルキック、レイナ: サイドヘッドロック・足四の字）を×3として、残り6種×2・SIGNATURE各×2・FINISHER各×1・COUNTER各×2で確定した | `combat_v1_phase10_production_data.md` 19・23章 |
+| OO | Reina NORMAL第6枠の最終選定 | 「ニーストライク（strike）」「ヘッドロック（joint、サイドヘッドロックとfamily重複）」「アブドミナルストレッチ（joint、family=stretch）」の3案を比較し、Reinaを「関節に明確に偏らせる」方針を優先してアブドミナルストレッチを採用した | `combat_v1_phase10_production_data.md` 21.1章 |
+
+---
+
 ## 後続Phaseまで保留可能な項目
 
 ### 1. PINカード「共有4枚」の管理構造
@@ -176,10 +194,7 @@ Production Dataとして確定しきれなかった項目。Phase 10A実装セ�
 
 ### 3. アカリ・レイナの技データ（全12技の詳細数値）
 
-- 関連章: `combat_rules_v1.md` 22章
-- 内容: 一次資料に記載がなく、本セッションでも意図的に確定させていない（ユーザー指示により推測補完を
-  行っていない）。
-- 解決が必要な時期: **Phase 10着手前**。ユーザーからの追加仕様提供待ち。
+**Phase 10Cで解決済み（KK〜OO番）。上記「Phase 10C時点で解決した項目」参照。**
 
 ### 4. 技系統（TechniqueFamily）の正式taxonomy
 

@@ -1,9 +1,9 @@
-/// Production Wrestler定義（docs/combat_rules_v1.md 2章・18章、Phase 10A/10B）。
+/// Production Wrestler定義（docs/combat_rules_v1.md 2章・18章、Phase 10A/10B/10C）。
 ///
-/// Phase 10Aで豪田ミサキ、Phase 10Bで黒蝶ジャックを追加した（火神アカリ・
-/// 白銀レイナはPhase 10C以降）。ENERGY Poolは`combat_rules_v1.md`18章の検証値を、
+/// Phase 10Aで豪田ミサキ、Phase 10Bで黒蝶ジャック、Phase 10Cで火神アカリ・
+/// 白銀レイナを追加した。ENERGY Poolは`combat_rules_v1.md`18章の検証値を、
 /// 各Phaseセッションでユーザーが確認のうえProduction値として正式承認した値（
-/// docs/design/combat_v1_phase10_production_data.md 2.1章・Phase 10B節参照）。
+/// docs/design/combat_v1_phase10_production_data.md 2.1章・Phase 10B/10C節参照）。
 library;
 
 import 'combat_v1_energy.dart';
@@ -35,6 +35,38 @@ const CombatV1Wrestler jackWrestler = CombatV1Wrestler(
     CombatV1EnergyAttribute.throwing: 1,
     CombatV1EnergyAttribute.aerial: 0,
     CombatV1EnergyAttribute.rough: 4,
+    CombatV1EnergyAttribute.wild: 1,
+  }),
+);
+
+/// 火神アカリ（Production Wrestler、Phase 10C Production Data Final
+/// Specification 1章）。ENERGY Poolは`combat_rules_v1.md`18章の検証値をそのまま
+/// 採用した。
+const CombatV1Wrestler akariWrestler = CombatV1Wrestler(
+  id: 'akari',
+  name: '火神アカリ',
+  energyPool: CombatV1EnergyPool({
+    CombatV1EnergyAttribute.strike: 5,
+    CombatV1EnergyAttribute.joint: 1,
+    CombatV1EnergyAttribute.throwing: 2,
+    CombatV1EnergyAttribute.aerial: 2,
+    CombatV1EnergyAttribute.rough: 0,
+    CombatV1EnergyAttribute.wild: 1,
+  }),
+);
+
+/// 白銀レイナ（Production Wrestler、Phase 10C Production Data Final
+/// Specification 5章）。ENERGY Poolは`combat_rules_v1.md`18章の検証値をそのまま
+/// 採用した。
+const CombatV1Wrestler reinaWrestler = CombatV1Wrestler(
+  id: 'reina',
+  name: '白銀レイナ',
+  energyPool: CombatV1EnergyPool({
+    CombatV1EnergyAttribute.strike: 2,
+    CombatV1EnergyAttribute.joint: 4,
+    CombatV1EnergyAttribute.throwing: 3,
+    CombatV1EnergyAttribute.aerial: 0,
+    CombatV1EnergyAttribute.rough: 0,
     CombatV1EnergyAttribute.wild: 1,
   }),
 );
