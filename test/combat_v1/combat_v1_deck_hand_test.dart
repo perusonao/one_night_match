@@ -110,9 +110,9 @@ void main() {
     test('19. 開始時初期手札5枚を引く', () {
       final state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('w_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('w_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(1),
@@ -125,9 +125,9 @@ void main() {
     test('20. 先攻turn startの1draw後に6枚', () {
       final state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('w_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('w_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(1),
@@ -139,9 +139,9 @@ void main() {
     test('21. 1discard後に5枚', () {
       var state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('w_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('w_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(1),
@@ -154,9 +154,9 @@ void main() {
     test('22. 後攻も最初のturn startで5→6→5になる', () {
       var state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('w_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('w_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(1),
@@ -378,9 +378,9 @@ void main() {
 
       var state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: smallDeck('ra'),
+        deckA: smallDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: smallDeck('rb'),
+        deckB: smallDeck(fixtureWrestlerB.id),
         rules: smallRules,
         catalog: fixtureCatalog,
         random: Random(11),
@@ -404,9 +404,9 @@ void main() {
     test('35. 開始直後にカード総数30', () {
       final state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('w_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('w_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(1),
@@ -420,9 +420,9 @@ void main() {
     test('36. turn-start draw/discard後も総数30', () {
       var state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('w_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('w_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(1),
@@ -501,9 +501,9 @@ void main() {
     test('39. 正式30枚デッキでreshuffleが発生しても総数30、40. 重複instanceIdなし', () {
       var state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: fixtureDeck('w_a'),
+        deckA: fixtureDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: fixtureDeck('w_b'),
+        deckB: fixtureDeck(fixtureWrestlerB.id),
         rules: fixtureRules,
         catalog: fixtureCatalog,
         random: Random(3),

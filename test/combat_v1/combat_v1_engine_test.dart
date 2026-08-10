@@ -589,9 +589,9 @@ void main() {
 
       var state = CombatV1Engine.start(
         wrestlerA: fixtureWrestlerA,
-        deckA: smallDeck('small_a'),
+        deckA: smallDeck(fixtureWrestlerA.id),
         wrestlerB: fixtureWrestlerB,
-        deckB: smallDeck('small_b'),
+        deckB: smallDeck(fixtureWrestlerB.id),
         rules: smallRules,
         catalog: fixtureCatalog,
         random: Random(7),
