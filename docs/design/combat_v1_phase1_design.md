@@ -758,3 +758,85 @@ validation（`validateMatchStateInvariants`）の責務とし、getterの意味�
   CombatV1RulesConfig()`という既定値付き引数を追加した（PINカード合計の判定に
   `rules.totalPinCards`が必要なため。既定値により既存呼び出し箇所は無変更で動作する）。
 - `CombatV1PinLegalityReasonCode`へ`noPinCard`／`malformedPinState`を追加した。
+
+---
+
+## 15. Phase 6での更新（SUBMISSION）
+
+Phase 6（SUBMISSION）で、本書のPhase 1〜5設計から以下を更新した。ゲームルール自体
+（`combat_rules_v1.md` 10.1章）の新規確定事項は同書10.1章・29章「変更履歴」を参照。ここでは実装
+内部の技術設計の差分を記す。
+
+### 15.1 新規ファイル
+
+`lib/src/combat_v1/combat_v1_submission_rules.dart`（§1で想定していた
+`combat_v1_submission_rules.dart`の役割をほぼそのまま踏襲）を追加した。SUBMISSION突入条件
+（`submissionEligible`）・ESCAPE/GIVE UP判定（`determineSubmissionOutcome`）を純粋関数として
+切り出し、`combat_v1_engine.dart`側のstate遷移配線と責務を分離した（`combat_v1_pin_rules.dart`と
+同じ方針）。
+
+テストファイルとして`test/combat_v1/combat_v1_submission_test.dart`を追加した。
+
+### 15.2 State Machineに`submissionResponsePending`等を追加しない設計判断
+
+`combat_rules_v1.md` 10.1章で確定したとおり、SUBMISSIONのESCAPE/GIVE UP判定は防御側の任意選択が
+存在しない完全自動判定（防御側KOC>=1なら必ずESCAPE、KOC==0なら必ずGIVE UP）であり、PIN
+（14.2章）と同じ理由で、防御側の実質的な選択を待つ中間フェーズは導入していない。SUBMISSIONへの
+突入自体もDIRECT PINと同じ「TECHNIQUE成功解決と同一Command内で完結する自動遷移」のみであり
+（10.1章「突入方法」）、`declarePin`に相当する攻撃側任意宣言の独立APIも存在しない。
+
+この設計判断により、`CombatV1PendingSubmission`のようなpublic Domain
+modelおよび`CombatV1MatchPhase.submissionResponsePending`は追加していない（`CombatV1PendingAttack`・
+`counterResponsePending`とは異なり、SUBMISSIONには「宣言はしたが未解決」という状態を跨いで保持する
+必要がないため——`_resolvePendingAttack`内で完結する）。
+
+### 15.3 `combat_v1_enums.dart`への追加
+
+`CombatV1SubmissionOutcome`（`escape`/`giveUp`の2値enum）: SUBMISSIONの自動解決結果を、PINの
+`CombatV1PinCountResult`と同じ思想で閉じた型として表現する。
+
+### 15.4 `CombatV1RulesConfig`への追加
+
+`submissionHpThreshold`（既定50）・`submissionEscapeKocCost`（既定1）を追加した
+（`combat_rules_v1.md` 10.1章）。
+
+### 15.5 `CombatV1Engine`内部の変更
+
+新規公開Command APIは追加していない（SUBMISSIONは自動トリガーのみのため、`declareSubmission`の
+ような独立APIは存在しない）。`_resolvePendingAttack`（decline経路専用、Phase
+4で導入・Phase 5でDIRECT PIN自動遷移を追加）へ以下を追加した:
+
+- **Command atomicity（0.のprecondition）**: `pending.submissionHold`かつDMG適用後の相手HPが
+  閾値以下になることが事前に判明している場合、`submissionStateConsistencyViolation`
+  （`combat_v1_state_invariants.dart`、新規。防御側`koc>=0`を検証する軽量チェック。Phase
+  5の`pinStateConsistencyViolation`と同じ位置付け）をTechnique成功のいかなるstate
+  commitより前に検証する。不正なら`CombatV1IllegalActionException`を送出し、[state]を一切
+  変更しない（DIRECT PINと同じ「Technique成功だけ残してSUBMISSIONだけ拒否する設計にはしない」
+  方針、14.11章「H1」参照）。
+- **自動遷移（9.の直後）**: `pending.directPin`かつ相手DOWNのケースをDIRECT PINが処理した後、
+  `else if`として`pending.submissionHold`かつ解決後の相手HPが閾値以下なら`_resolveSubmission`
+  （新規private関数、`_resolvePin`と同じ構造）を呼び出す。`directPin`/`submissionHold`は
+  Catalog validationで排他のため通常はどちらか一方のみtrueになるが、Catalog
+  validationを経由しない直接構築されたテストデータ等に対しても構造的にDIRECT PINが優先されるよう
+  `else if`で防御的に実装した。`state.lastSuccessfulTechnique`（match-level・stale化しうる）は
+  一切参照せず、今まさに解決した`pending`を直接使うことで、古い成功記録によるSUBMISSIONの再発火を
+  構造的に防ぐ（DIRECT PINと同じstale対策方針）。
+
+`_resolveSubmission`は防御側の`koc`から`determineSubmissionOutcome`で結果を一括決定し、
+`escape`ならKOCを`submissionEscapeKocCost`だけ減らしたうえで`endTurn`と同じ内部処理
+（`_startTurn`）でESCAPEした側の新しいターンへ進める。`giveUp`なら`winnerPlayerIndex`を攻撃側へ
+設定して即座に返す（PINカードは一切操作しない）。
+
+### 15.6 Catalog validationの追加
+
+`combat_v1_catalog_validation.dart`へ`techniqueDirectPinSubmissionHoldConflict`
+（新規エラーコード）を追加した。`category != finisher`の技で`directPin`と`submissionHold`が
+同時にtrueの場合にエラーとする（`category == finisher`の技はこの2フィールドを参照しないため
+対象外、2.4章の優先順位ルールと整合。`combat_rules_v1.md` 23.6章）。
+
+### 15.7 `combat_v1_test_fixtures.dart`の拡張
+
+`fx_normal_submission_hold`（NORMAL技、`submissionHold: true`、damage=110で相手HPを一撃で
+閾値以下まで落とせる）・`fx_counter_submission`（SUBMISSION groupを返せるCOUNTER）を追加した
+（いずれも`fixtureDeckSpec`には含めない——既存30枚デッキ構成テストへ影響を与えないため、Phase
+5の`fx_normal_direct_pin`と同じ方針）。

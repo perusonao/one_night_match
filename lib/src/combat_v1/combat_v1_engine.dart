@@ -24,6 +24,7 @@ import 'combat_v1_pending_attack.dart';
 import 'combat_v1_pin_rules.dart';
 import 'combat_v1_rules_config.dart';
 import 'combat_v1_state_invariants.dart';
+import 'combat_v1_submission_rules.dart';
 import 'combat_v1_successful_technique_snapshot.dart';
 import 'combat_v1_technique.dart';
 import 'combat_v1_wrestler.dart';
@@ -753,18 +754,24 @@ class CombatV1Engine {
   ///    自動的にPINへ移行する」）。古い`lastSuccessfulTechnique`
   ///    snapshotを後から参照するのではなく、今まさに解決した[pending]を
   ///    直接使うことで、stale snapshotの再発火を構造的に防ぐ
-  ///    （docs/combat_rules_v1.md 8章のstale対策方針）。
+  ///    （docs/combat_rules_v1.md 8章のstale対策方針）。そうでなく
+  ///    submissionHold技で解決後の相手HPが閾値以下（10.1章）なら、同じ
+  ///    思想で同一遷移内でSUBMISSIONへ自動移行する（Phase 6、[pending]の
+  ///    directPin/submissionHoldは排他のためelse-ifで判定する
+  ///    ——`combat_v1_catalog_validation.dart`参照）。
   ///
-  /// 0. （上記1に先立って）DIRECT PINへ移行することが事前に判明している
-  ///    場合、Phase 5 PIN state invariant（[pinStateConsistencyViolation]）
+  /// 0. （上記1に先立って）DIRECT PIN/SUBMISSIONへ移行することが事前に
+  ///    判明している場合、Phase 5/6のstate invariant
+  ///    （[pinStateConsistencyViolation]/[submissionStateConsistencyViolation]）
   ///    をTechnique成功のいかなるstate commitより前に検証する（Phase 5
-  ///    Codexレビュー指摘H1、DIRECT PIN Command atomicity）。`koc`/
-  ///    `pinCardsHeld`はTechnique解決自体では変化しないため、[state]
-  ///    （解決前の元state）の値で判定して問題ない。不正なら
+  ///    Codexレビュー指摘H1と同じ思想、DIRECT PIN/SUBMISSION Command
+  ///    atomicity）。`koc`/`pinCardsHeld`はTechnique解決自体では変化しない
+  ///    ため、[state]（解決前の元state）の値で判定して問題ない。不正なら
   ///    [CombatV1IllegalActionException]を送出し、[state]を一切変更しない
   ///    （DMG・HEAT・posture・discard・attacker
   ///    draw・`lastSuccessfulTechnique`のいずれもcommitされない——
-  ///    「Technique成功だけ残してPINだけ拒否する」設計にはしない）。
+  ///    「Technique成功だけ残してPIN/SUBMISSIONだけ拒否する」設計には
+  ///    しない）。
   static CombatV1MatchState _resolvePendingAttack(
     CombatV1MatchState state,
     CombatV1PendingAttack pending, {
@@ -789,6 +796,26 @@ class CombatV1Engine {
         if (violation != null) {
           throw CombatV1IllegalActionException(
             'DIRECT PINへ移行できません（Technique成功処理ごと拒否）: $violation',
+          );
+        }
+      }
+    }
+
+    if (pending.submissionHold) {
+      final wouldBeOpponentHp = max(
+        0,
+        min(state.opponent.hp - pending.damage, state.opponent.maxHp),
+      );
+      if (submissionEligible(opponentHp: wouldBeOpponentHp, rules: rules)) {
+        final defender = pending.defenderPlayerIndex == 0
+            ? state.playerA
+            : state.playerB;
+        final violation = submissionStateConsistencyViolation(
+          defender: defender,
+        );
+        if (violation != null) {
+          throw CombatV1IllegalActionException(
+            'SUBMISSIONへ移行できません（Technique成功処理ごと拒否）: $violation',
           );
         }
       }
@@ -866,6 +893,20 @@ class CombatV1Engine {
         rules: rules,
         random: random,
         source: CombatV1PinSource.directPin,
+      );
+    } else if (pending.submissionHold &&
+        submissionEligible(opponentHp: next.opponent.hp, rules: rules)) {
+      // 通常SUBMISSION自動移行（同一遷移内、docs/combat_rules_v1.md
+      // 10.1章「相手HP50以下で宣言可能」、Phase 6）。DIRECT PINと同じ
+      // 思想——`state.lastSuccessfulTechnique`（match-level・stale化
+      // しうる）は一切参照せず、今まさに解決した[pending]を直接使うことで
+      // 古い成功記録によるSUBMISSIONの再発火を構造的に防ぐ。
+      next = _resolveSubmission(
+        next,
+        attackerIndex: pending.attackerPlayerIndex,
+        defenderIndex: pending.defenderPlayerIndex,
+        rules: rules,
+        random: random,
       );
     }
 
@@ -1059,6 +1100,83 @@ class CombatV1Engine {
   ) => index == 0
       ? state.copyWith(playerA: update(state.playerA))
       : state.copyWith(playerB: update(state.playerB));
+
+  /// SUBMISSIONを解決する（submissionHold Technique自動移行専用、Phase 6、
+  /// docs/combat_rules_v1.md 10.1章「通常SUBMISSION」）。
+  ///
+  /// 防御側の[CombatV1PlayerState.koc]から、ESCAPE可否を一括で自動決定する
+  /// （[determineSubmissionOutcome]。PINのKICK OUT自動判定と同じ思想——
+  /// 防御側が必要なKOCを保有していれば必ずESCAPEし、あえて支払わない選択肢は
+  /// 存在しない）。
+  ///
+  /// - ESCAPE: 防御側のKOCを[CombatV1RulesConfig.submissionEscapeKocCost]
+  ///   だけ減らす。その後は攻撃側のターンを終了し、`endTurn`と同じ内部処理
+  ///   でESCAPEした側（防御側）の新しいターンへ進める（PIN 1/2カウントと
+  ///   同じ扱い。Phase 6セッションでユーザーが確定した方針）。
+  /// - GIVE UP: KOCを支払えず、攻撃側の勝利で試合が終了する
+  ///   （[CombatV1MatchState.winnerPlayerIndex]を攻撃側に設定）。
+  ///
+  /// PINと異なりPINカードは一切操作しない（docs/combat_rules_v1.md
+  /// 10章「SUBMISSIONはPINカードを使用しない」）。支払い可能性を先に判定
+  /// してから状態を変更するため、負のKOCをCommandで生成しない
+  /// （docs/combat_rules_v1.md 9章）。
+  static CombatV1MatchState _resolveSubmission(
+    CombatV1MatchState state, {
+    required int attackerIndex,
+    required int defenderIndex,
+    required CombatV1RulesConfig rules,
+    required Random random,
+  }) {
+    final attackerName =
+        (attackerIndex == 0 ? state.playerA : state.playerB).wrestlerName;
+    final defenderBefore = defenderIndex == 0 ? state.playerA : state.playerB;
+    final defenderName = defenderBefore.wrestlerName;
+
+    var next = state.copyWith(
+      log: [...state.log, '$attackerNameが$defenderNameへSUBMISSIONを仕掛けた'],
+    );
+
+    final outcome = determineSubmissionOutcome(
+      defenderKoc: defenderBefore.koc,
+      rules: rules,
+    );
+
+    if (outcome == CombatV1SubmissionOutcome.giveUp) {
+      // 必要なKOCを支払えない → GIVE UP、SUBMISSION決着
+      // （docs/combat_rules_v1.md 10.1章）。
+      return next.copyWith(
+        winnerPlayerIndex: attackerIndex,
+        log: [
+          ...next.log,
+          '$defenderNameはKOC不足でESCAPEできず、'
+              '$attackerNameのSUBMISSION勝利（GIVE UP）で試合が終了した',
+        ],
+      );
+    }
+
+    final kocCost = rules.submissionEscapeKocCost;
+    next = _updatePlayerAt(
+      next,
+      defenderIndex,
+      (p) => p.copyWith(koc: p.koc - kocCost),
+    );
+    next = next.copyWith(
+      log: [
+        ...next.log,
+        '$defenderNameがKOC$kocCostを支払いSUBMISSIONからESCAPEした',
+      ],
+    );
+
+    // ESCAPE成功後は攻撃側のターンを終了し、ESCAPEした側（防御側）の
+    // 新しいターンへ進める（PIN 1/2カウントと同じ扱い、Phase 6セッションで
+    // ユーザーが確定した方針）。
+    final flipped = next.copyWith(
+      activePlayerIndex: defenderIndex,
+      turnNumber: next.turnNumber + 1,
+      log: [...next.log, 'ターン終了'],
+    );
+    return _startTurn(flipped, random);
+  }
 
   // ---- 読み取り専用の判定API ----
   // 例外を出さず、legal/reason/reasonCodeの組で結果を返す

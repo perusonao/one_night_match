@@ -41,6 +41,13 @@ enum CombatV1CatalogValidationErrorCode {
   /// [CombatV1Technique.heatGain]が負数。
   techniqueNegativeHeatGain,
 
+  /// [CombatV1Technique.directPin]と[CombatV1Technique.submissionHold]が
+  /// 同時にtrue（docs/combat_rules_v1.md 10章「通常SUBMISSIONとSUBMISSION
+  /// FINISHERは別ルールとして扱う」、Phase 6でユーザーが確定した排他方針。
+  /// category==finisherの技はこの2フィールドを参照しないため対象外、
+  /// docs/design/combat_v1_phase1_design.md 2.4章）。
+  techniqueDirectPinSubmissionHoldConflict,
+
   /// [CombatV1Counter.attribute]がwild（docs/combat_rules_v1.md「5.2章
   /// COUNTERでの＊(ワイルド)ENERGYの扱い」とは別概念。COUNTERの支払い属性
   /// そのものにwildは指定できない）。
@@ -165,6 +172,24 @@ CombatV1CatalogValidationResult validateCatalog(CombatV1CardCatalog catalog) {
           code: CombatV1CatalogValidationErrorCode.techniqueNegativeHeatGain,
           cardId: key,
           message: '$keyのheatGainが負数です',
+        ),
+      );
+    }
+
+    // directPin/submissionHoldはcategory!=finisherの技にのみ意味を持つ
+    // （docs/design/combat_v1_phase1_design.md 2.4章）。category==finisherの
+    // 技はfinisherTypeが決着方式を決定し、この2フィールドは参照されないため
+    // 対象外とする。
+    if (technique.category != CombatV1CardCategory.finisher &&
+        technique.directPin &&
+        technique.submissionHold) {
+      errors.add(
+        CombatV1CatalogValidationError(
+          code: CombatV1CatalogValidationErrorCode
+              .techniqueDirectPinSubmissionHoldConflict,
+          cardId: key,
+          message: '$keyはdirectPinとsubmissionHoldが同時にtrueです'
+              '（排他、docs/combat_rules_v1.md 10章）',
         ),
       );
     }

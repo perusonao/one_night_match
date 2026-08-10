@@ -318,13 +318,40 @@ SUBMISSIONはPINカードを使用しない。**通常SUBMISSIONとSUBMISSION FI
 - ESCAPE: KOC1を消費。**HP0でもKOCがあればESCAPE可能**。
 - KOCを支払えなければGIVE UP。
 
+Phase 6で以下を正式実装した（技術設計の詳細は
+[`combat_v1_phase1_design.md`](design/combat_v1_phase1_design.md)「Phase 6での更新」節参照）。
+
+- **突入方法（Phase 6で確定）**: 自動トリガーのみ。`submissionHold=true`のTECHNIQUEがCOUNTERされずに
+  成立し、解決後の相手HPが閾値（既定50、`CombatV1RulesConfig.submissionHpThreshold`）以下になった場合に
+  限り、DIRECT PIN（8章）と同じ仕組みでTECHNIQUE成功解決と同一Command（`declineCounter`）内で
+  自動的にSUBMISSIONへ移行する。`declarePin`のような攻撃側が任意に宣言する独立APIは追加しない
+  （相手HPが閾値以下というだけでは宣言できず、必ずsubmissionHold技の成功が引き金になる）。
+- **ESCAPE/GIVE UP判定（Phase 6で確定）**: 完全自動。防御側が必要なKOC
+  （既定1、`CombatV1RulesConfig.submissionEscapeKocCost`）を保有していれば必ずESCAPEする
+  （PINのKICK OUT自動判定、8.2章と同じ思想。「保有していてもあえて支払わない」という選択肢は存在しない）。
+  KOCを支払えなければGIVE UPで試合が終了する（`winnerPlayerIndex`を攻撃側に設定）。防御側に実質的な
+  選択肢が無いため、PINの`pinResponsePending`と同様、SUBMISSION専用の入力待ちフェーズ
+  （`CombatV1MatchPhase`の新規値）や`CombatV1PendingSubmission`のようなpublic Domain
+  modelは追加していない。
+- **ESCAPE成功後の展開（Phase 6で確定）**: 攻撃側のターンを終了し、防御側（ESCAPEした側）へ主導権を移す
+  （`endTurn`と同じ内部処理、PIN 1／2カウントと同じ扱い、8.3章）。
+- **directPin/submissionHoldの排他（Phase 6で確定）**: 同一TECHNIQUEに`directPin=true`と
+  `submissionHold=true`を同時に設定することは、Catalog validation（23.6章）で禁止する
+  （`techniqueDirectPinSubmissionHoldConflict`）。`category==finisher`の技は`directPin`/
+  `submissionHold`をそもそも参照しないため対象外（13章、2.4章）。
+- **stale snapshot対策**: DIRECT PINと同じ思想で、`state.lastSuccessfulTechnique`
+  （match-level・ターンを跨いで残る）は一切参照せず、TECHNIQUE成功解決の中で今まさに解決した
+  pending攻撃を直接使って判定する。これにより、古い成功記録によるSUBMISSIONの再発火は構造的に発生しない。
+- **PINカードは操作しない**: 本章冒頭のとおりSUBMISSIONはPINカードを使用しない。ESCAPE/GIVE UPの
+  いずれも`pinCardsHeld`を変化させない。
+
 ### 10.2 SUBMISSION FINISHER
 
 - 例: 白銀スペシャル
 - HP1〜50: KOC1でESCAPE可能。
 - **HP0: 即GIVE UP**（HP0による特殊決着の唯一の例外パターン。14章参照）。
 
-Phase 1ではSUBMISSIONのロジックは実装しない。
+Phase 6ではSUBMISSION FINISHERのロジックは実装しない（Phase 9でFINISHER全体とあわせて実装する、13章）。
 
 ---
 
@@ -595,6 +622,8 @@ Catalog validationエラーとする:
 - ENERGY COSTの合計（`total`）が0以下（zero-cost技禁止、7.2章）
 - attributeがwild
 - damage／heatGainが負数
+- `directPin`と`submissionHold`が同時にtrue（`category != finisher`の技のみ対象、Phase
+  6で確定。10.1章参照。`category == finisher`の技はこの2フィールドを参照しないため対象外）
 
 **Counter側**:
 - counterableFamiliesとcounterableGroupsの両方空
@@ -745,3 +774,18 @@ Playtest Analytics、Simulatorの設計、Report、Diagnosticsなど、Ver.1へ�
     決着で試合が終了する経路を確定した（技術設計は`combat_v1_phase1_design.md`参照）。
   - DIRECT PINはTECHNIQUE成功解決と同一Command内で遷移し、古い`lastSuccessfulTechnique`を
     後から参照して再発火させない設計方針を確定した（8章）。
+
+- **Phase 6（SUBMISSION）**: 以下を新規確定した（一次資料・`combat_rules_v1.md`本文には記載が
+  なかったため、Phase 6実装セッション内でユーザーへ確認したうえで正式仕様として採用した）。
+  - 通常SUBMISSIONへの突入方法: 自動トリガーのみ。`submissionHold=true`のTECHNIQUEがCOUNTERされず
+    成立し、解決後の相手HPが閾値（既定50）以下ならDIRECT PINと同じ仕組みで同一Command内で自動的に
+    SUBMISSIONへ移行する。攻撃側が任意に宣言する独立API（`declarePin`に相当するもの）は追加しない
+    （10.1章）。
+  - ESCAPE/GIVE UP判定方式: 完全自動。防御側KOC>=1（既定コスト1）なら自動的にKOCを支払いESCAPE
+    成功、KOC==0なら自動的にGIVE UPで試合終了する。PINのKICK OUT自動判定と同じ思想で、防御側の任意
+    選択は存在しないため、`CombatV1PendingSubmission`のような入力待ちDomain
+    modelおよび専用`CombatV1MatchPhase`は追加していない（10.1章）。
+  - ESCAPE成功後の展開: 攻撃側のターンを終了し、ESCAPEした側（防御側）の新しいターンへ進める
+    （PIN 1／2カウントと同じ扱い、10.1章）。
+  - `directPin`と`submissionHold`の排他: 同一TECHNIQUEに両方trueを設定することをCatalog
+    validationで禁止する（`category==finisher`の技は対象外、10.1章・23.6章）。

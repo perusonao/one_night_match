@@ -163,6 +163,24 @@ const Map<String, CombatV1Technique> fixtureTechniques = {
     directPin: true,
     family: CombatV1TechniqueFamily.backdrop,
   ),
+  /// Phase 6専用: submissionHoldを持つNORMAL技（docs/combat_rules_v1.md
+  /// 10.1章「通常SUBMISSION」）。相手HPを150→40（閾値50以下）まで一撃で
+  /// 落とせるだけのdamageを持たせ、SUBMISSION自動移行のテストで
+  /// 「このTECHNIQUEの成功だけでHP条件を満たす」ケースを再現しやすくする
+  /// （[fixtureDeckSpec]には含めない——通常の30枚デッキ構成テストへ影響を
+  /// 与えないため、declareTechnique/submission系のテストでカタログへ直接
+  /// この技を渡す用途専用）。
+  'fx_normal_submission_hold': CombatV1Technique(
+    id: 'fx_normal_submission_hold',
+    name: 'テストSUBMISSIONホールド技',
+    category: CombatV1CardCategory.normal,
+    attribute: CombatV1EnergyAttribute.joint,
+    energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.joint: 1}),
+    damage: 110,
+    heatGain: 20,
+    submissionHold: true,
+    family: CombatV1TechniqueFamily.crossface,
+  ),
   'fx_signature_a': CombatV1Technique(
     id: 'fx_signature_a',
     name: 'テスト固有技A',
@@ -239,6 +257,16 @@ final Map<String, CombatV1Counter> fixtureCounters = {
     name: 'テストカウンターC',
     attribute: CombatV1EnergyAttribute.aerial,
     counterableFamilies: [CombatV1TechniqueFamily.dropKick],
+  ),
+
+  /// Phase 6専用: SUBMISSION groupを返せる（関属性で支払う）。
+  /// `fx_normal_submission_hold`（family=crossface、SUBMISSION group）の
+  /// COUNTER regressionテスト用（[fixtureDeckSpec]には含めない）。
+  'fx_counter_submission': CombatV1Counter(
+    id: 'fx_counter_submission',
+    name: 'テストカウンターSUBMISSION',
+    attribute: CombatV1EnergyAttribute.joint,
+    counterableGroups: [CombatV1TechniqueFamilyGroup.submission],
   ),
 };
 

@@ -27,6 +27,8 @@ class CombatV1RulesConfig {
     this.pinCountOneKocCost = 3,
     this.pinCountTwoKocCost = 2,
     this.pinCountTwoPointNineKocCost = 1,
+    this.submissionHpThreshold = 50,
+    this.submissionEscapeKocCost = 1,
   });
 
   /// 全レスラー共通の初期HP（docs/combat_rules_v1.md 2・14章）。
@@ -81,6 +83,16 @@ class CombatV1RulesConfig {
   /// 2.9カウントでPINが終了した際に防御側が支払うKOC
   /// （docs/combat_rules_v1.md 8.2章）。
   final int pinCountTwoPointNineKocCost;
+
+  /// 通常SUBMISSIONへ移行できる相手HPの上限（docs/combat_rules_v1.md
+  /// 10.1章「相手HP50以下で宣言可能」、Phase 6）。submissionHold=trueの
+  /// TECHNIQUEがCOUNTERされず成立し、解決後の相手HPがこの値以下になった
+  /// 場合にのみSUBMISSIONへ自動移行する。
+  final int submissionHpThreshold;
+
+  /// ESCAPEに必要なKOC（docs/combat_rules_v1.md 10.1章「ESCAPE: KOC1を
+  /// 消費」、Phase 6）。防御側がこのKOCを支払えなければGIVE UPとなる。
+  final int submissionEscapeKocCost;
 
   /// [category]の同名カード上限（docs/combat_rules_v1.md 3章）。
   /// Deck validation（[../combat_v1_deck_validation.dart]）が参照する
