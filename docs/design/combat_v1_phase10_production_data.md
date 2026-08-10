@@ -95,6 +95,14 @@ Family割当はSSOT本文に明記がなかったため、Phase
 | 11 | 豪田ボム | `misaki_goda_bomb` | FINISHER | throwing | POWERBOMB | 投3 | 30 | 40 | STAND→DOWN | finisherType=directPin |
 | 12 | 豪田ドライバー | `misaki_goda_driver` | FINISHER | throwing | DRIVER | 投4 | 40 | 50 | STAND→DOWN | finisherType=normal |
 
+上表「状態」列の左側（例: `STAND→DOWN`の`STAND`）は`requiredOpponentState`を表す。
+`CombatV1Technique.requiredOpponentState`は`null`の場合「STAND/DOWNどちらでも使用可能」を
+意味するため（`combat_v1_technique.dart`）、STAND始動の11技（#1〜7・9〜12）には明示的に
+`requiredOpponentState: CombatV1WrestlerPosture.stand`を設定する必要がある
+（Phase 10A Codexレビュー指摘、初回実装ではこの11技が`requiredOpponentState`未設定のまま
+公開されており、DOWN状態の相手へも使用できてしまう不整合があったため修正した）。
+required=DOWNの#8（ギロチンドロップ）のみ元から正しく実装されていた。
+
 ### 3.1 finisherType確定経緯
 
 - **豪田ボム**: `combat_rules_v1.md`19章の表が「特性」列に明示的に「DIRECT PIN」と記載しており、

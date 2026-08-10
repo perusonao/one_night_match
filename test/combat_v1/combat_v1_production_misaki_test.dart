@@ -11,17 +11,86 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_catalog_validation.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_counter_catalog.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_deck.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_decks.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_deck_validation.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_engine.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_match_state.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_production_catalog.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_technique_catalog.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_wrestler_catalog.dart';
 
+const CombatV1RulesConfig rules = CombatV1RulesConfig();
+
+/// Technique state legality検証専用の最小MatchStateを組み立てる
+/// （`test/combat_v1/combat_v1_technique_legality_test.dart`の`_buildState`と
+/// 同じ方針だが、fixtureWrestlerではなく実際の[misakiWrestler]（Production
+/// ENERGY Pool）をplayerA/playerB双方に使う。Production
+/// Technique自身のENERGY COSTが、ミサキの実際の保有量で無理なく支払えることも
+/// 合わせて検証できるようにするため）。
+CombatV1MatchState _buildMisakiLegalityState({
+  required CombatV1WrestlerPosture opponentPosture,
+  required List<CombatV1DeckEntry> handA,
+  int sharedHeat = 0,
+}) {
+  final playerA = CombatV1PlayerState(
+    wrestlerId: misakiWrestler.id,
+    wrestlerName: misakiWrestler.name,
+    maxHp: rules.startingHp,
+    hp: rules.startingHp,
+    koc: rules.startingKoc,
+    pinCardsHeld: rules.startingPinCards,
+    posture: CombatV1WrestlerPosture.stand,
+    energyPool: misakiWrestler.energyPool,
+    hand: handA,
+  );
+  final playerB = CombatV1PlayerState(
+    wrestlerId: misakiWrestler.id,
+    wrestlerName: misakiWrestler.name,
+    maxHp: rules.startingHp,
+    hp: rules.startingHp,
+    koc: rules.startingKoc,
+    pinCardsHeld: rules.startingPinCards,
+    posture: opponentPosture,
+    energyPool: misakiWrestler.energyPool,
+  );
+  return CombatV1MatchState(
+    matchId: 'phase10a-legality-test',
+    playerA: playerA,
+    playerB: playerB,
+    activePlayerIndex: 0,
+    sharedHeat: sharedHeat,
+    turnNumber: 1,
+    phase: CombatV1MatchPhase.action,
+  );
+}
+
+/// [cardId]を唯一のinstanceId `'a1'`としてplayerAの手札へ入れたlegality
+/// チェック結果を返す。
+CombatV1ActionCheck _checkLegality(
+  String cardId, {
+  required CombatV1WrestlerPosture opponentPosture,
+  int sharedHeat = 0,
+}) {
+  final category = misakiTechniques[cardId]!.category;
+  final state = _buildMisakiLegalityState(
+    opponentPosture: opponentPosture,
+    sharedHeat: sharedHeat,
+    handA: [
+      CombatV1DeckEntry(instanceId: 'a1', cardId: cardId, category: category),
+    ],
+  );
+  return CombatV1Engine.checkTechniqueLegality(
+    state,
+    'a1',
+    catalog: productionCardCatalog,
+    rules: rules,
+  );
+}
+
 void main() {
-  const rules = CombatV1RulesConfig();
 
   group('A/B. ミサキTechnique 12定義', () {
     test('12技すべてがcatalogに存在する', () {
@@ -67,7 +136,7 @@ void main() {
       expect(t.energyCost.total, 1);
       expect(t.damage, 10);
       expect(t.heatGain, 10);
-      expect(t.requiredOpponentState, isNull);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, isNull);
     });
 
@@ -76,6 +145,7 @@ void main() {
       expect(t.energyCost.amountFor(CombatV1EnergyAttribute.strike), 1);
       expect(t.damage, 10);
       expect(t.heatGain, 20);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, CombatV1WrestlerPosture.down);
     });
 
@@ -85,6 +155,7 @@ void main() {
       expect(t.energyCost.amountFor(CombatV1EnergyAttribute.throwing), 1);
       expect(t.damage, 10);
       expect(t.heatGain, 10);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, isNull);
     });
 
@@ -93,6 +164,7 @@ void main() {
       expect(t.energyCost.amountFor(CombatV1EnergyAttribute.throwing), 2);
       expect(t.damage, 20);
       expect(t.heatGain, 20);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, CombatV1WrestlerPosture.down);
     });
 
@@ -101,6 +173,7 @@ void main() {
       expect(t.energyCost.amountFor(CombatV1EnergyAttribute.throwing), 2);
       expect(t.damage, 20);
       expect(t.heatGain, 20);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, CombatV1WrestlerPosture.down);
     });
 
@@ -109,6 +182,7 @@ void main() {
       expect(t.energyCost.amountFor(CombatV1EnergyAttribute.throwing), 3);
       expect(t.damage, 30);
       expect(t.heatGain, 30);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, CombatV1WrestlerPosture.down);
     });
 
@@ -117,6 +191,7 @@ void main() {
       expect(t.energyCost.amountFor(CombatV1EnergyAttribute.strike), 2);
       expect(t.damage, 20);
       expect(t.heatGain, 20);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, CombatV1WrestlerPosture.down);
     });
 
@@ -135,6 +210,7 @@ void main() {
       expect(t.energyCost.amountFor(CombatV1EnergyAttribute.throwing), 3);
       expect(t.damage, 30);
       expect(t.heatGain, 40);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, CombatV1WrestlerPosture.down);
     });
 
@@ -144,6 +220,7 @@ void main() {
       expect(t.energyCost.amountFor(CombatV1EnergyAttribute.strike), 2);
       expect(t.damage, 20);
       expect(t.heatGain, 30);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, CombatV1WrestlerPosture.down);
     });
 
@@ -153,6 +230,7 @@ void main() {
       expect(t.energyCost.amountFor(CombatV1EnergyAttribute.throwing), 3);
       expect(t.damage, 30);
       expect(t.heatGain, 40);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, CombatV1WrestlerPosture.down);
     });
 
@@ -162,7 +240,47 @@ void main() {
       expect(t.energyCost.amountFor(CombatV1EnergyAttribute.throwing), 4);
       expect(t.damage, 40);
       expect(t.heatGain, 50);
+      expect(t.requiredOpponentState, CombatV1WrestlerPosture.stand);
       expect(t.resultOpponentState, CombatV1WrestlerPosture.down);
+    });
+
+    test('STAND始動11技すべてがrequiredOpponentState==standを持つ（regression防止）', () {
+      const standRequiredIds = [
+        'misaki_reverse_chop',
+        'misaki_shoulder_tackle',
+        'misaki_body_slam',
+        'misaki_brainbuster',
+        'misaki_backdrop',
+        'misaki_power_slam',
+        'misaki_lariat',
+        'misaki_mighty_backdrop',
+        'misaki_strong_arm_lariat',
+        'misaki_goda_bomb',
+        'misaki_goda_driver',
+      ];
+      expect(standRequiredIds.length, 11);
+      for (final id in standRequiredIds) {
+        expect(
+          misakiTechniques[id]!.requiredOpponentState,
+          CombatV1WrestlerPosture.stand,
+          reason: '$idはrequiredOpponentState==standである必要があります',
+        );
+      }
+      // ギロチンドロップのみDOWN始動（8技目、19章）。
+      expect(
+        misakiTechniques['misaki_guillotine_drop']!.requiredOpponentState,
+        CombatV1WrestlerPosture.down,
+      );
+      // 12技すべてがrequiredOpponentStateを明示的に持つ
+      // （nullは「STAND/DOWNどちらでも可」を意味するため、未設定のまま
+      // 残っている技が無いことを保証する）。
+      for (final t in misakiTechniques.values) {
+        expect(
+          t.requiredOpponentState,
+          isNotNull,
+          reason: '${t.id}はrequiredOpponentStateが未設定です',
+        );
+      }
     });
   });
 
@@ -193,6 +311,154 @@ void main() {
         expect(t.hasConsistentFinisherType, isTrue, reason: t.id);
       }
     });
+  });
+
+  group('R. Technique state legality（Codexレビュー指摘の再発防止）', () {
+    test('A. 逆水平チョップ: opponent DOWN → illegal（opponentStateMismatch）', () {
+      final check = _checkLegality(
+        'misaki_reverse_chop',
+        opponentPosture: CombatV1WrestlerPosture.down,
+      );
+      expect(check.legal, isFalse);
+      expect(
+        check.reasonCode,
+        CombatV1TechniqueLegalityReasonCode.opponentStateMismatch,
+      );
+    });
+
+    test('B. ショルダータックル: opponent DOWN → illegal（opponentStateMismatch）', () {
+      final check = _checkLegality(
+        'misaki_shoulder_tackle',
+        opponentPosture: CombatV1WrestlerPosture.down,
+      );
+      expect(check.legal, isFalse);
+      expect(
+        check.reasonCode,
+        CombatV1TechniqueLegalityReasonCode.opponentStateMismatch,
+      );
+    });
+
+    test('C. ボディスラム（THROW/STAND始動）: opponent DOWN → illegal', () {
+      final check = _checkLegality(
+        'misaki_body_slam',
+        opponentPosture: CombatV1WrestlerPosture.down,
+      );
+      expect(check.legal, isFalse);
+      expect(
+        check.reasonCode,
+        CombatV1TechniqueLegalityReasonCode.opponentStateMismatch,
+      );
+    });
+
+    test('C. バックドロップ（THROW/STAND始動）: opponent DOWN → illegal', () {
+      final check = _checkLegality(
+        'misaki_backdrop',
+        opponentPosture: CombatV1WrestlerPosture.down,
+      );
+      expect(check.legal, isFalse);
+      expect(
+        check.reasonCode,
+        CombatV1TechniqueLegalityReasonCode.opponentStateMismatch,
+      );
+    });
+
+    test('D. 豪快バックドロップ（SIGNATURE）: opponent DOWN → illegal', () {
+      final check = _checkLegality(
+        'misaki_mighty_backdrop',
+        opponentPosture: CombatV1WrestlerPosture.down,
+      );
+      expect(check.legal, isFalse);
+      expect(
+        check.reasonCode,
+        CombatV1TechniqueLegalityReasonCode.opponentStateMismatch,
+      );
+    });
+
+    test('E. 豪田ボム（FINISHER）: HEAT解禁済みでもopponent DOWN → illegal', () {
+      // sharedHeat=finisherHeatThresholdでFINISHER解禁条件は満たしたうえで、
+      // state mismatchのみを検証する（HEAT不足によるfinisherHeatNotReachedと
+      // 混同しないため）。
+      final check = _checkLegality(
+        'misaki_goda_bomb',
+        opponentPosture: CombatV1WrestlerPosture.down,
+        sharedHeat: rules.finisherHeatThreshold,
+      );
+      expect(check.legal, isFalse);
+      expect(
+        check.reasonCode,
+        CombatV1TechniqueLegalityReasonCode.opponentStateMismatch,
+      );
+    });
+
+    test('E. 豪田ドライバー（FINISHER）: HEAT解禁済みでもopponent DOWN → illegal', () {
+      final check = _checkLegality(
+        'misaki_goda_driver',
+        opponentPosture: CombatV1WrestlerPosture.down,
+        sharedHeat: rules.finisherHeatThreshold,
+      );
+      expect(check.legal, isFalse);
+      expect(
+        check.reasonCode,
+        CombatV1TechniqueLegalityReasonCode.opponentStateMismatch,
+      );
+    });
+
+    test('F. ギロチンドロップ: opponent DOWN → state条件はlegal（ENERGY等も充足）', () {
+      final check = _checkLegality(
+        'misaki_guillotine_drop',
+        opponentPosture: CombatV1WrestlerPosture.down,
+      );
+      expect(check.legal, isTrue);
+      expect(check.reasonCode, CombatV1TechniqueLegalityReasonCode.legal);
+    });
+
+    test('G. ギロチンドロップ: opponent STAND → illegal（opponentStateMismatch）', () {
+      final check = _checkLegality(
+        'misaki_guillotine_drop',
+        opponentPosture: CombatV1WrestlerPosture.stand,
+      );
+      expect(check.legal, isFalse);
+      expect(
+        check.reasonCode,
+        CombatV1TechniqueLegalityReasonCode.opponentStateMismatch,
+      );
+    });
+
+    test(
+      'table-driven: STAND始動11技すべてがopponent DOWNでopponentStateMismatch'
+      '（requiredOpponentStateが誤ってnullへ戻るregressionを防止）',
+      () {
+        const standRequiredIds = [
+          'misaki_reverse_chop',
+          'misaki_shoulder_tackle',
+          'misaki_body_slam',
+          'misaki_brainbuster',
+          'misaki_backdrop',
+          'misaki_power_slam',
+          'misaki_lariat',
+          'misaki_mighty_backdrop',
+          'misaki_strong_arm_lariat',
+          'misaki_goda_bomb',
+          'misaki_goda_driver',
+        ];
+        expect(standRequiredIds.length, 11);
+        for (final id in standRequiredIds) {
+          final isFinisher =
+              misakiTechniques[id]!.category == CombatV1CardCategory.finisher;
+          final check = _checkLegality(
+            id,
+            opponentPosture: CombatV1WrestlerPosture.down,
+            sharedHeat: isFinisher ? rules.finisherHeatThreshold : 0,
+          );
+          expect(check.legal, isFalse, reason: id);
+          expect(
+            check.reasonCode,
+            CombatV1TechniqueLegalityReasonCode.opponentStateMismatch,
+            reason: id,
+          );
+        }
+      },
+    );
   });
 
   group('H. Counter 3定義', () {
