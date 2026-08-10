@@ -13,6 +13,7 @@ import 'package:one_night_match/src/combat_v1/combat_v1_action_observer.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_cpu_match_runner.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_decision_policy.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_deck.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_energy.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_engine.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
@@ -103,6 +104,72 @@ void main() {
       expect(result.actionCount, 0);
       expect(result.lastAction, isNull);
       expect(result.invariantViolationMessage, isNotNull);
+    });
+  });
+
+  group('B. player-level invariant違反もinvariantViolationとして検出する'
+      '（validateMatchStateInvariants単体では検出できないケース、'
+      'Codexレビュー指摘対応）', () {
+    final runner = CombatV1CpuMatchRunner(catalog: fixtureCatalog, rules: rules);
+
+    void expectInvariantViolationWithoutThrow(CombatV1MatchState malformed) {
+      late final CombatV1CpuMatchResult result;
+      expect(
+        () => result = runner.run(
+          malformed,
+          policyA: const CombatV1FirstLegalPolicy(),
+          policyB: const CombatV1FirstLegalPolicy(),
+        ),
+        returnsNormally,
+      );
+      expect(result.termination, CombatV1CpuMatchTermination.invariantViolation);
+      expect(result.actionCount, 0);
+      expect(result.invariantViolationMessage, isNotNull);
+    }
+
+    test('negative spentEnergy', () {
+      expectInvariantViolationWithoutThrow(
+        buildMatchState(spentA: const {CombatV1EnergyAttribute.strike: -1}),
+      );
+    });
+
+    test('spentEnergy > energyPool', () {
+      // fixtureWrestlerAのjoint pool量は1（combat_v1_test_fixtures.dart）。
+      expectInvariantViolationWithoutThrow(
+        buildMatchState(spentA: const {CombatV1EnergyAttribute.joint: 5}),
+      );
+    });
+
+    test('negative KOC', () {
+      expectInvariantViolationWithoutThrow(buildMatchState(kocB: -1));
+    });
+
+    test('invalid pinCardsHeld（match-level合計は規定通りだがplayer単体では'
+        '最低1枚を下回る）', () {
+      // 合計は4（rules.totalPinCards）のままなのでvalidateMatchStateInvariants
+      // 単体は検出できず、validatePlayerStateInvariants側で初めて検出される。
+      expectInvariantViolationWithoutThrow(
+        buildMatchState(pinCardsHeldA: 0, pinCardsHeldB: 4),
+      );
+    });
+
+    test('negative energy pool（CombatV1PlayerStateを直接構築）', () {
+      final base = buildMatchState();
+      final brokenPlayerA = CombatV1PlayerState(
+        wrestlerId: base.playerA.wrestlerId,
+        wrestlerName: base.playerA.wrestlerName,
+        maxHp: base.playerA.maxHp,
+        hp: base.playerA.hp,
+        koc: base.playerA.koc,
+        pinCardsHeld: base.playerA.pinCardsHeld,
+        energyPool: const CombatV1EnergyPool({
+          CombatV1EnergyAttribute.strike: -1,
+        }),
+        hand: base.playerA.hand,
+        drawPile: base.playerA.drawPile,
+        discardPile: base.playerA.discardPile,
+      );
+      expectInvariantViolationWithoutThrow(base.copyWith(playerA: brokenPlayerA));
     });
   });
 

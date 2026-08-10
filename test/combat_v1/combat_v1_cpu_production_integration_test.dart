@@ -13,6 +13,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_action_executor.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_cpu_match_runner.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_decision_policy.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_legal_action_enumerator.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_match_state.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_production_catalog.dart';
@@ -73,35 +75,98 @@ CombatV1MatchState _startMatch({
   random: random,
 );
 
+void _expectMatchAndPlayerInvariants(CombatV1MatchState state) {
+  final matchResult = validateMatchStateInvariants(state, rules: rules);
+  expect(matchResult.isValid, isTrue, reason: matchResult.errors.join(' / '));
+
+  final playerAResult = validatePlayerStateInvariants(state.playerA);
+  expect(playerAResult.isValid, isTrue, reason: playerAResult.errors.join(' / '));
+
+  final playerBResult = validatePlayerStateInvariants(state.playerB);
+  expect(playerBResult.isValid, isTrue, reason: playerBResult.errors.join(' / '));
+}
+
 void main() {
-  group('41. 4 Production Wrestler decision test', () {
+  group('41. 4 Production Wrestler decision test（discard→Technique実行まで）', () {
     for (final wrestlerId in productionWrestlerIds) {
-      test('$wrestlerId: enumerate → choose(FirstLegal) → executeが成功する', () {
-        final state = _startMatch(
+      test('$wrestlerId: Production Wrestler → Deck → Catalog → Enumerator → '
+          'Executor → EngineのTechnique経路が実際に接続される', () {
+        var state = _startMatch(
           wrestlerAId: wrestlerId,
           wrestlerBId: 'misaki',
           random: Random(1),
         );
+        expect(state.phase, CombatV1MatchPhase.discard);
 
-        final legalActions = CombatV1LegalActionEnumerator.enumerate(
+        // 1〜3. discard phaseで合法discardを取得して実行する。
+        final discardActions = CombatV1LegalActionEnumerator.enumerate(
           state,
           catalog: productionCardCatalog,
           rules: rules,
         );
-        expect(legalActions, isNotEmpty);
-
-        const policy = CombatV1FirstLegalPolicy();
-        final chosen = policy.choose(state, legalActions);
-
+        expect(discardActions, isNotEmpty);
+        final discardAction = discardActions.first as CombatV1DiscardAction;
+        // 7. physical instanceIdを確認（cardIdではなく物理instanceIdである
+        // こと）。
         expect(
-          () => CombatV1ActionExecutor.execute(
+          state.playerA.hand.any((e) => e.instanceId == discardAction.cardInstanceId),
+          isTrue,
+        );
+
+        state = CombatV1ActionExecutor.execute(
+          state,
+          discardAction,
+          catalog: productionCardCatalog,
+          rules: rules,
+        );
+
+        // 4. action phaseへ到達する。
+        expect(state.phase, CombatV1MatchPhase.action);
+
+        // 5〜6. LegalActionEnumeratorで合法手を取得し、少なくとも1つ
+        // 合法Techniqueが存在することを確認する。
+        final actionPhaseActions = CombatV1LegalActionEnumerator.enumerate(
+          state,
+          catalog: productionCardCatalog,
+          rules: rules,
+        );
+        final techniqueActions =
+            actionPhaseActions.whereType<CombatV1TechniqueAction>().toList()
+              ..sort((a, b) => a.cardInstanceId.compareTo(b.cardInstanceId));
+        expect(
+          techniqueActions,
+          isNotEmpty,
+          reason: '$wrestlerIdの初期手札にlegalなTechniqueが1枚も無い'
+              '（Production Deckの構成上、通常のstarting handでは発生しない想定）',
+        );
+        final techniqueAction = techniqueActions.first;
+        expect(
+          state.playerA.hand.any((e) => e.instanceId == techniqueAction.cardInstanceId),
+          isTrue,
+        );
+
+        // 8〜9. Technique actionをExecutorで実行し、Engineにillegalとして
+        // 拒否されないことを確認する。
+        expect(
+          () => state = CombatV1ActionExecutor.execute(
             state,
-            chosen,
+            techniqueAction,
             catalog: productionCardCatalog,
             rules: rules,
+            random: Random(2),
           ),
           returnsNormally,
         );
+
+        // 10. Technique宣言後の正しいphaseへ遷移する
+        // （counterResponsePending、docs/combat_rules_v1.md 7.1章）。
+        expect(state.phase, CombatV1MatchPhase.counterResponsePending);
+        expect(state.pendingAttack?.attackCardInstance.instanceId, techniqueAction.cardInstanceId);
+
+        // 11〜14. state/player invariant・card conservation・instanceId
+        // uniquenessを確認する。
+        _expectMatchAndPlayerInvariants(state);
+        _expectCardConservation(state);
       });
     }
   });

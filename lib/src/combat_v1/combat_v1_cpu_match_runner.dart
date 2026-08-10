@@ -32,7 +32,8 @@ enum CombatV1CpuMatchTermination {
   /// （到達した時点のstateをそのまま返すのみ）。
   safetyLimit,
 
-  /// state invariant違反（[validateMatchStateInvariants]失敗）、または
+  /// state invariant違反（[validateMatchStateInvariants]または
+  /// 両playerの[validatePlayerStateInvariants]のいずれかが失敗）、または
   /// 非terminal stateでlegal actionが0件など、programming/invariant上の
   /// 異常により停止した。
   invariantViolation,
@@ -165,9 +166,12 @@ class CombatV1CpuMatchRunner {
   /// addendum「Structured Action Observation」）。Phase 11B自身は
   /// observationを蓄積・分析しない。
   ///
-  /// `validateMatchStateInvariants`を(1)開始直後、(2)各Action Executor成功
-  /// 後、(3)result返却直前、の3箇所で実行する（性能より正しさを優先する
-  /// Phase 11Bの方針）。
+  /// [_validateRunnerInvariants]（[validateMatchStateInvariants] + 両
+  /// playerの[validatePlayerStateInvariants]の統合チェック）を(1)開始直後、
+  /// (2)各Action Executor成功後、(3)result返却直前、の3箇所で実行する
+  /// （性能より正しさを優先するPhase 11Bの方針。[validateMatchStateInvariants]
+  /// 単体は`spentEnergy`/`energyPool`/`koc`/`pinCardsHeld`等のplayer-level
+  /// invariantを検証しないため、これらもrunnerが確実に検出できるようにする）。
   CombatV1CpuMatchResult run(
     CombatV1MatchState initialState, {
     required CombatV1DecisionPolicy policyA,
@@ -177,15 +181,15 @@ class CombatV1CpuMatchRunner {
   }) {
     final rng = engineRandom ?? Random();
 
-    final startCheck = validateMatchStateInvariants(initialState, rules: rules);
-    if (!startCheck.isValid) {
+    final startViolation = _validateRunnerInvariants(initialState);
+    if (startViolation != null) {
       return _buildResult(
         state: initialState,
         actionCount: 0,
         termination: CombatV1CpuMatchTermination.invariantViolation,
         policyAId: policyA.id,
         policyBId: policyB.id,
-        violationMessage: startCheck.errors.join(' / '),
+        violationMessage: startViolation,
       );
     }
 
@@ -270,8 +274,8 @@ class CombatV1CpuMatchRunner {
         ),
       );
 
-      final postActionCheck = validateMatchStateInvariants(state, rules: rules);
-      if (!postActionCheck.isValid) {
+      final postActionViolation = _validateRunnerInvariants(state);
+      if (postActionViolation != null) {
         return _buildResult(
           state: state,
           actionCount: actionCount,
@@ -279,10 +283,38 @@ class CombatV1CpuMatchRunner {
           policyAId: policyA.id,
           policyBId: policyB.id,
           lastAction: lastAction,
-          violationMessage: postActionCheck.errors.join(' / '),
+          violationMessage: postActionViolation,
         );
       }
     }
+  }
+
+  /// [state]がPhase 11Bで求める統合invariantを満たしているかを検証する。
+  /// [validateMatchStateInvariants]（`CombatV1MatchState`全体の構造的
+  /// 整合性）に加え、[validatePlayerStateInvariants]を`state.playerA`/
+  /// `state.playerB`の両方へ適用する——`validateMatchStateInvariants`単体
+  /// では`spentEnergy`が`energyPool`を超えている・`spentEnergy`が負数・
+  /// `energyPool`自体が不正・`koc`が負数・`pinCardsHeld`が1未満、といった
+  /// player-level invariant違反を検出できないため（Codexレビュー指摘、
+  /// docs/design/combat_v1_phase11b_cpu.md参照）。
+  ///
+  /// 満たしていれば`null`、そうでなければ結合した人間可読メッセージ
+  /// （[CombatV1CpuMatchResult.invariantViolationMessage]）を返す。
+  /// Core Engine側のvalidator（`combat_v1_state_invariants.dart`）自体は
+  /// 変更しない——既存の2つのAPIをrunner側で組み合わせるだけの薄いhelper。
+  String? _validateRunnerInvariants(CombatV1MatchState state) {
+    final messages = <String>[
+      ...validateMatchStateInvariants(state, rules: rules).errors.map(
+        (e) => e.message,
+      ),
+      ...validatePlayerStateInvariants(state.playerA).errors.map(
+        (e) => e.message,
+      ),
+      ...validatePlayerStateInvariants(state.playerB).errors.map(
+        (e) => e.message,
+      ),
+    ];
+    return messages.isEmpty ? null : messages.join(' / ');
   }
 
   /// [action]の実行によって[stateBefore]（未決着）から[stateAfter]
@@ -296,6 +328,26 @@ class CombatV1CpuMatchRunner {
   /// 保持する宣言時点の`category`/`finisherType`/`directPin`/
   /// `submissionHold`（いずれも公開field）だけで分類できる。通常PINは
   /// [CombatV1PinAction]（`declarePin`）以外の経路では決着しない。
+  ///
+  /// `CombatV1Engine._resolvePendingAttack`のeffectiveDirectPin/
+  /// effectiveSubmissionHold導出（Codexレビューで確認済みの現行Engine仕様）
+  /// と完全に一致する、以下の網羅的なmappingに従う
+  /// （`combat_v1_cpu_terminal_cause_test.dart`で10パターンを直接検証）:
+  ///
+  /// - NORMAL/SIGNATURE（`category != finisher`）:
+  ///   - `directPin==false && submissionHold==false` → 自動決着なし（`null`）
+  ///   - `directPin==true && submissionHold==false` → [directPin]
+  ///   - `directPin==false && submissionHold==true` → [submission]
+  ///   - `directPin==true && submissionHold==true` → Catalog validation
+  ///     （`techniqueDirectPinSubmissionHoldConflict`）で拒否されるため
+  ///     到達しない
+  /// - FINISHER（`category == finisher`）: `directPin`/`submissionHold`
+  ///   フィールドは一切参照しない（`finisherType`のみが決着方式を決定する。
+  ///   docs/design/combat_v1_phase1_design.md 2.4章）
+  ///   - `finisherType == normal` → 自動決着なし（`null`）。技定義に
+  ///     `directPin`/`submissionHold`が誤って`true`設定されていても無視する
+  ///   - `finisherType == directPin` → [directPin]
+  ///   - `finisherType == submission` → [submissionFinisher]
   static CombatV1CpuMatchTerminalCause? _classifyTerminalCause({
     required CombatV1LegalAction? action,
     required CombatV1MatchState? stateBefore,
@@ -350,10 +402,10 @@ class CombatV1CpuMatchRunner {
     var cause = terminalCause;
 
     if (finalTermination != CombatV1CpuMatchTermination.invariantViolation) {
-      final finalCheck = validateMatchStateInvariants(state, rules: rules);
-      if (!finalCheck.isValid) {
+      final finalViolation = _validateRunnerInvariants(state);
+      if (finalViolation != null) {
         finalTermination = CombatV1CpuMatchTermination.invariantViolation;
-        message = finalCheck.errors.join(' / ');
+        message = finalViolation;
         cause = null;
       }
     }
