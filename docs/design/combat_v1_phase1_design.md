@@ -923,3 +923,129 @@ RESTのターン終了処理で発生する新しい手番プレイヤーの1ド
 1〜6で使われているものと同一の内部関数）を再利用しただけであり、REST/起き上がり専用の追加
 draw/discardは無い。`lastSuccessfulTechnique`もREST/起き上がりでは一切参照・変更しない
 （`combat_rules_v1.md` 21章の方針どおり、根拠のないclear処理は追加しなかった）。
+
+---
+
+## 17. Phase 8での更新（ROUGH）
+
+Phase 8（ROUGH特殊処理）で、本書のPhase 1〜7設計から以下を更新した。ゲームルール自体
+（`combat_rules_v1.md` 15章）の新規確定事項は同書15章・29章「変更履歴」を参照。ここでは実装内部の
+技術設計の差分を記す。
+
+### 17.1 ユーザー確認で確定した4項目
+
+`combat_rules_v1.md` 15章本文には「1枚でも使用したターンはPINできない」「相手は次の自ターンに
+TECHNIQUE最大1枚」とあるが、以下4点は実装上の解釈が分かれるため、Phase 8セッション内でユーザーへ
+確認したうえで正式仕様として採用した（`docs/design/combat_v1_open_questions.md`参照）。
+
+1. 「ROUGH使用ターンはPINできない」の“使用”は宣言時点の基準（使用ベース）。COUNTERされたROUGH技も
+   対象になる——`techniquesUsedThisTurn`と同じ「宣言時点で確定し、COUNTERされても取り消さない」
+   基準に統一する。
+2. このPIN不可ルールは通常PIN（`declarePin`/`checkPinLegality`）のみが対象。DIRECT
+   PINは技成功と同一Command内で自動遷移するため対象外（`checkPinLegality`を経由しない経路であり、
+   新しいCatalog validation制約も追加しない）。
+3. 「相手は次の自ターンにTECHNIQUE最大1枚」の“1枚”も宣言時点の基準（使用ベース）。COUNTERされた
+   技も1枚に含む。
+4. 次ターン制限は、そのターンの終了とともに（消費の有無に関わらず）消滅する。持ち越しはしない。
+
+### 17.2 新規ファイルを追加しない設計判断
+
+§8・`docs/design/combat_v1_phase1_design.md`旧稿では`combat_v1_rough_rules.dart`（新規）を想定して
+いたが、Phase 8で実装したROUGHのロジックは「ある一時点の`CombatV1PlayerState`/
+`CombatV1MatchState`の2値（使用フラグ・制限フラグ）を読み書きするだけ」であり、`combat_v1_pin_rules.dart`
+（`determinePinCountResult`等の複雑な純粋計算）のように専用ファイルへ切り出すだけの独立した計算ロジックが
+存在しなかった。判定・更新のいずれも`combat_v1_engine.dart`内（`checkTechniqueLegality`・
+`checkPinLegality`・後述の`_advanceTurnAfterEnd`）に直接実装し、新規ファイルは追加しなかった
+（過剰な分割を避ける、本書9章の方針）。
+
+### 17.3 `CombatV1PlayerState`への新規フィールド
+
+- `roughTechniqueUsedThisTurn: bool`（既定`false`）: このターン、attribute==roughのTECHNIQUEを
+  1枚でも宣言したか。`declareTechnique`のコミット時（`_commitTechniqueDeclaration`）に
+  `technique.attribute == rough`ならtrueへセットする（COUNTERされても取り消さない）。ターン開始時
+  （`_startTurn`）に`techniquesUsedThisTurn`と同時にfalseへリセットする。`checkPinLegality`
+  （通常PINのみ）が参照する。
+- `roughTechniqueLimitActive: bool`（既定`false`）: このターン、ROUGHによる「TECHNIQUE最大1枚」
+  制限を受けているか。手番が渡る瞬間（後述の`_advanceTurnAfterEnd`）に、直前の手番プレイヤーの
+  `lastSuccessfulTechnique`（`turnNumber`一致・stale snapshot対策込み）がROUGH属性なら次の手番
+  プレイヤー側でtrueにセットする。手番を終えるプレイヤー自身の値は、消費の有無に関わらずそのターンの
+  終了と同時にfalseへクリアする（持ち越さない）。`checkTechniqueLegality`が
+  `techniquesUsedThisTurn >= CombatV1RulesConfig.roughRestrictedTechniqueLimit`と組み合わせて参照
+  する。
+
+いずれも「とりあえずboolを増やす」ものではなく、15章の「使用」（宣言ベース）と「成功」
+（`lastSuccessfulTechnique`ベース）という2つの異なる判定基準に対応する、意味の異なる2つのフラグとして
+設計した。
+
+### 17.4 `CombatV1RulesConfig`への追加
+
+`roughRestrictedTechniqueLimit`（既定`1`）を追加した（`combat_rules_v1.md` 15章「TECHNIQUEを最大
+1枚」）。既存の`pinCountOneKocCost`等と同じく、ルール定数をマジックナンバーとして直書きしない方針
+（本書1章・9章）に従う。
+
+### 17.5 `checkTechniqueLegality`・`checkPinLegality`への統合
+
+Phase 4〜7で確立した「軽量Command guard + full diagnostic」「checkXxxLegalityへ統合し、
+`hasAnyPlayableTechnique`/`hasPinOption`はcheckへ委譲するだけで判定ロジックを重複実装しない」という
+責務分離をPhase 8でも維持した。
+
+- `checkTechniqueLegality`（新たに`rules: CombatV1RulesConfig`引数を追加、既定値付きの名前付き
+  引数のため既存呼び出し元との後方互換を維持）: `selfDown`判定の直後に、
+  `state.active.roughTechniqueLimitActive && state.active.techniquesUsedThisTurn >=
+  rules.roughRestrictedTechniqueLimit`なら`CombatV1TechniqueLegalityReasonCode.roughTechniqueLimitReached`
+  で拒否する。`declareTechnique`・`hasAnyPlayableTechnique`は`rules`をそのまま透過的に渡すだけで、
+  独自のif文は追加していない。
+- `checkPinLegality`: `opponentNotDown`判定の直後に、`state.active.roughTechniqueUsedThisTurn`なら
+  `CombatV1PinLegalityReasonCode.roughTechniqueUsedThisTurn`で拒否する。`declarePin`・`hasPinOption`
+  への変更は無い（既存の委譲のみで自動的に反映される）。
+
+DIRECT PIN自動遷移（`_resolvePendingAttack`内の`_resolvePin(source: directPin)`呼び出し）は
+`checkPinLegality`を経由しない既存の設計（Phase 5で確定）のため、17.1-2の方針どおり変更していない。
+SUBMISSION自動遷移（`_resolveSubmission`）も同様にPINとは独立した経路であり、ROUGH使用フラグを一切
+参照しない。
+
+### 17.6 ターン終了処理の共通化: `_advanceTurnAfterEnd`
+
+Phase 5〜7時点で、`endTurn`・`rest`・PIN 1/2カウントkickout・SUBMISSION
+ESCAPEの4箇所が、いずれも「`activePlayerIndex`を反転→`turnNumber`を+1→`_startTurn`」という同一の
+手番交代処理を、コメントで「endTurnと同じ内部処理」と明記しながらも個別に重複実装していた。Phase
+8のROUGH次ターン制限は、この4箇所すべてで一様に判定する必要があるため（8.3・10.1・11章がいずれも
+この手番交代を「同じ内部処理」と明記していることとも整合する）、重複実装を避けてこの機会に
+`combat_v1_engine.dart`内の`_advanceTurnAfterEnd(state, random)`という共有private staticメソッドへ
+統合した。
+
+`_advanceTurnAfterEnd`は次の2点を行ってから`_startTurn`を呼ぶ:
+
+1. 手番を終える側（`state.active`）の`roughTechniqueLimitActive`をfalseへクリアする。
+2. 手番を終える側の`lastSuccessfulTechnique`が「このターン中に成立したROUGH属性技」
+   （`attackerPlayerIndex`・`turnNumber`が現在の手番・ターンと一致、stale snapshot対策込み）で
+   あれば、次に手番を得る側（`state.opponent`）の`roughTechniqueLimitActive`をtrueへセットする
+   （該当しなければfalseを明示的にセットし、古い値の持ち越しを防ぐ）。
+
+`endTurn`・`rest`・`_resolvePin`の1/2カウント分岐・`_resolveSubmission`のESCAPE分岐は、いずれも
+末尾の手番交代処理をこの`_advanceTurnAfterEnd`呼び出しへ置き換えた。挙動（`turnNumber`・
+`activePlayerIndex`・ログ・`_startTurn`によるENERGY全回復/1ドロー）自体はPhase 5〜7から変更していない。
+
+### 17.7 invariantの追加
+
+`combat_v1_state_invariants.dart`の`validateMatchStateInvariants`へ、
+`CombatV1MatchStateInvariantErrorCode.roughTechniqueLimitActiveOnInactivePlayer`を追加した:
+非手番プレイヤー（`state.opponent`）の`roughTechniqueLimitActive`がtrueになっていないことを検証する
+（この制限は「次の自ターン」限定であり、手番を得た瞬間から次にターンを終えるまでの間のみtrueで
+ありうる構造のため）。
+
+### 17.8 Catalog validationへの変更なし
+
+17.1-2の確定方針（DIRECT PINは通常PIN不可ルールの対象外）により、`attribute == rough`かつ
+`directPin == true`の技データを禁止する新規Catalog
+validationは追加しなかった（両立を許容する）。`submissionHold`との関係も、23.4章の「attribute=rough・
+family=CHOKEの反則的な首絞め」という既存の想定例のとおり両立可能であり、SUBMISSION自動遷移は
+ROUGH使用フラグを参照しないため、既存の`techniqueDirectPinSubmissionHoldConflict`
+（`directPin`と`submissionHold`の同時true禁止）以外に新規の検証を追加していない。
+
+### 17.9 FINISHER境界（Phase 9未着手）
+
+Phase 9（FINISHER）は引き続き未着手のまま。`category == finisher`の技は`checkTechniqueLegality`が
+`finisherNotImplemented`で一律拒否する既存の仕組み（Phase 3）をPhase
+8でも変更していない。20章のROUGH FINISHER（黒蝶ドライバー）に関するデータ・Catalog
+validationはPhase 9着手時に扱う（SSOT根拠のない先行実装はしない）。

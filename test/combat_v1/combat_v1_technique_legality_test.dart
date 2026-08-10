@@ -1081,32 +1081,55 @@ void main() {
   });
 
   group('Phase境界 — Phase 3ではまだ実装しないもの（57〜61）', () {
-    test('57・58. ROUGH技はPhase 3では通常のNORMAL技として解決され、特殊制限は発生しない', () {
-      final rough = const CombatV1DeckEntry(
-        instanceId: 'a1',
-        cardId: 'fx_rough_normal',
-        category: CombatV1CardCategory.normal,
-      );
-      final followUp = const CombatV1DeckEntry(
-        instanceId: 'a2',
-        cardId: 'fx_normal_strike',
-        category: CombatV1CardCategory.normal,
-      );
-      final catalog = _catalogWith({'fx_rough_normal': _fxRoughNormal});
-      var state = _buildState(handA: [rough, followUp], hpB: 150, sharedHeat: 0);
+    test(
+      '57・58. ROUGH技はPhase 3〜7では通常のNORMAL技として解決される'
+      '（ROUGH特殊処理はPhase 8で実装済み。詳細はcombat_v1_rough_test.dart参照）',
+      () {
+        final rough = const CombatV1DeckEntry(
+          instanceId: 'a1',
+          cardId: 'fx_rough_normal',
+          category: CombatV1CardCategory.normal,
+        );
+        final followUp = const CombatV1DeckEntry(
+          instanceId: 'a2',
+          cardId: 'fx_normal_strike',
+          category: CombatV1CardCategory.normal,
+        );
+        final catalog = _catalogWith({'fx_rough_normal': _fxRoughNormal});
+        var state = _buildState(
+          handA: [rough, followUp],
+          hpB: 150,
+          sharedHeat: 0,
+        );
 
-      state = declareAndResolveTechnique(state, 'a1', catalog: catalog, random: Random(1));
-      // 通常のDMG/HEAT適用のみで、PIN不可等の特殊フラグは存在しない
-      // （CombatV1PlayerState/CombatV1MatchStateにROUGH専用フィールドが
-      // 無いことがモデル上の裏付けになる）。
-      expect(state.playerB.hp, 140); // 150 - 10
-      expect(state.sharedHeat, 20);
+        state = declareAndResolveTechnique(
+          state,
+          'a1',
+          catalog: catalog,
+          random: Random(1),
+        );
+        // DMG/HEAT適用は通常のNORMAL技と同じ（ROUGHはDMG/HEATを変えない）。
+        expect(state.playerB.hp, 140); // 150 - 10
+        expect(state.sharedHeat, 20);
+        // ROUGH技を宣言した事実は記録される（Phase 8、docs/combat_rules_v1.md
+        // 15章）。ただしこれは「このターンのPIN不可」（自分向け）としてのみ
+        // 働き、「次ターンTECHNIQUE最大1枚」制限は相手にのみ適用される
+        // （15章）。
+        expect(state.playerA.roughTechniqueUsedThisTurn, isTrue);
+        expect(state.playerB.roughTechniqueLimitActive, isFalse);
 
-      // ROUGH技を使用したターンでも、次のTECHNIQUEが制限されない
-      // （Phase 8の「次ターンTECHNIQUE最大1枚」はまだ存在しない）。
-      state = declareAndResolveTechnique(state, 'a2', catalog: catalog, random: Random(2));
-      expect(state.playerA.techniquesUsedThisTurn, 2);
-    });
+        // ROUGH技を使用した本人（playerA）は、同一ターン内で追加の
+        // TECHNIQUEを引き続き宣言できる（次ターン制限は相手のみが対象、
+        // 15章「重要: 相手が技を一切使用できない、ではない」）。
+        state = declareAndResolveTechnique(
+          state,
+          'a2',
+          catalog: catalog,
+          random: Random(2),
+        );
+        expect(state.playerA.techniquesUsedThisTurn, 2);
+      },
+    );
 
     test('59. FINISHERの本処理（DIRECT PIN等）は発生しない', () {
       // fx_finisher_bはdirectPin==trueを持つが、Phase

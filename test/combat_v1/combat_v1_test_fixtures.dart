@@ -202,6 +202,55 @@ const Map<String, CombatV1Technique> fixtureTechniques = {
     submissionHold: true,
     family: CombatV1TechniqueFamily.bodyPress,
   ),
+  /// Phase 8専用: ROUGH属性の基本技（docs/combat_rules_v1.md 15章）。
+  /// attribute=rough・family=choke（23.4章「CHOKEはattribute横断」の具体例、
+  /// fx_normal_submission_hold/fx_counter_submissionと同じfamily/groupで
+  /// COUNTERテストを共有できるようにする）。相手をDOWNさせるため、
+  /// PIN不可（15章）のテストで「相手DOWN・このターン成功済み」という
+  /// 他の前提条件を別途満たさずに済む（[fixtureDeckSpec]には含めない）。
+  'fx_rough_basic': CombatV1Technique(
+    id: 'fx_rough_basic',
+    name: 'テストラフ技',
+    category: CombatV1CardCategory.normal,
+    attribute: CombatV1EnergyAttribute.rough,
+    energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.rough: 1}),
+    damage: 10,
+    heatGain: 20,
+    resultOpponentState: CombatV1WrestlerPosture.down,
+    family: CombatV1TechniqueFamily.choke,
+  ),
+  /// Phase 8専用: ROUGH属性かつdirectPin==trueの技（DIRECT PINとROUGH-PIN
+  /// 不可ルールの共存を検証する、Phase
+  /// 8セッションでユーザーが確定した方針「通常PINのみ制限、DIRECT PINは
+  /// 対象外」、[fixtureDeckSpec]には含めない）。
+  'fx_rough_direct_pin': CombatV1Technique(
+    id: 'fx_rough_direct_pin',
+    name: 'テストラフ自動移行技',
+    category: CombatV1CardCategory.normal,
+    attribute: CombatV1EnergyAttribute.rough,
+    energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.rough: 1}),
+    damage: 20,
+    heatGain: 20,
+    resultOpponentState: CombatV1WrestlerPosture.down,
+    directPin: true,
+    family: CombatV1TechniqueFamily.choke,
+  ),
+  /// Phase 8専用: ROUGH属性かつsubmissionHold==trueの技（23.4章の例
+  /// 「attribute=rough・family=CHOKEの反則的な首絞め」を再現し、SUBMISSION
+  /// 自動移行がROUGH使用フラグの影響を受けないことを検証する、
+  /// [fixtureDeckSpec]には含めない）。fx_normal_submission_holdと同じく
+  /// 相手HPを一撃で閾値以下まで落とせるdamageを持たせる。
+  'fx_rough_submission_hold': CombatV1Technique(
+    id: 'fx_rough_submission_hold',
+    name: 'テストラフSUBMISSIONホールド技',
+    category: CombatV1CardCategory.normal,
+    attribute: CombatV1EnergyAttribute.rough,
+    energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.rough: 1}),
+    damage: 110,
+    heatGain: 20,
+    submissionHold: true,
+    family: CombatV1TechniqueFamily.choke,
+  ),
   'fx_finisher_a': CombatV1Technique(
     id: 'fx_finisher_a',
     name: 'テストフィニッシャーA',
@@ -299,6 +348,10 @@ CombatV1MatchState buildMatchState({
   int sharedHeat = 0,
   int techniquesUsedA = 0,
   int techniquesUsedB = 0,
+  bool roughUsedA = false,
+  bool roughUsedB = false,
+  bool roughLimitActiveA = false,
+  bool roughLimitActiveB = false,
   int activePlayerIndex = 0,
   int kocA = 10,
   int kocB = 10,
@@ -322,6 +375,8 @@ CombatV1MatchState buildMatchState({
     drawPile: drawPileA,
     discardPile: discardPileA,
     techniquesUsedThisTurn: techniquesUsedA,
+    roughTechniqueUsedThisTurn: roughUsedA,
+    roughTechniqueLimitActive: roughLimitActiveA,
   );
   final playerB = CombatV1PlayerState(
     wrestlerId: fixtureWrestlerB.id,
@@ -337,6 +392,8 @@ CombatV1MatchState buildMatchState({
     drawPile: drawPileB,
     discardPile: discardPileB,
     techniquesUsedThisTurn: techniquesUsedB,
+    roughTechniqueUsedThisTurn: roughUsedB,
+    roughTechniqueLimitActive: roughLimitActiveB,
   );
   return CombatV1MatchState(
     matchId: 'phase4-test-match',
@@ -359,13 +416,14 @@ CombatV1SuccessfulTechniqueSnapshot fixtureSuccessfulTechnique({
   required int attackerPlayerIndex,
   required int turnNumber,
   bool directPin = false,
+  CombatV1EnergyAttribute attribute = CombatV1EnergyAttribute.throwing,
 }) => CombatV1SuccessfulTechniqueSnapshot(
   attackerPlayerIndex: attackerPlayerIndex,
   turnNumber: turnNumber,
   cardInstanceId: 'fx_last_success',
   cardId: 'fx_normal_throw_down',
   category: CombatV1CardCategory.normal,
-  attribute: CombatV1EnergyAttribute.throwing,
+  attribute: attribute,
   family: CombatV1TechniqueFamily.slam,
   directPin: directPin,
   submissionHold: false,
