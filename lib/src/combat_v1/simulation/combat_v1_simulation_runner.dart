@@ -41,11 +41,14 @@ String combatV1SimulationOwnerId({
 /// 実行）を一切持たない。責務は以下のみ:
 ///
 /// 1. [CombatV1SimulationConfig]・`matchIndex`から[deriveV1SimulationSeeds]
-///    で試合固有のseed群を導出する
-/// 2. [combatV1SimulationOwnerId]でowner namespaceを決定する
-/// 3. `CombatV1ProductionMatchStarter.start`で試合を開始する
-/// 4. `CombatV1CpuMatchRunner.run`で試合を進行させる
-/// 5. 結果を[CombatV1MatchSimulationResult]/[CombatV1SimulationResult]へ
+///    で試合固有のRNG seed群を導出する
+/// 2. 同じ`config`・`matchIndex`から[deriveV1SimulationMatchId]で
+///    canonical simulation identity（`maxActions`/`rules`を含む、RNG
+///    seedとは独立した計算）を導出する
+/// 3. [combatV1SimulationOwnerId]でowner namespaceを決定する
+/// 4. `CombatV1ProductionMatchStarter.start`で試合を開始する
+/// 5. `CombatV1CpuMatchRunner.run`で試合を進行させる
+/// 6. 結果を[CombatV1MatchSimulationResult]/[CombatV1SimulationResult]へ
 ///    詰め替える
 class CombatV1SimulationRunner {
   const CombatV1SimulationRunner();
@@ -94,6 +97,21 @@ class CombatV1SimulationRunner {
       wrestlerBId: config.wrestlerBId,
       playerAPolicyId: config.playerAPolicy.policyId,
       playerBPolicyId: config.playerBPolicy.policyId,
+    );
+
+    // simulationMatchIdはRNG seed derivation（seeds）とは独立して算出する
+    // ——maxActions/rulesはRandom sequenceを決定しないが、試合結果には
+    // 実際に影響するため、canonical simulation identityへは反映する
+    // 必要がある（Codex review M3対応）。
+    final simulationMatchId = deriveV1SimulationMatchId(
+      masterSeed: config.masterSeed,
+      matchIndex: matchIndex,
+      wrestlerAId: config.wrestlerAId,
+      wrestlerBId: config.wrestlerBId,
+      playerAPolicyId: config.playerAPolicy.policyId,
+      playerBPolicyId: config.playerBPolicy.policyId,
+      maxActions: config.maxActions,
+      rules: config.rules,
     );
 
     // playerAOwnerId/playerBOwnerIdは1度だけ計算し、starterへ渡す値と
@@ -146,6 +164,7 @@ class CombatV1SimulationRunner {
 
     return CombatV1MatchSimulationResult.fromCpuResult(
       matchIndex: matchIndex,
+      simulationMatchId: simulationMatchId,
       wrestlerAId: config.wrestlerAId,
       wrestlerBId: config.wrestlerBId,
       playerAOwnerId: playerAOwnerId,

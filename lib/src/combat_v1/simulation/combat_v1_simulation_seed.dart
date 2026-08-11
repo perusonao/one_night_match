@@ -1,9 +1,25 @@
-/// Combat Ver.1 Phase 12A — Simulation seed derivation
+/// Combat Ver.1 Phase 12A — Simulation seed / identity derivation
 /// （docs/design/combat_v1_phase12a_simulation_core.md）。
 ///
-/// 「同じ設定＋同じseedなら再現可能」を保証するための、masterSeedから
-/// matchSeed・engineSeed・playerAPolicySeed・playerBPolicySeed・
-/// simulationMatchIdを導出するdeterministic pure function群。
+/// このファイルは目的が異なる2つのpure function群を提供する（Codex
+/// review Blocking Finding M3対応で明確に分離した）:
+///
+/// 1. [deriveV1SimulationSeeds] — 「同じ設定＋同じseedなら再現可能」を
+///    保証するためのRNG seed derivation。masterSeedから
+///    matchSeed・engineSeed・playerAPolicySeed・playerBPolicySeedを導出
+///    する。[maxActions]/[CombatV1RulesConfig]には一切依存しない
+///    ——これらはEngine/PolicyのRandom sequenceを決定しないため。
+/// 2. [deriveV1SimulationMatchId] — Phase 12Bの集計・監査・replay
+///    boundaryとして使う、Simulator独自のcanonical simulation identity。
+///    RNG seedとは異なり、`maxActions`・`CombatV1RulesConfig`の
+///    outcome-affecting fieldも含む（試合結果へ実際に影響する設定が
+///    違えば、別のmatchとして区別する必要があるため）。
+///
+/// 両者は同じ低レベルhash primitive（[_deriveV1]/[_encodeLengthPrefixed]/
+/// [_fnv1a32]/[_mix32]/[_mul32]）を共有するが、互いの出力に依存しない
+/// 独立した計算である——[deriveV1SimulationMatchId]の入力を変えても
+/// [deriveV1SimulationSeeds]の結果（したがって既存golden vector）は
+/// 一切変化しない。
 ///
 /// 制約（Phase 12A要件）:
 ///
@@ -12,18 +28,37 @@
 /// - `Random`を順番に呼び出して子seedを作る方式は使わない（呼び出し回数の
 ///   変化に脆弱なため）。
 /// - すべてpure function（同じ引数なら常に同じ結果、外部stateに依存しない）。
+/// - `rules.toString()`/`hashCode`/`Object.hash`/Map・Set iteration/
+///   reflection/`DateTime`のいずれにも依存しない。
 ///
 /// 32-bit FNV-1aハッシュ + 有限混合（finalizer）による小規模な
 /// deterministic mixerで十分とする（Phase 12Aでは暗号学的な強度は不要）。
 library;
 
-/// このファイルのseed derivationロジックのバージョン。[deriveV1SimulationSeeds]
-/// が返す[CombatV1SimulationSeedSet.derivationVersion]と同じ値。ロジックを
+import '../combat_v1_rules_config.dart';
+
+/// RNG seed derivationロジックのバージョン。[deriveV1SimulationSeeds]が
+/// 返す[CombatV1SimulationSeedSet.derivationVersion]と同じ値。ロジックを
 /// 変更する場合は必ずインクリメントし、既存Simulation Resultとの
 /// 再現性の非互換を明示できるようにする。
+///
+/// [combatV1SimulationIdentityVersion]（simulation identity derivation）
+/// とは独立してバージョン管理する——RNG seedの算出方式とsimulation
+/// identityの算出方式は別々に進化しうるため（Codex review M3対応）。
 const int combatV1SeedDerivationVersion = 1;
 
-/// [deriveV1SimulationSeeds]が1試合分について生成するseed群。
+/// Simulation identity derivationロジックのバージョン
+/// （[deriveV1SimulationMatchId]が使用）。[CombatV1RulesConfig]のどの
+/// fieldをidentityへ含めるか等、identity算出方式を変更する場合は必ず
+/// インクリメントする。[combatV1SeedDerivationVersion]（RNG seed）とは
+/// 独立。
+const int combatV1SimulationIdentityVersion = 1;
+
+/// [deriveV1SimulationSeeds]が1試合分について生成するRNG seed群。
+///
+/// `simulationMatchId`はこのclassには含まない——[deriveV1SimulationMatchId]
+/// が独立したpure functionとして提供する（Codex review M3対応、RNG seed
+/// derivationとsimulation identity derivationの分離）。
 class CombatV1SimulationSeedSet {
   const CombatV1SimulationSeedSet({
     required this.matchIndex,
@@ -33,7 +68,6 @@ class CombatV1SimulationSeedSet {
     required this.playerAPolicySeed,
     required this.playerBPolicySeed,
     required this.derivationVersion,
-    required this.simulationMatchId,
   });
 
   final int matchIndex;
@@ -41,7 +75,7 @@ class CombatV1SimulationSeedSet {
 
   /// `masterSeed` + `matchIndex` + config（wrestlerA/B・policyA/B id）から
   /// 導出された、この試合固有のseed。[engineSeed]/[playerAPolicySeed]/
-  /// [playerBPolicySeed]/[simulationMatchId]はすべてこの値から派生する。
+  /// [playerBPolicySeed]はすべてこの値から派生する。
   final int matchSeed;
 
   /// `CombatV1Engine`のCommand実行（shuffle/draw/PIN/COUNTER解決）専用に
@@ -58,24 +92,13 @@ class CombatV1SimulationSeedSet {
   /// Randomのseed。
   final int playerBPolicySeed;
 
-  /// この結果を生成したseed derivationロジックのバージョン
+  /// この結果を生成したRNG seed derivationロジックのバージョン
   /// （[combatV1SeedDerivationVersion]と同じ値）。
   final int derivationVersion;
-
-  /// Simulator独自のdeterministic match identity（Codex review M2対応、
-  /// `docs/design/combat_v1_phase12a_simulation_core.md`参照）。
-  ///
-  /// `CombatV1Engine.start`が生成する時刻依存の`matchId`
-  /// （`DateTime.now().microsecondsSinceEpoch`由来）とは完全に独立
-  /// ——[matchSeed]（`masterSeed`/`matchIndex`/wrestlerA・B/policyA・Bから
-  /// 決定論的に導出される）のみから生成するため、Engine側matchIdが
-  /// 変化してもこの値は変化しない。`Random`を一切消費しない
-  /// （pure functionのみで構成）。
-  final String simulationMatchId;
 }
 
-/// masterSeedから1試合分の[CombatV1SimulationSeedSet]を導出する（Phase 12A
-/// 「Seed Strategy」）。
+/// masterSeedから1試合分の[CombatV1SimulationSeedSet]（RNG seedのみ）を
+/// 導出する（Phase 12A「Seed Strategy」）。
 ///
 /// 同じ[masterSeed]・[matchIndex]・[wrestlerAId]・[wrestlerBId]・
 /// [playerAPolicyId]・[playerBPolicyId]なら、常に同じ[CombatV1SimulationSeedSet]
@@ -83,6 +106,11 @@ class CombatV1SimulationSeedSet {
 /// [playerBPolicyId]のいずれかが変われば[CombatV1SimulationSeedSet.matchSeed]
 /// も変わる——同じ`masterSeed`/`matchIndex`のまま対戦カードやpolicyだけを
 /// 差し替えて実行した場合に、seed群が意図せず衝突しないようにするため。
+///
+/// [maxActions]・[CombatV1RulesConfig]は受け取らない——これらはEngine/
+/// PolicyのRandom sequenceを一切決定しないため（Codex review M3対応。
+/// これらを識別子へ反映する必要がある場合は[deriveV1SimulationMatchId]
+/// を使う）。
 CombatV1SimulationSeedSet deriveV1SimulationSeeds({
   required int masterSeed,
   required int matchIndex,
@@ -98,23 +126,17 @@ CombatV1SimulationSeedSet deriveV1SimulationSeeds({
     wrestlerBId,
     playerAPolicyId,
     playerBPolicyId,
-  ], 'match');
+  ], 'match', versionTag: _seedVersionTag);
 
-  final engineSeed = _deriveV1(<Object>[matchSeed], 'engine');
-  final playerAPolicySeed = _deriveV1(<Object>[matchSeed], 'policyA');
-  final playerBPolicySeed = _deriveV1(<Object>[matchSeed], 'policyB');
-
-  // simulationMatchId専用のlaneを追加するだけであり、既存の
-  // 'engine'/'policyA'/'policyB' laneの導出（したがって既存golden
-  // vectorのengineSeed/playerAPolicySeed/playerBPolicySeed）には一切
-  // 影響しない——各laneは`matchSeed`とlane文字列のみから独立に導出される
-  // ため（Codex review M2対応）。
-  final matchIdValue = _deriveV1(<Object>[matchSeed], 'matchId');
-  final simulationMatchId = _formatSimulationMatchId(
-    masterSeed: masterSeed,
-    matchIndex: matchIndex,
-    matchIdValue: matchIdValue,
-  );
+  final engineSeed = _deriveV1(<Object>[
+    matchSeed,
+  ], 'engine', versionTag: _seedVersionTag);
+  final playerAPolicySeed = _deriveV1(<Object>[
+    matchSeed,
+  ], 'policyA', versionTag: _seedVersionTag);
+  final playerBPolicySeed = _deriveV1(<Object>[
+    matchSeed,
+  ], 'policyB', versionTag: _seedVersionTag);
 
   return CombatV1SimulationSeedSet(
     matchIndex: matchIndex,
@@ -124,32 +146,148 @@ CombatV1SimulationSeedSet deriveV1SimulationSeeds({
     playerAPolicySeed: playerAPolicySeed,
     playerBPolicySeed: playerBPolicySeed,
     derivationVersion: combatV1SeedDerivationVersion,
-    simulationMatchId: simulationMatchId,
   );
 }
 
-/// [masterSeed]/[matchIndex]（人間可読な先頭部分）と[matchIdValue]
-/// （`matchSeed`から`'matchId'` laneで導出した32-bit値、衝突耐性の
-/// ための一意化サフィックス）から、[CombatV1SimulationSeedSet.simulationMatchId]
-/// の文字列表現を組み立てる。
-String _formatSimulationMatchId({
+/// Simulator独自のdeterministic simulation identity
+/// （[CombatV1MatchSimulationResult.simulationMatchId]）を算出する
+/// （Codex review Blocking Finding M3対応）。
+///
+/// [deriveV1SimulationSeeds]（RNG seed derivation）とは独立したpure
+/// function。masterSeed/matchIndex/wrestlerA・B/policyA・Bに加え、実際に
+/// 試合結果へ影響する[maxActions]・[rules]（の全outcome-affecting
+/// field、[_rulesIdentityComponents]参照）も識別子へ反映する——旧実装
+/// （`matchSeed`から`'matchId'` laneで派生させる方式）は`maxActions`/
+/// `rules`の違いを反映できず、異なる試合条件を誤って同一matchとして
+/// 扱ってしまう問題があった。
+///
+/// 保証する性質:
+///
+/// - **deterministic**: 同一の全引数なら常に同じ結果
+/// - **match separation**: `matchIndex`が異なれば別の結果になる
+///   （`matchIndex`自体を文字列内に直接埋め込むことでも二重に保証する）
+/// - **maxActions/rules差の反映**: 他の引数が同一でも、`maxActions`や
+///   `rules`のoutcome-affecting fieldが異なれば別の結果になる
+/// - **Engine matchId非依存**: `CombatV1Engine.start`が生成する時刻
+///   依存の`matchId`は一切参照しない
+/// - **Random非消費**: pure functionのみで構成され、`Random`を一切
+///   消費しない
+/// - **RNG seedへ無影響**: [deriveV1SimulationSeeds]の結果
+///   （したがって既存golden vector）には一切影響しない
+String deriveV1SimulationMatchId({
   required int masterSeed,
   required int matchIndex,
-  required int matchIdValue,
-}) =>
-    'sim-v$combatV1SeedDerivationVersion-$masterSeed-$matchIndex-'
-    '${matchIdValue.toRadixString(16).padLeft(8, '0')}';
+  required String wrestlerAId,
+  required String wrestlerBId,
+  required String playerAPolicyId,
+  required String playerBPolicyId,
+  required int maxActions,
+  required CombatV1RulesConfig rules,
+}) {
+  final identityValue = _deriveV1(<Object>[
+    masterSeed,
+    matchIndex,
+    wrestlerAId,
+    wrestlerBId,
+    playerAPolicyId,
+    playerBPolicyId,
+    maxActions,
+    ..._rulesIdentityComponents(rules),
+  ], 'simulationMatchId', versionTag: _identityVersionTag);
+
+  return 'sim-v$combatV1SimulationIdentityVersion-$masterSeed-$matchIndex-'
+      '${identityValue.toRadixString(16).padLeft(8, '0')}';
+}
+
+String get _seedVersionTag => 'combatV1SimSeed.v$combatV1SeedDerivationVersion';
+
+String get _identityVersionTag =>
+    'combatV1SimIdentity.v$combatV1SimulationIdentityVersion';
+
+/// [rules]（[CombatV1RulesConfig]）の全outcome-affecting fieldを、固定順の
+/// tag/value pairとして列挙する（Codex review M3「Rules Canonical
+/// Representation」対応）。
+///
+/// `rules.toString()`・`hashCode`・`Object.hash`・Map/Set iteration・
+/// reflection・`DateTime`のいずれにも依存しない、明示的・小規模な
+/// canonical representation。各field値の直前にfield名（tag）を挿入する
+/// ことで、値の並びだけでは区別できない曖昧さを避ける
+/// （[_encodeLengthPrefixed]による長さ接頭辞化と組み合わせ、bijectiveな
+/// 直列化になる）。
+///
+/// **重要（Future Rule Addition Risk対応）**: [CombatV1RulesConfig]に
+/// 新しいfieldが追加された場合、必ずこの一覧へも追加すること——追加を
+/// 忘れると、そのfieldの違いが`simulationMatchId`へ反映されなくなる。
+/// `combat_v1_simulation_seed_test.dart`の「M3: rules field毎の識別」
+/// testが、現時点で列挙済みの各fieldについて「その1 fieldだけを変えると
+/// `simulationMatchId`が変わる」ことを網羅的に固定しているため、新field
+/// を追加する際は対応するtest caseも追加すること
+/// （reflection・generic serializer・code generationのような大規模な
+/// 汎用機構は、Phase 12Aのscopeでは意図的に採用していない）。
+List<Object> _rulesIdentityComponents(CombatV1RulesConfig rules) => <Object>[
+  'rulesCanonicalization.v1',
+  'startingHp',
+  rules.startingHp,
+  'startingKoc',
+  rules.startingKoc,
+  'startingPinCards',
+  rules.startingPinCards,
+  'startingHandSize',
+  rules.startingHandSize,
+  'deckComposition.normalCount',
+  rules.deckComposition.normalCount,
+  'deckComposition.signatureCount',
+  rules.deckComposition.signatureCount,
+  'deckComposition.finisherCount',
+  rules.deckComposition.finisherCount,
+  'deckComposition.counterCount',
+  rules.deckComposition.counterCount,
+  'normalSameNameLimit',
+  rules.normalSameNameLimit,
+  'signatureSameNameLimit',
+  rules.signatureSameNameLimit,
+  'finisherSameNameLimit',
+  rules.finisherSameNameLimit,
+  'counterSameNameLimit',
+  rules.counterSameNameLimit,
+  'counterAllowsWildSubstitution',
+  rules.counterAllowsWildSubstitution,
+  'totalPinCards',
+  rules.totalPinCards,
+  'pinCountOneKocCost',
+  rules.pinCountOneKocCost,
+  'pinCountTwoKocCost',
+  rules.pinCountTwoKocCost,
+  'pinCountTwoPointNineKocCost',
+  rules.pinCountTwoPointNineKocCost,
+  'submissionHpThreshold',
+  rules.submissionHpThreshold,
+  'submissionEscapeKocCost',
+  rules.submissionEscapeKocCost,
+  'restHpRecovery',
+  rules.restHpRecovery,
+  'roughRestrictedTechniqueLimit',
+  rules.roughRestrictedTechniqueLimit,
+  'finisherHeatThreshold',
+  rules.finisherHeatThreshold,
+];
 
 /// [components]（順序を含めて意味を持つ）と[lane]（同じcomponentsから複数の
-/// 独立したseedを分岐させるための識別子、例:`'engine'`/`'policyA'`）から、
-/// 32-bit非負整数のseedを1つ決定論的に導出する。
+/// 独立した値を分岐させるための識別子、例:`'engine'`/`'policyA'`）・
+/// [versionTag]（呼び出し元のderivation namespace、RNG seedと
+/// simulation identityで別の値を使う——Codex review M3対応）から、
+/// 32-bit非負整数を1つ決定論的に導出する。
 ///
 /// [components]を[_encodeLengthPrefixed]でbijectiveに直列化してFNV-1aで
 /// ハッシュ化した後、[_mix32]でavalanche（1bitの変化が出力全体へ広がる
 /// 性質）を高める2段構成。`Random`の逐次呼び出しには依存しない。
-int _deriveV1(List<Object> components, String lane) {
+int _deriveV1(
+  List<Object> components,
+  String lane, {
+  required String versionTag,
+}) {
   final parts = <String>[
-    'combatV1SimSeed.v$combatV1SeedDerivationVersion',
+    versionTag,
     for (final component in components) component.toString(),
     lane,
   ];

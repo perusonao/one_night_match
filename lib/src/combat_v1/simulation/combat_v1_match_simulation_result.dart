@@ -189,12 +189,16 @@ class CombatV1MatchSimulationResult {
   /// `matchIndex`と同じ値）。
   final int matchIndex;
 
-  /// Simulator独自のdeterministic match identity（Codex review M2対応）。
-  /// `CombatV1SimulationSeedSet.simulationMatchId`をそのまま転記する
-  /// ——`CombatV1Engine.start`が生成する時刻依存の`matchId`
-  /// （`finalState.matchId`）とは独立した、canonicalなidentityであり、
-  /// Phase 12Bの集計・監査・replay boundaryとして利用できる。同一の
-  /// `CombatV1SimulationConfig` + `matchIndex`からは常に同じ値になる。
+  /// Simulator独自のdeterministic match identity（Codex review M2/M3
+  /// 対応）。`deriveV1SimulationMatchId`（`combat_v1_simulation_seed.dart`）
+  /// が算出した値をそのまま転記する——RNG seed derivationとは独立した
+  /// 計算であり、`wrestlerAId`/`wrestlerBId`/policyA・B/`masterSeed`/
+  /// `matchIndex`に加え、`maxActions`・`rules`（試合結果へ実際に影響する
+  /// 設定）も反映する（M3対応）。`CombatV1Engine.start`が生成する時刻
+  /// 依存の`matchId`（`finalState.matchId`）とは独立した、canonicalな
+  /// identityであり、Phase 12Bの集計・監査・replay boundaryとして
+  /// 利用できる。同一の`CombatV1SimulationConfig` + `matchIndex`からは
+  /// 常に同じ値になる。
   final String simulationMatchId;
 
   final String wrestlerAId;
@@ -260,6 +264,7 @@ class CombatV1MatchSimulationResult {
   /// structured terminationをそのまま転記するのみ。
   factory CombatV1MatchSimulationResult.fromCpuResult({
     required int matchIndex,
+    required String simulationMatchId,
     required String wrestlerAId,
     required String wrestlerBId,
     required String playerAOwnerId,
@@ -277,7 +282,7 @@ class CombatV1MatchSimulationResult {
 
     return CombatV1MatchSimulationResult(
       matchIndex: matchIndex,
-      simulationMatchId: seeds.simulationMatchId,
+      simulationMatchId: simulationMatchId,
       wrestlerAId: wrestlerAId,
       wrestlerBId: wrestlerBId,
       playerAOwnerId: playerAOwnerId,

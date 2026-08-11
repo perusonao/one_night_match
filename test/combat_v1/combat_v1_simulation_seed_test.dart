@@ -6,6 +6,8 @@
 // engine/A/B policy seedが分離していることを検証する。
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_deck.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
 import 'package:one_night_match/src/combat_v1/simulation/combat_v1_simulation_seed.dart';
 
 CombatV1SimulationSeedSet _seeds({
@@ -22,6 +24,26 @@ CombatV1SimulationSeedSet _seeds({
   wrestlerBId: wrestlerBId,
   playerAPolicyId: playerAPolicyId,
   playerBPolicyId: playerBPolicyId,
+);
+
+String _id({
+  int masterSeed = 12345,
+  int matchIndex = 0,
+  String wrestlerAId = 'misaki',
+  String wrestlerBId = 'jack',
+  String playerAPolicyId = 'firstLegal',
+  String playerBPolicyId = 'randomLegal',
+  int maxActions = 500,
+  CombatV1RulesConfig rules = const CombatV1RulesConfig(),
+}) => deriveV1SimulationMatchId(
+  masterSeed: masterSeed,
+  matchIndex: matchIndex,
+  wrestlerAId: wrestlerAId,
+  wrestlerBId: wrestlerBId,
+  playerAPolicyId: playerAPolicyId,
+  playerBPolicyId: playerBPolicyId,
+  maxActions: maxActions,
+  rules: rules,
 );
 
 void main() {
@@ -118,6 +140,124 @@ void main() {
       final seeds = _seeds(masterSeed: 999, matchIndex: 7);
       expect(seeds.masterSeed, 999);
       expect(seeds.matchIndex, 7);
+    });
+  });
+
+  group('I. simulationMatchId identity（Codex review Blocking Finding M3対応）', () {
+    test('Test A: maxActionsのみ変更するとRNG seed群は不変で'
+        'simulationMatchIdは異なる', () {
+      // deriveV1SimulationSeedsはmaxActionsを引数に取らない——同一config
+      // identity（masterSeed/matchIndex/wrestlerA・B/policyA・B）に対する
+      // RNG seed群は、maxActionsの値に関わらず1通りしか存在しない
+      // （型シグネチャ自体がこれを構造的に保証する）。
+      final seeds = _seeds();
+      expect(seeds.matchSeed, isNotNull);
+
+      final idMaxActions500 = _id(maxActions: 500);
+      final idMaxActions1 = _id(maxActions: 1);
+
+      expect(idMaxActions500, isNot(idMaxActions1));
+    });
+
+    test('Test B: rulesのoutcome-affecting fieldを変更するとRNG seed群は'
+        '不変でsimulationMatchIdは異なる', () {
+      final seeds = _seeds();
+      expect(seeds.matchSeed, isNotNull);
+
+      const alteredRules = CombatV1RulesConfig(startingHp: 200);
+      final idDefaultRules = _id();
+      final idAlteredRules = _id(rules: alteredRules);
+
+      expect(idDefaultRules, isNot(idAlteredRules));
+    });
+
+    test('Test C: CombatV1RulesConfigの各outcome-affecting fieldについて、'
+        'そのfieldだけを変えるとsimulationMatchIdが変わる（table-driven、'
+        '全19 field網羅）', () {
+      final baseId = _id();
+
+      final variants = <String, CombatV1RulesConfig>{
+        'startingHp': const CombatV1RulesConfig(startingHp: 999),
+        'startingKoc': const CombatV1RulesConfig(startingKoc: 99),
+        'startingPinCards': const CombatV1RulesConfig(startingPinCards: 9),
+        'startingHandSize': const CombatV1RulesConfig(startingHandSize: 9),
+        'deckComposition': const CombatV1RulesConfig(
+          deckComposition: CombatV1DeckComposition(
+            normalCount: 19,
+            signatureCount: 3,
+            finisherCount: 2,
+            counterCount: 6,
+          ),
+        ),
+        'normalSameNameLimit': const CombatV1RulesConfig(
+          normalSameNameLimit: 9,
+        ),
+        'signatureSameNameLimit': const CombatV1RulesConfig(
+          signatureSameNameLimit: 9,
+        ),
+        'finisherSameNameLimit': const CombatV1RulesConfig(
+          finisherSameNameLimit: 9,
+        ),
+        'counterSameNameLimit': const CombatV1RulesConfig(
+          counterSameNameLimit: 9,
+        ),
+        'counterAllowsWildSubstitution': const CombatV1RulesConfig(
+          counterAllowsWildSubstitution: true,
+        ),
+        'totalPinCards': const CombatV1RulesConfig(totalPinCards: 9),
+        'pinCountOneKocCost': const CombatV1RulesConfig(
+          pinCountOneKocCost: 9,
+        ),
+        'pinCountTwoKocCost': const CombatV1RulesConfig(
+          pinCountTwoKocCost: 9,
+        ),
+        'pinCountTwoPointNineKocCost': const CombatV1RulesConfig(
+          pinCountTwoPointNineKocCost: 9,
+        ),
+        'submissionHpThreshold': const CombatV1RulesConfig(
+          submissionHpThreshold: 9,
+        ),
+        'submissionEscapeKocCost': const CombatV1RulesConfig(
+          submissionEscapeKocCost: 9,
+        ),
+        'restHpRecovery': const CombatV1RulesConfig(restHpRecovery: 9),
+        'roughRestrictedTechniqueLimit': const CombatV1RulesConfig(
+          roughRestrictedTechniqueLimit: 9,
+        ),
+        'finisherHeatThreshold': const CombatV1RulesConfig(
+          finisherHeatThreshold: 9,
+        ),
+      };
+
+      for (final entry in variants.entries) {
+        final variantId = _id(rules: entry.value);
+        expect(
+          variantId,
+          isNot(baseId),
+          reason:
+              'field=${entry.key}: この1 fieldだけを変えても'
+              'simulationMatchIdが変化しませんでした'
+              '（identityへの反映漏れの可能性があります）',
+        );
+      }
+    });
+
+    test('Test D: 同一引数から呼び出せば同じsimulationMatchIdになる'
+        '（determinism、pure function）', () {
+      final a = _id();
+      final b = _id();
+      expect(a, b);
+    });
+
+    test('matchIndex/wrestler/policy差でもsimulationMatchIdが分離する'
+        '（既存Codex review M2契約の維持確認）', () {
+      expect(_id(matchIndex: 0), isNot(_id(matchIndex: 1)));
+      expect(_id(wrestlerAId: 'misaki'), isNot(_id(wrestlerAId: 'akari')));
+      expect(
+        _id(playerAPolicyId: 'firstLegal'),
+        isNot(_id(playerAPolicyId: 'randomLegal')),
+      );
+      expect(_id(masterSeed: 1), isNot(_id(masterSeed: 2)));
     });
   });
 }

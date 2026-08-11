@@ -551,6 +551,63 @@ void main() {
       );
     });
 
+    test('Test A（Codex review M3、Runner/Result level）: maxActionsのみ'
+        '変更するとRNG seed群は同一のままsimulationMatchIdが変わる', () {
+      final config500 = _config(masterSeed: 3030, maxActions: 500);
+      final config1 = _config(masterSeed: 3030, maxActions: 1);
+      const runner = CombatV1SimulationRunner();
+
+      final result500 = runner.runSingleMatch(config500, 0);
+      final result1 = runner.runSingleMatch(config1, 0);
+
+      expect(result500.matchSeed, result1.matchSeed);
+      expect(result500.engineSeed, result1.engineSeed);
+      expect(result500.playerAPolicySeed, result1.playerAPolicySeed);
+      expect(result500.playerBPolicySeed, result1.playerBPolicySeed);
+      expect(result500.simulationMatchId, isNot(result1.simulationMatchId));
+    });
+
+    test('Test B（Codex review M3、Runner/Result level）: rulesの'
+        'outcome-affecting fieldを変更するとRNG seed群は同一のまま'
+        'simulationMatchIdが変わる', () {
+      final configDefaultRules = CombatV1SimulationConfig(
+        wrestlerAId: 'misaki',
+        wrestlerBId: 'jack',
+        playerAPolicy: CombatV1SimulationPolicyKind.randomLegal,
+        playerBPolicy: CombatV1SimulationPolicyKind.randomLegal,
+        matchCount: 1,
+        masterSeed: 4040,
+      );
+      final configAlteredRules = CombatV1SimulationConfig(
+        wrestlerAId: 'misaki',
+        wrestlerBId: 'jack',
+        playerAPolicy: CombatV1SimulationPolicyKind.randomLegal,
+        playerBPolicy: CombatV1SimulationPolicyKind.randomLegal,
+        matchCount: 1,
+        masterSeed: 4040,
+        rules: const CombatV1RulesConfig(startingHp: 200),
+      );
+      const runner = CombatV1SimulationRunner();
+
+      final resultDefault = runner.runSingleMatch(configDefaultRules, 0);
+      final resultAltered = runner.runSingleMatch(configAlteredRules, 0);
+
+      expect(resultDefault.matchSeed, resultAltered.matchSeed);
+      expect(resultDefault.engineSeed, resultAltered.engineSeed);
+      expect(
+        resultDefault.playerAPolicySeed,
+        resultAltered.playerAPolicySeed,
+      );
+      expect(
+        resultDefault.playerBPolicySeed,
+        resultAltered.playerBPolicySeed,
+      );
+      expect(
+        resultDefault.simulationMatchId,
+        isNot(resultAltered.simulationMatchId),
+      );
+    });
+
     test('owner metadata: Resultのplayer{A,B}OwnerIdは実際に使用した'
         'deterministic owner namespaceと一致する', () {
       final config = _config(masterSeed: 5566, matchCount: 1);

@@ -1,10 +1,12 @@
 # Combat Ver.1 Phase 12A — Simulation Core 設計文書
 
-- ステータス: Phase 12A（Simulation Core 実装）完了時点。Codex exact-HEAD reviewの
-  2ラウンド（1ラウンド目「C. CHANGES REQUIRED」— Major Finding M1: policy factory
-  closure問題、Minor Finding: seed serializationの曖昧性／2ラウンド目「C. CHANGES
-  REQUIRED」— Blocking Finding M2: simulation match ID・owner ID metadata不足）を
-  いずれも修正済み。
+- ステータス: Phase 12A（Simulation Core 実装）完了時点。Codex reviewの3ラウンド
+  （1ラウンド目「C. CHANGES REQUIRED」— Major Finding M1: policy factory closure
+  問題、Minor Finding: seed serializationの曖昧性／2ラウンド目「C. CHANGES
+  REQUIRED」— Blocking Finding M2: simulation match ID・owner ID metadata不足／
+  3ラウンド目（PR #15）「C. CHANGES REQUIRED BEFORE MERGE」— Blocking Finding M3:
+  simulationMatchIdがmaxActions/rulesを識別子へ含んでいなかった）を、いずれも
+  修正済み。
 - 関連: [`../combat_rules_v1.md`](../combat_rules_v1.md)（SSOT） /
   [`combat_v1_phase11a_production_match_setup.md`](combat_v1_phase11a_production_match_setup.md) /
   [`combat_v1_phase11b_cpu.md`](combat_v1_phase11b_cpu.md)
@@ -266,13 +268,21 @@ testの数（7）」と「検証した入力パターンの数（9）」は別�
 
 ### Golden Seed Tests
 
-`combat_v1_simulation_seed_golden_test.dart`（7個の`test()`）が、seed derivation version 1
-の既知入力→既知出力を固定literalとしてpinする（実装からその場で計算した値をexpectedには
-しない）。将来アルゴリズムが意図せず変化した場合、この既存golden testがfailすることで
-検出できる。各testは`matchSeed`/`engineSeed`/`playerAPolicySeed`/`playerBPolicySeed`に
-加え、`simulationMatchId`（Codex review M2対応、9章参照）のgolden値も固定している。
+`combat_v1_simulation_seed_golden_test.dart`が、seed/identity derivationの既知入力→
+既知出力を固定literalとしてpinする（実装からその場で計算した値をexpectedにはしない）。
+将来アルゴリズムが意図せず変化した場合、この既存golden testがfailすることで検出できる。
+M3でRNG seed derivationとsimulation identity derivationを分離したため（前述）、この
+ファイルも2つのgroupへ分かれている:
 
-カバーするシナリオ:
+- **A. RNG seed golden vectors**（7個の`test()`）: `deriveV1SimulationSeeds`の
+  `matchSeed`/`engineSeed`/`playerAPolicySeed`/`playerBPolicySeed`のgolden値。M3修正
+  でも1件も変更していない（`deriveV1SimulationMatchId`が独立したため、RNG seed
+  derivationのgolden値は影響を受けない）
+- **B. simulationMatchId golden vectors**（7個の`test()`）: `deriveV1SimulationMatchId`
+  のgolden値。M3で`maxActions`/`rules`を識別子へ追加したため算出方式自体が変わり、
+  golden値もM2時点から全面的に更新されている（Codex reviewが明示的に許容した変更）
+
+カバーするシナリオ（両group共通）:
 
 - normal positive masterSeed
 - masterSeed = 0
@@ -284,7 +294,11 @@ testの数（7）」と「検証した入力パターンの数（9）」は別�
 - matchIndex差（matchIndex 0/1双方のgolden値、およびEngine/policyA/policyB domain
   separationの確認）
 
-golden値は本テスト追加時に、Dart VM（`dart run`）とdart2js（`dart compile js` +
+`maxActions`/`rules`の差異ケース（M3固有）は`combat_v1_simulation_seed_test.dart`の
+「I. simulationMatchId identity」group（Test A〜D、固定literalではなく構造的な差異の
+確認）で扱う。
+
+golden値は本テスト追加・更新時に、Dart VM（`dart run`）とdart2js（`dart compile js` +
 Node.jsで実行）の両方で実際に算出し、bit単位で一致することを確認済み。
 
 ## 7. RNG Separation
@@ -349,39 +363,89 @@ determinism/replay testで直接比較できる。保持する項目: 両player�
 held/hand・drawPile・discardPileサイズ/reshuffle count、shared HEAT、final phase、
 activePlayerIndex、pending attack有無。
 
-### Simulation Match ID（Codex review Blocking Finding M2対応）
+### Simulation Match ID（Codex review Blocking Finding M2/M3対応）
 
-Codex exact-HEAD reviewの2ラウンド目で、`CombatV1MatchSimulationResult`に(1) Simulator
-独自のdeterministic match ID、(2) 実際に使用したowner IDが保存されていないというBlocking
+Codex reviewの2ラウンド目で、`CombatV1MatchSimulationResult`に(1) Simulator独自の
+deterministic match ID、(2) 実際に使用したowner IDが保存されていないというBlocking
 Finding M2が指摘された。`CombatV1Engine.start`が生成する`matchId`
 （`DateTime.now().microsecondsSinceEpoch`由来）は意図的にResultから除外しているが
 （10章）、その代わりとなるSimulator独自のcanonical identityが存在しなかった。
 
-`CombatV1SimulationSeedSet.simulationMatchId`（`combat_v1_simulation_seed.dart`）が
-これを解消する。`matchSeed`から`'matchId'`という新しいlaneで導出した32-bit値を、
-`sim-v<seedDerivationVersion>-<masterSeed>-<matchIndex>-<matchIdValueの8桁16進数>`
-という人間可読な形式へ整形する。
+M2時点の初期実装は、`matchSeed`から`'matchId'`という新しいlaneを派生させる方式だった。
+しかし3ラウンド目のreviewで、この方式は`maxActions`・`CombatV1RulesConfig`の違いを
+`simulationMatchId`へ反映できないというBlocking Finding M3が指摘された——`matchSeed`は
+RNG streamの再現にしか関与せず、`maxActions`/`rules`を一切考慮しないため、同じseed/
+matchIndex/wrestler/policyのまま`maxActions`や`rules`だけを変えても、試合結果・
+terminationが変わるにもかかわらず同じ`simulationMatchId`になってしまう問題があった。
+
+#### M3修正: RNG derivationとsimulation identity derivationの分離
+
+`deriveV1SimulationMatchId`（`combat_v1_simulation_seed.dart`）を、`deriveV1SimulationSeeds`
+から完全に独立したpure functionとして新設した。`matchSeed`の派生値ではなく、
+`masterSeed`/`matchIndex`/`wrestlerAId`/`wrestlerBId`/`playerAPolicyId`/
+`playerBPolicyId`に加えて`maxActions`・`rules`（の全outcome-affecting field、後述）を
+直接入力として受け取り、独自のlane（`'simulationMatchId'`）・独自のversion tag
+（`combatV1SimulationIdentityVersion`、RNG seedの`combatV1SeedDerivationVersion`とは
+独立してバージョン管理）で導出する。
+
+```
+sim-v<simulationIdentityVersion>-<masterSeed>-<matchIndex>-<identityValueの8桁16進数>
+```
 
 保証する性質:
 
-- **deterministic**: `matchSeed`が`masterSeed`/`matchIndex`/`wrestlerAId`/`wrestlerBId`/
-  `playerAPolicyId`/`playerBPolicyId`から決定論的に導出される既存の仕組み（6章）を
-  そのまま利用するため、同一configと`matchIndex`からは常に同じ`simulationMatchId`になる
-- **match separation**: `matchIndex`が異なれば`matchSeed`が変わり、`simulationMatchId`も
-  変わる（`matchIndex`自体も文字列内に直接埋め込まれるため、二重に保証される）
-- **matchup identity**: `matchSeed`経由でwrestlerA/B・policyA/B・masterSeedの識別を
-  反映する
+- **deterministic**: 同一の全引数（`maxActions`/`rules`を含む）なら常に同じ結果
+- **match separation**: `matchIndex`が異なれば別の結果になる（`matchIndex`自体も
+  文字列内に直接埋め込むことで二重に保証する）
+- **maxActions/rules差の反映**: 他の引数が同一でも、`maxActions`や`rules`の
+  outcome-affecting fieldが異なれば別の結果になる（M3の核心）
 - **Engine matchId independent**: `CombatV1Engine.start`が生成する時刻依存`matchId`を
-  一切参照しない——`matchSeed`（pure function）のみから導出するため、Engine側matchIdが
-  試行ごとに変化しても`simulationMatchId`は変化しない
-- **Random非消費**: `_deriveV1`と同じpure functionで完結し、Engine RNG/Policy RNG
-  streamを一切消費しない
+  一切参照しない
+- **Random非消費**: pure functionのみで構成され、`Random`を一切消費しない
+- **RNG seedへ無影響**: `deriveV1SimulationSeeds`の結果（したがって既存golden vector
+  の`matchSeed`/`engineSeed`/`playerAPolicySeed`/`playerBPolicySeed`）には一切影響しない
+  ——2つの関数はもはや共有する計算ステップを持たない（低レベルhash primitiveのみ共有）
 - **replay**: `CombatV1SimulationResult.config` + `matchIndex`から
   `CombatV1SimulationRunner.runSingleMatch`を呼び直せば、同じ`simulationMatchId`になる
 
-既存の`matchSeed`/`engineSeed`/`playerAPolicySeed`/`playerBPolicySeed`の導出（したがって
-既存golden vector）には一切影響しない——各laneは`matchSeed`とlane文字列のみから独立に
-導出されるため、新しいlaneの追加は既存laneの値を変えない。
+#### Rules Canonical Representation
+
+`CombatV1RulesConfig`をidentityへ含める際、`toString()`・`hashCode`・`Object.hash`・
+runtime依存表現・Map/Set iteration・reflection・`DateTime`のいずれも使わない
+——`_rulesIdentityComponents`（`combat_v1_simulation_seed.dart`）が、
+`CombatV1RulesConfig`の全19 field（`deckComposition`の4 sub-fieldを含む）を、
+`'fieldName', value`という固定順のtag/value pairとして明示的に列挙し、既存の
+length-prefix encoding（`_encodeLengthPrefixed`）へそのまま渡す。field名をtagとして
+挿入することで、値の並びだけでは区別できない曖昧さを避ける。
+
+対象field一覧（`combat_v1_rules_config.dart`・`combat_v1_deck.dart`より）:
+
+`startingHp` / `startingKoc` / `startingPinCards` / `startingHandSize` /
+`deckComposition.normalCount` / `deckComposition.signatureCount` /
+`deckComposition.finisherCount` / `deckComposition.counterCount` /
+`normalSameNameLimit` / `signatureSameNameLimit` / `finisherSameNameLimit` /
+`counterSameNameLimit` / `counterAllowsWildSubstitution` / `totalPinCards` /
+`pinCountOneKocCost` / `pinCountTwoKocCost` / `pinCountTwoPointNineKocCost` /
+`submissionHpThreshold` / `submissionEscapeKocCost` / `restHpRecovery` /
+`roughRestrictedTechniqueLimit` / `finisherHeatThreshold`
+
+reflection・generic serializer・code generationのような大規模な汎用機構は、Phase 12Aの
+scopeでは意図的に採用していない——明示的・小規模・review可能な実装を優先した。
+
+**Future Rule Addition Risk**: `CombatV1RulesConfig`に新しいfieldが追加された場合、
+`_rulesIdentityComponents`への追加を忘れると、そのfieldの違いが`simulationMatchId`へ
+反映されなくなる。これを検知しやすくするため、`combat_v1_simulation_seed_test.dart`の
+「I. simulationMatchId identity」group「Test C」が、現時点で列挙済みの19 fieldそれぞれに
+ついて「その1 fieldだけを変えると`simulationMatchId`が変わる」ことを網羅的に固定して
+いる。新fieldを追加する際は、`_rulesIdentityComponents`とTest Cの両方を更新すること
+（コード上のコメントにも同じ注意書きを記載）。
+
+#### VM/Web一致
+
+M3で新設した`deriveV1SimulationMatchId`も、既存の`_mul32`（16-bit分割の安全乗算）・
+length-prefix encoding・8桁16進数フォーマットをそのまま利用するため、Dart VMと
+dart2js（`dart compile js` + Node.jsで実行）で同一の結果になることを実測で確認済み
+（`maxActions`/`rules`の差異ケースを含む）。
 
 ### CombatV1MatchSimulationResult
 
@@ -459,9 +523,13 @@ Phase 12Aでは原則としてPhase 11B Runnerの通常invariant validationを�
 ## 13. Test Coverage概要
 
 - `combat_v1_simulation_seed_test.dart`: pure function・determinism・matchIndex/wrestler/
-  policy/masterSeed差異によるmatchSeed分離・engine/A/B seed分離・derivation version固定
-- `combat_v1_simulation_seed_golden_test.dart`: seed derivation version 1のgolden vector
-  （固定literal、VM/Web両方で算出・一致確認済み）
+  policy/masterSeed差異によるmatchSeed分離・engine/A/B seed分離・derivation version固定・
+  **I. simulationMatchId identity**（Codex review Blocking Finding M3直接固定: Test A
+  maxActions差／Test B rules差／Test C 全19 rule fieldの網羅的table-driven確認／Test D
+  determinism、およびmatchIndex/wrestler/policy差での分離の維持確認）
+- `combat_v1_simulation_seed_golden_test.dart`: RNG seed derivation（group A、golden値
+  M3でも不変）とsimulation identity derivation（group B、golden値はM3で全面更新）の
+  golden vector、VM/Web両方で算出・一致確認済み
 - `combat_v1_simulation_config_test.dart`: valid config・matchCount/maxActions<=0拒否・
   unknown wrestler拒否・policy APIが構造的に2種類へ閉じていること
 - `combat_v1_simulation_policy_test.dart`: Codex review Major Finding M1の直接固定
@@ -472,8 +540,9 @@ Phase 12Aでは原則としてPhase 11B Runnerの通常invariant validationを�
   determinism（FirstLegal/RandomLegal双方、複数masterSeed）・RNG分離（Simulation Runner
   wiring境界）・replay（`simulationMatchId`/owner ID一致を含む）・safetyLimit保持・
   4 Production Wrestler起動確認・**J. simulationMatchId / owner metadata**
-  （Codex review M2直接固定: simulation match ID determinism・matchIndex separation・
-  Engine matchId independence・owner metadataの実使用値との一致・owner A/B separation・
+  （Codex review M2/M3直接固定: simulation match ID determinism・matchIndex separation・
+  Engine matchId independence・Test A/B（Runner/Result levelでのmaxActions/rules差異、
+  RNG seed群不変の確認込み）・owner metadataの実使用値との一致・owner A/B separation・
   match separation・mirror matchでのowner分離）
 
 既存Phase 11Bテスト（`combat_v1_cpu_match_runner_test.dart`等）が既に検証しているCPU対戦
