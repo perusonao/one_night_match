@@ -266,6 +266,11 @@ void main() {
               reason: '$reason winnerPlayerIndex',
             );
             expect(
+              other.winnerWrestlerId,
+              fromCanonical.winnerWrestlerId,
+              reason: '$reason winnerWrestlerId',
+            );
+            expect(
               other.actionCount,
               fromCanonical.actionCount,
               reason: '$reason actionCount',
@@ -283,6 +288,56 @@ void main() {
           }
         }
       }
+    });
+
+    test('execution plan: wrestlerIds順序を変えても、production '
+        'CombatV1BatchSimulationRunner.runと同じ組み立て方（matrix × local '
+        'index）で生成した(matchup, localMatchIndex)の集合は不変（Codex review '
+        'Minor m4対応）。production APIへall-match retentionを追加せず、'
+        'matrix generator（`combatV1GenerateMatchupMatrix`、Runnerが実際に使う'
+        'のと同じpure helper）とmatchesPerMatchupのlocal indexループのみで'
+        'execution planをpureに再構築して比較する。', () {
+      Set<(CombatV1Matchup, int)> executionPlanFor(
+        List<String> wrestlerIds,
+        int matchesPerMatchup,
+      ) => {
+        for (final matchup in combatV1GenerateMatchupMatrix(wrestlerIds))
+          for (
+            var localMatchIndex = 0;
+            localMatchIndex < matchesPerMatchup;
+            localMatchIndex++
+          )
+            (matchup, localMatchIndex),
+      };
+
+      const matchesPerMatchup = 4;
+      final planCanonical = executionPlanFor(const [
+        'misaki',
+        'jack',
+        'akari',
+        'reina',
+      ], matchesPerMatchup);
+      final planReversed = executionPlanFor(const [
+        'reina',
+        'akari',
+        'jack',
+        'misaki',
+      ], matchesPerMatchup);
+      final planShuffled = executionPlanFor(const [
+        'akari',
+        'reina',
+        'misaki',
+        'jack',
+      ], matchesPerMatchup);
+
+      expect(planCanonical, hasLength(16 * matchesPerMatchup));
+      expect(planReversed, equals(planCanonical));
+      expect(planShuffled, equals(planCanonical));
+
+      // Runnerが実際に生成するrequestedMatchCountとも一致する。
+      final config = _config(matchesPerMatchup: matchesPerMatchup);
+      final result = _runner.run(config);
+      expect(planCanonical.length, result.requestedMatchCount);
     });
   });
 

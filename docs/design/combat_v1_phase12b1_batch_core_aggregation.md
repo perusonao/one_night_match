@@ -5,7 +5,9 @@
   利用し、Core Engine・Production Data・UIは変更しない。Codex exact-HEAD independent
   review 1ラウンド目「C. CHANGES REQUIRED」（Blocking Finding M1: simulationMatchId
   全件保持によるO(totalMatches) memory／M2: pure aggregatorのstructured result
-  invariant不足）を修正済み（15・17・18章参照）。
+  invariant不足）、2ラウンド目「C. CHANGES REQUIRED」（Blocking Finding M3:
+  invariantViolationのwinner shape制約がPhase 12A semanticsと不整合）を、いずれも
+  修正済み（15・17・18章参照）。
 - 関連: [`combat_v1_phase12a_simulation_core.md`](combat_v1_phase12a_simulation_core.md)（Phase
   12A、直接の基盤） / [`combat_v1_phase11b_cpu.md`](combat_v1_phase11b_cpu.md) /
   [`combat_v1_phase11a_production_match_setup.md`](combat_v1_phase11a_production_match_setup.md)
@@ -412,14 +414,14 @@ Aggregation logicはexecutionから完全に分離する（`combat_v1_batch_aggr
 両方とも入力として受け取る`CombatV1MatchSimulationResult`以外の外部stateに依存しない
 （現在時刻・グローバル変数・Random等を一切使わない）。
 
-### Structured Result Invariants（M2対応、Codex review Blocking Finding M2）
+### Structured Result Invariants（M2対応、Codex review Blocking Finding M2/M3）
 
-**問題**: 修正前の`add()`は、矛盾した`CombatV1MatchSimulationResult`
+**問題（M2）**: 修正前の`add()`は、矛盾した`CombatV1MatchSimulationResult`
 （例: `termination == matchOver`なのに`winnerPlayerIndex`が`null`）を検証せずに
 黙って集計へ混入させてしまう余地があった。Codex exact-HEAD reviewでBlocking Finding
 M2として指摘された。
 
-**修正内容**: `add()`は、集計を行う前に`_validateStructuredResultInvariants(result)`で
+**修正内容（M2）**: `add()`は、集計を行う前に`_validateStructuredResultInvariants(result)`で
 Phase 12Aの実際のstructured termination契約（`CombatV1CpuMatchRunner`/
 `CombatV1MatchSimulationResult.fromCpuResult`、`combat_v1_cpu_match_runner.dart`/
 `combat_v1_match_simulation_result.dart`）と整合しているかを検証する。矛盾があれば
@@ -456,25 +458,65 @@ Phase 12Aの実際のstructured termination契約（`CombatV1CpuMatchRunner`/
 - `safetyLimitReached == false`
 - `invariantViolationMessage`が非null・非空
 
-**重要な設計判断（invariantViolationの`winnerPlayerIndex`について）**: 上記
-`invariantViolation`の検証には、`winnerPlayerIndex == null`（したがって
-`winnerWrestlerId == null`）も含める。ただし、この制約はPhase 12Aの型シグネチャ自体が
-構造的に保証するものでは**ない**——事前にPhase 12Aの実装（`CombatV1CpuMatchRunner._buildResult`）
-を確認したところ、result返却直前の最終invariant再検証（checkpoint 3）が、既に
-`matchOver`と判定された直後のstate（`winnerPlayerIndex`が既に0/1でセット済み、
-`state.isOver == true`）を`invariantViolation`へ再分類する経路を持つことが分かった。
-この経路が実際に発生するのはCore Engine自体にbugがあり、「決着済みのstate」と「他の
-invariant違反」が同時に成立してしまった場合のみだが、発生した場合
-`finalState.winnerPlayerIndex`はセットされたまま`termination`だけが
-`invariantViolation`へ変わる。
+#### invariantViolationのwinner shape（M3対応、Codex review Blocking Finding M3）
 
-Phase 12B-1は、この（本来ほぼ到達しないはずの）経路が実際に観測された場合、それを黙って
-aggregateへ混入させず、fail-fastすることを意図的に選択する——これはPhase 12Aが保証しない
-制約をPhase 12B側で追加していることになるが、「Core Engine invariant違反の兆候を
-batch統計へ埋没させない」という安全側の判断であり、3章で述べたPhase 12B自身の
-structural/config invariant違反はfail-fastしてよいという方針とも整合する。この判断・
-根拠は`combat_v1_batch_aggregator.dart`の`_validateStructuredResultInvariants`の
-doc commentにも明記している。
+**問題**: M2修正時点の実装は、`invariantViolation`について
+`winnerPlayerIndex == null`（したがって`winnerWrestlerId == null`）も常にMUSTとして
+要求していた。M2修正時のdesign doc自身が「この制約はPhase 12Aの型シグネチャが構造的に
+保証するものではない」と明記したうえで、あえて厳格化する設計判断だと記載していたが、
+Codex exact-HEAD re-reviewはこれをBlocking Finding M3として指摘した——「winner付き
+invariantViolationはcorrupted resultではなく、Phase 12Aが正規に返し得るstructured
+abnormal resultである」ため、これを一律rejectするのはPhase 12A semanticsとの
+incompatibilityにあたる、という指摘である。
+
+**Phase 12Aの実際の挙動（再確認）**: `CombatV1CpuMatchRunner._buildResult`の
+checkpoint 3（result返却直前の最終invariant再検証）は、既に`matchOver`と判定された
+直後のstate（`winnerPlayerIndex`が既に0/1でセット済み、`state.isOver == true`）を
+`invariantViolation`へ再分類する経路を持つ。この経路では`finalState`自体は変更されない
+——`terminalCause`は`null`へ明示的にクリアされ、`termination`だけが
+`invariantViolation`へ書き換わる。`CombatV1MatchSimulationResult.fromCpuResult`は
+`cpuResult.finalState.winnerPlayerIndex`から`winnerPlayerIndex`/`winnerWrestlerId`を
+機械的に転記するため、この経路を通った場合、`termination == invariantViolation`かつ
+`winnerPlayerIndex`が0/1・`winnerWrestlerId`が対応するwrestlerId、という組み合わせに
+なる。これは「決着はしていた（winnerが確定していた）が、その後の最終invariant検証で
+Core Engine側の別のinvariant違反が見つかったため、公式には`matchOver`ではなく
+`invariantViolation`として報告する」というPhase 12Aの正規のstructured abnormal
+resultであり、corrupted dataではない。
+
+**修正内容（M3）**: `invariantViolation`のwinner pairについて、以下の2形状を両方
+validとして受理する:
+
+- **Shape A（no winner）**: `winnerPlayerIndex == null` かつ `winnerWrestlerId == null`
+- **Shape B（winner preserved from final state）**: `winnerPlayerIndex`が0または1、
+  かつ`winnerWrestlerId`がそれに対応するwrestlerIdと一致
+
+Shape A/B以外（`winnerPlayerIndex`と`winnerWrestlerId`が矛盾する組み合わせ——例:
+`winnerPlayerIndex == null`なのに`winnerWrestlerId`が非null、`winnerPlayerIndex`が
+0/1なのに`winnerWrestlerId`がnullまたは不一致、`winnerPlayerIndex`が0/1/null以外）は
+引き続きreject する。この判定は実装上、termination共通チェック（上記）だけで
+自然に処理される——`invariantViolation`のcase自体はもはや`winnerPlayerIndex`へ
+追加の制約を課さない。
+
+**Aggregation semantics（変更なし・重要）**: Shape Bでwinner metadataが残っていても、
+`add`の`invariantViolation`分類ロジックはこれを一切参照しない
+（`_invariantViolationMatches`/`matchupBucket.invariantViolation`/mirror用counterへの
+加算のみ）。すなわち、winner付きinvariantViolationであっても:
+
+- `completedMatches`へは加算されない
+- `playerAWins`/`playerBWins`へは加算されない
+- wrestler別winsへは加算されない
+- `terminalCause`カウントへは加算されない
+
+winner metadataは、あくまでPhase 12A final state由来のreplay/audit metadataとして
+許容するだけであり、勝敗集計の入力としては一切使わない。
+
+**判断根拠のまとめ**: M2修正時点では「Phase 12Aが保証しない制約を追加することで
+Core Engine invariant違反の兆候を統計へ埋没させない」という安全側の判断を優先したが、
+M3 reviewで指摘された通り、これはPhase 12Aが実際に返しうる正規のresultを不必要に
+rejectしてしまう副作用を伴っていた。Aggregation semantics側で勝敗集計から確実に
+除外できる（上記）ため、winner shapeの受理を緩和してもPhase 12B-1の
+balance-analysis用集計の正しさは損なわれない——このtrade-offの再評価を踏まえ、M3では
+Phase 12Aの実際のresult contractへ厳密に合わせる方向へ修正した。
 
 ## 19. Result Hierarchy
 
@@ -638,19 +680,29 @@ lib/src/combat_v1/simulation/
   invariant・A/B wins・completed分母・completed=0→null・matchup分類・wrestler分類・
   A/B seat帰属・mirror分類・mirror deviation・terminal cause分布・aggregate sum
   invariant・**同一simulationMatchIdを2回addしても拒否されないこと（M1、17章参照）**・
-  **matchOver/safetyLimit/invariantViolationそれぞれの structured result invariant
-  違反negative test（M2、18章「Structured Result Invariants」参照、winner
-  null/invalid/mismatch・terminalCause不整合・safetyLimitReached不整合・
-  invariantViolationMessage不整合の網羅）**・**accumulatorのbuild() snapshot
-  immutability（m3、build()取得後に追加addしても既存snapshotが変化しないこと）**を検証
+  **matchOver/safetyLimitそれぞれのstructured result invariant違反negative test
+  （M2、18章「Structured Result Invariants」参照、winner null/invalid/mismatch・
+  terminalCause不整合・safetyLimitReached不整合・invariantViolationMessage不整合の
+  網羅）**・**invariantViolationのwinner shape（M3、18章「invariantViolationのwinner
+  shape」参照）——Shape A（winner両方null）・Shape B（Phase 12A final-checkpoint形状を
+  模した、winnerPlayerIndex/winnerWrestlerIdが有効な組）の両方が受理され、かつ
+  Shape Bでもcompleted/win/terminalCause集計へ一切使われないことを直接固定。
+  inconsistentなwinner pair（index/wrestlerId不一致・invalid index等）は引き続き
+  reject**・**accumulatorのbuild() snapshot immutability（前回review Minor m3、
+  build()取得後に追加addしても既存snapshotが変化しないこと）**を検証
 - **Determinism**（`combat_v1_batch_simulation_runner_test.dart`）: 同一config→同一
   aggregate（複数回run）・execution order independence（wrestlerIds順を変えてmatrix
   traversal順を変えても、matchup単位のaggregate値が不変。**加えてm1対応として、代表
   `(matchup, localMatchIndex)`について、異なるwrestlerIds順序から再構築した
   `CombatV1SimulationConfig`で`runSingleMatch`を直接呼び、simulationMatchId/matchSeed/
   engineSeed/playerA・BPolicySeed/termination/terminalCause/winnerPlayerIndex/
-  actionCount/finalTurnNumber/finalStateSummaryが完全一致することを直接固定**）・
-  異なるmasterSeedでidentity/seedが変化すること
+  winnerWrestlerId/actionCount/finalTurnNumber/finalStateSummaryが完全一致することを
+  直接固定（m4対応でwinnerWrestlerIdを追加）**・**m4対応: production Runnerが実際に
+  使う`combatV1GenerateMatchupMatrix`と同じpure helper + local indexループのみで
+  execution plan（`(matchup, localMatchIndex)`の集合）をpureに再構築し、wrestlerIds
+  順序を変えてもこの集合自体が不変であることを直接固定（Set比較、順序に依存しない）。
+  productionへall-match retentionは追加しない**）・異なるmasterSeedでidentity/seedが
+  変化すること
 - **Replay**（同上）: 代表matchについて、`config` + `matchup` + `localMatchIndex`から
   `CombatV1SimulationConfig` + `CombatV1SimulationRunner.runSingleMatch`を再構築し、
   `simulationMatchId`/matchSeed/engineSeed/playerA・BPolicySeed/termination/

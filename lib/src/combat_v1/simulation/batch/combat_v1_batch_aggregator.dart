@@ -355,12 +355,10 @@ class CombatV1BatchAggregationAccumulator {
 
   /// [result]が、Phase 12Aの実際のstructured termination契約
   /// （`CombatV1CpuMatchRunner`/`CombatV1MatchSimulationResult.fromCpuResult`）
-  /// と矛盾しないことを検証する（Codex review Blocking Finding M2対応）。
+  /// と矛盾しないことを検証する（Codex review Blocking Finding M2/M3対応）。
   ///
   /// Phase 12Aが実際に保証する制約のみを検証し、保証していない制約は
-  /// 追加しない——ただし`termination == invariantViolation`について1点、
-  /// Phase 12Aの型シグネチャ自体が許容する余地よりも意図的に厳格な制約を
-  /// 課している（下記参照）。
+  /// 追加しない。
   ///
   /// - `termination == matchOver`: [CombatV1MatchSimulationResult.winnerPlayerIndex]
   ///   が0/1、[CombatV1MatchSimulationResult.terminalCause]が非null、
@@ -376,17 +374,39 @@ class CombatV1BatchAggregationAccumulator {
   /// - `termination == invariantViolation`: terminalCause == null、
   ///   safetyLimitReached == false、invariantViolationMessageが非null・
   ///   非空（いずれも`CombatV1CpuMatchRunner`の全invariantViolation経路で
-  ///   常に成立）。**winnerPlayerIndex/winnerWrestlerIdも == nullを要求する
-  ///   ——ただしこれはPhase 12Aの型シグネチャが構造的に保証する制約では
-  ///   ない**。`CombatV1CpuMatchRunner._buildResult`のcheckpoint 3
+  ///   常に成立）。**winnerPlayerIndex/winnerWrestlerIdは以下の2形状の
+  ///   どちらも許容する（Codex review Blocking Finding M3対応。当初は
+  ///   両方`null`のみを許容していたが、これはPhase 12Aの実際の契約より
+  ///   厳格すぎることが再reviewで判明した）**:
+  ///
+  ///   - Shape A（no winner）: `winnerPlayerIndex == null` かつ
+  ///     `winnerWrestlerId == null`
+  ///   - Shape B（winner preserved from final state）:
+  ///     `winnerPlayerIndex`が0または1、かつ`winnerWrestlerId`がそれに
+  ///     対応するwrestlerIdと一致
+  ///
+  ///   `CombatV1CpuMatchRunner._buildResult`のcheckpoint 3
   ///   （result返却直前の最終invariant再検証）は、既に`matchOver`と
   ///   判定された直後のstate（`winnerPlayerIndex`が既に0/1でセット
   ///   済み・`state.isOver == true`）を`invariantViolation`へ再分類する
-  ///   経路を持つ——この経路が実際に発生するのはCore Engine自体に
-  ///   bugがある場合のみだが、発生した場合`finalState.winnerPlayerIndex`
-  ///   はセットされたままになる。Phase 12B-1はこの経路を黙って
-  ///   aggregateに混入させず、fail-fastすることを意図的に選択する
-  ///   （Core Engine invariant違反の兆候をstatisticsへ埋没させないため）。
+  ///   経路を持つ。この経路では`finalState`自体は変更されないため、
+  ///   `finalState.winnerPlayerIndex`はセットされたままとなり、
+  ///   `CombatV1MatchSimulationResult.fromCpuResult`はそれをそのまま
+  ///   Resultへ転記する（Shape B）。これはcorrupted resultではなく、
+  ///   Phase 12Aが正規に返し得るstructured abnormal result——「決着は
+  ///   していた（winnerが確定していた）が、その後の最終invariant検証で
+  ///   Core Engine側の別のinvariant違反が見つかったため、公式には
+  ///   `matchOver`ではなく`invariantViolation`として報告する」という
+  ///   意味論を持つ。Phase 12B-1はこれを拒否しない——ただし14章
+  ///   「Aggregation Semantics」の通り、Shape Bのwinner
+  ///   metadataは勝敗集計（`playerAWins`/`playerBWins`/wrestler wins/
+  ///   `completedMatches`/`terminalCause`カウント）へは一切使わない
+  ///   （`add`の`switch`で`invariantViolation`ケースがこれらへ加算する
+  ///   経路を持たないことで構造的に保証する）。
+  ///
+  ///   Shape A/B以外（例: `winnerPlayerIndex`が非nullなのに
+  ///   `winnerWrestlerId`が対応しない、`winnerPlayerIndex`が0/1/null
+  ///   以外）は、termination共通チェック（下記実装）で引き続き拒否する。
   void _validateStructuredResultInvariants(
     CombatV1MatchSimulationResult result,
   ) {
@@ -469,13 +489,13 @@ class CombatV1BatchAggregationAccumulator {
           );
         }
       case CombatV1CpuMatchTermination.invariantViolation:
-        if (winnerPlayerIndex != null) {
-          throw CombatV1IllegalActionException(
-            'termination==invariantViolationですがwinnerPlayerIndexが'
-            '非nullです（simulationMatchId: $id, winnerPlayerIndex: '
-            '$winnerPlayerIndex）',
-          );
-        }
+        // winnerPlayerIndex/winnerWrestlerIdは、Shape A（both null）・
+        // Shape B（final stateのwinnerがそのまま保持され、0/1 +
+        // 対応するwrestlerIdのペア）のいずれも許容する——両方とも上の
+        // termination共通チェックで既に「0/1/nullのいずれか」かつ
+        // 「winnerWrestlerIdとの対応が正しいこと」を検証済み。ここでは
+        // これ以上winnerPlayerIndexの値を制限しない（Codex review
+        // Blocking Finding M3対応、下記doc参照）。
         if (result.terminalCause != null) {
           throw CombatV1IllegalActionException(
             'termination==invariantViolationですがterminalCauseが非nullです'

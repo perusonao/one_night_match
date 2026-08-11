@@ -664,19 +664,15 @@ void main() {
         });
       });
 
-      group('invariantViolation', () {
-        test('winnerあり → reject', () {
-          expectRejected(
-            _rawResult(
-              termination: CombatV1CpuMatchTermination.invariantViolation,
-              winnerPlayerIndex: 0,
-              winnerWrestlerId: 'misaki',
-              invariantViolationMessage: 'engine bug',
-            ),
-          );
-        });
-
-        test('winnerWrestlerIdあり（winnerPlayerIndexはnull） → reject', () {
+      group('invariantViolation — winner pair: inconsistent → reject '
+          '（Codex review Blocking Finding M3対応。以前は「winnerがあるだけで'
+          'reject」だったが、Phase 12A実装確認の結果それはPhase 12A自身の'
+          'checkpoint 3再分類経路（matchOver判定後の最終invariant再検証で'
+          'invariantViolationへ再分類される場合、finalState.winnerPlayerIndex'
+          'がセットされたまま残る）と矛盾する、厳しすぎる制約だったと判明した。'
+          '正しいMUSTは「winner pairがinconsistent（矛盾）でない限りreject'
+          'しない」であり、以下は矛盾したpairのみを拒否する）', () {
+        test('index null + wrestler non-null → reject', () {
           expectRejected(
             _rawResult(
               termination: CombatV1CpuMatchTermination.invariantViolation,
@@ -687,6 +683,43 @@ void main() {
           );
         });
 
+        test('index non-null + wrestler null → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              winnerPlayerIndex: 0,
+              winnerWrestlerId: null,
+              invariantViolationMessage: 'engine bug',
+            ),
+          );
+        });
+
+        test('invalid index（0/1/null以外） → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              winnerPlayerIndex: 5,
+              winnerWrestlerId: null,
+              invariantViolationMessage: 'engine bug',
+            ),
+          );
+        });
+
+        test('wrestler mismatch（indexに対応しないwrestlerId） → reject', () {
+          expectRejected(
+            _rawResult(
+              wrestlerAId: 'misaki',
+              wrestlerBId: 'jack',
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              winnerPlayerIndex: 0,
+              winnerWrestlerId: 'jack',
+              invariantViolationMessage: 'engine bug',
+            ),
+          );
+        });
+      });
+
+      group('invariantViolation — その他のfield不整合 → reject', () {
         test('terminalCauseあり → reject', () {
           expectRejected(
             _rawResult(
@@ -724,15 +757,76 @@ void main() {
             ),
           );
         });
+      });
 
-        test('正常系: winner/terminalCause/safetyLimitReachedすべて既定値なら受理される', () {
+      group('invariantViolation — 正常系: Shape A（winner無し）/ Shape B'
+          '（winner保持、M3対応）の両方を受理する', () {
+        test('Shape A: winnerPlayerIndex/winnerWrestlerIdが両方null → 受理される', () {
           final bundle = combatV1AggregateBatchResults([
             _rawResult(
               termination: CombatV1CpuMatchTermination.invariantViolation,
+              winnerPlayerIndex: null,
+              winnerWrestlerId: null,
               invariantViolationMessage: 'engine bug',
             ),
           ]);
           expect(bundle.global.invariantViolationMatches, 1);
+        });
+
+        test('Shape B: Phase 12A final-checkpoint形状（winnerPlayerIndex/'
+            'winnerWrestlerIdが有効な組）を模したresultは拒否されず、'
+            '勝敗集計には一切使われない', () {
+          final bundle = combatV1AggregateBatchResults([
+            _rawResult(
+              wrestlerAId: 'misaki',
+              wrestlerBId: 'jack',
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              winnerPlayerIndex: 0,
+              winnerWrestlerId: 'misaki',
+              terminalCause: null,
+              safetyLimitReached: false,
+              invariantViolationMessage: 'checkpoint 3: pinCardsTotalMismatch',
+            ),
+          ]);
+
+          // invariantViolationMatchesへのみ加算される。
+          expect(bundle.global.invariantViolationMatches, 1);
+          expect(bundle.global.totalMatches, 1);
+
+          // winner metadataがあっても、勝敗集計には一切使われない。
+          expect(bundle.global.completedMatches, 0);
+          expect(bundle.global.playerAWins, 0);
+          expect(bundle.global.playerBWins, 0);
+          expect(bundle.global.terminalCauseCounts.total, 0);
+
+          final misaki = bundle.wrestlers.firstWhere(
+            (w) => w.wrestlerId == 'misaki',
+          );
+          expect(misaki.playerACompletedAppearances, 0);
+          expect(misaki.playerAWins, 0);
+          expect(misaki.wins, 0);
+
+          final matchupAggregate = bundle.matchups.single;
+          expect(matchupAggregate.invariantViolationMatches, 1);
+          expect(matchupAggregate.completedMatches, 0);
+          expect(matchupAggregate.playerAWins, 0);
+          expect(matchupAggregate.playerBWins, 0);
+        });
+
+        test('Shape B: winnerPlayerIndex==1（playerB側）でも受理・非集計', () {
+          final bundle = combatV1AggregateBatchResults([
+            _rawResult(
+              wrestlerAId: 'misaki',
+              wrestlerBId: 'jack',
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              winnerPlayerIndex: 1,
+              winnerWrestlerId: 'jack',
+              invariantViolationMessage: 'checkpoint 3 violation',
+            ),
+          ]);
+          expect(bundle.global.invariantViolationMatches, 1);
+          expect(bundle.global.playerAWins, 0);
+          expect(bundle.global.playerBWins, 0);
         });
       });
     },
