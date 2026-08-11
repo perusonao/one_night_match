@@ -14,10 +14,15 @@
 - 実装: `lib/src/combat_v1/simulation/batch/combat_v1_batch_matchup.dart` /
   `combat_v1_batch_simulation_config.dart` / `combat_v1_batch_aggregate.dart` /
   `combat_v1_batch_aggregator.dart` / `combat_v1_batch_simulation_result.dart` /
-  `combat_v1_batch_simulation_runner.dart`
+  `combat_v1_batch_simulation_runner.dart`（domain）/
+  `devtools/combat_v1_batch_result_snapshot_serializer.dart` /
+  `devtools/combat_v1_batch_result_snapshot_writer.dart`（29章、development snapshot、
+  正式Export APIではない）/ `tool/combat_v1_batch_result_snapshot.dart`（devtool script）
 - テスト: `test/combat_v1/batch/combat_v1_batch_matchup_test.dart` /
   `combat_v1_batch_simulation_config_test.dart` / `combat_v1_batch_aggregator_test.dart` /
-  `combat_v1_batch_simulation_runner_test.dart`
+  `combat_v1_batch_simulation_runner_test.dart` /
+  `devtools/combat_v1_batch_result_snapshot_serializer_test.dart` /
+  `devtools/combat_v1_batch_result_snapshot_writer_test.dart`
 
 ---
 
@@ -735,3 +740,87 @@ Phase 12B-1の`CombatV1BatchSimulationResult`・各aggregate型は、Phase 12B-2
 `CombatV1MatchSimulationResult`が保持しているため、Phase 12B-2はPhase 12B-1の
 streaming/aggregation基盤へ新しいaccumulator counterを追加するだけで実装できる想定）が、
 Phase 12B-1自身はこれらを一切参照・集計しない。
+
+## 29. Development Result Snapshot（devtools、正式Export APIではない）
+
+Phase 12B-1のscopeを変えずに、開発・検証時にBatch Simulationの最終集計結果を人間が
+ファイルとして確認・共有できるようにするため、`lib/src/combat_v1/simulation/batch/devtools/`
+配下へ**development専用**のsnapshot出力を追加した。正式なCSV/JSON Export API・
+Dashboard・UI・database保存ではない——将来Phase 12B-2以降で正式なExport機能を設計する際も、
+このdevtoolsをそのまま昇格させることは想定しない。
+
+### 責務分離
+
+```
+CombatV1BatchSimulationResult（domain、Phase 12B-1コア。変更なし）
+        |
+        v
+combatV1BatchResultSnapshotJson（pure、devtools/combat_v1_batch_result_snapshot_serializer.dart）
+        |  Map<String, Object?>
+        v
+writeCombatV1BatchResultSnapshot（dart:io、devtools/combat_v1_batch_result_snapshot_writer.dart）
+        |
+        v
+build/combat_v1_simulation/combat_v1_batch_result_<timestamp>.json
+```
+
+- `CombatV1BatchSimulationResult`・各aggregate型（`CombatV1GlobalAggregate`等）へ
+  `toJson()`等のserialization責務は一切追加していない——domain modelはPhase 12B-1
+  コアのまま不変。
+- `combatV1BatchResultSnapshotJson`はpure function（`dart:io`をimportしない）。入力は
+  完成済みの`CombatV1BatchSimulationResult`のみ——個別`CombatV1MatchSimulationResult`・
+  `simulationMatchId`・seed・replay metadata・action traceには一切アクセスしない。
+  そのため17章のaggregate-onlyメモリ契約・M1修正（`CombatV1BatchAggregationAccumulator`
+  がO(totalMatches)のcollectionを持たないこと）に一切影響しない
+  （`CombatV1BatchAggregationAccumulator`・`CombatV1BatchSimulationRunner`自体は
+  このdevtools追加で変更していない）。
+- ファイルへの実書き出し（`dart:io`使用）は`combat_v1_batch_result_snapshot_writer.dart`
+  という別fileへ分離。
+
+### Snapshot content
+
+`generatedAt`はfile内metadata・file名生成にのみ使用し、simulation identity/seed
+derivationには一切関与しない（Phase 12Aの`simulationMatchId`/seed derivationは
+現在時刻に依存しないpure functionのまま）。
+
+- `metadata`: `generatedAt`/`game`/`simulator`/`phase`/`masterSeed`/
+  `matchesPerMatchup`/`requestedMatchCount`/`executedMatchCount`/`maxActions`/
+  `wrestlerIds`/`playerAPolicy`/`playerBPolicy`/`rules`（`CombatV1RulesConfig`の
+  全22 field、`deckComposition`を含む。18章の`_rulesConfigValueEquals`と同じ範囲）
+- `global`: 20章のGlobal Aggregate全項目 + `terminalCauses`
+- `orderedMatchups`: canonical matrix順の16件、各matchupのMatchup Aggregate全項目
+  （21章）
+- `wrestlers`: Wrestler Aggregate全項目（22章）+ `playerASeat`/`playerBSeat`内訳
+- `seat`: Seat Aggregate全項目（23章）+ `currentRuleInterpretation`（人間可読な注釈
+  のみ。API field名をfirstPlayerへ変更してはいない）
+- `mirror`: Mirror Aggregate全項目（24章）
+
+denominatorが0のrateは、JSON化しても`null`のまま（`0.0`へfabricationしない、13章の
+denominator semanticsをそのまま維持）。
+
+### Output directory / file name
+
+`build/combat_v1_simulation/`（default）。`/build/`はリポジトリの`.gitignore`で
+既にignore対象のため、追加の`.gitignore`エントリなしでsnapshot fileがGit管理対象外に
+なる。file名は`combat_v1_batch_result_<yyyyMMdd_HHmmss>.json`
+（`combatV1BatchResultSnapshotFileName`）。
+
+### 実行方法
+
+```
+dart run tool/combat_v1_batch_result_snapshot.dart
+```
+
+`tool/combat_v1_batch_result_snapshot.dart`は、default設定
+（RandomLegal/RandomLegal・masterSeed固定・matchesPerMatchup=100・maxActions=500・
+default rules、4 wrestler × 4 wrestler × 100 = 1,600 matches）で
+`CombatV1BatchSimulationRunner.run`を1回実行し、snapshotを書き出したうえで、人間向けの
+summaryを標準出力へ表示する。balance judgment（閾値判定・warning）は行わない——
+生成された数値をそのまま出力するのみ。
+
+### Tests
+
+`test/combat_v1/batch/devtools/combat_v1_batch_result_snapshot_serializer_test.dart`
+（schema・null semantics・deterministic content）・
+`combat_v1_batch_result_snapshot_writer_test.dart`（実際のfile書き出し、一時
+directory使用）。
