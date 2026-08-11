@@ -160,7 +160,8 @@ single-owner・plain Dart classとして設計する:
 - `CombatV1MatchTerminalCause? _terminalCause`
 - `CombatV1LegalAction? _lastAction`・`CombatV1MatchState? _stateBeforeLastAction`
   （terminal cause分類専用）
-- `List<CombatV1PlayableObservation> _recentObservations`（bounded、13章）
+- `List<CombatV1PlayableObservation> _recentObservations`（bounded、上限8件。
+  超過分は古いものから破棄する。13章）
 
 Widget/呼び出し側は`_state`へ直接アクセスできない——常に
 `controller.snapshot`（hidden-safeなprojection）を介して読み取る（9章）。
