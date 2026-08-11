@@ -14,6 +14,7 @@ import 'technique_deck/technique_deck_builder_screen.dart';
 import 'technique_deck/technique_match_screen.dart';
 import 'technique_deck/technique_match_setup_screen.dart';
 import 'playtest_analytics/playtest_analytics_screen.dart';
+import 'combat_v1/dashboard/combat_v1_balance_dashboard_screen.dart';
 import 'app_build_info.dart';
 
 const _pink = Color(0xffff477e);
@@ -1209,6 +1210,20 @@ class _DebugScreenState extends State<DebugScreen> {
                   ),
                   icon: const Icon(Icons.query_stats),
                   label: const Text('Playtest Analytics（Technique Match自動診断）'),
+                ),
+                const SizedBox(height: 8),
+                // Balance Dashboard 1A: Combat Ver.1のCPU vs CPU batch
+                // simulation結果を確認するための開発用画面。一般プレイヤー
+                // 向け機能ではないため「開発用」を明示する。
+                FilledButton.tonalIcon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const CombatV1BalanceDashboardScreen(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.leaderboard),
+                  label: const Text('Combat V1 Balance Dashboard（開発用）'),
                 ),
                 const SizedBox(height: 12),
                 _metric('総試合数', '${analytics!.totalMatches}'),
