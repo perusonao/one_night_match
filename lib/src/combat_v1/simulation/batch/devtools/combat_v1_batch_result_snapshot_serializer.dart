@@ -21,6 +21,7 @@ library;
 import '../../../combat_v1_deck.dart';
 import '../../../combat_v1_rules_config.dart';
 import '../combat_v1_batch_aggregate.dart';
+import '../combat_v1_batch_length_statistics.dart';
 import '../combat_v1_batch_simulation_result.dart';
 
 /// [result]から、development snapshot用のJSON-serializableな
@@ -44,7 +45,7 @@ Map<String, Object?> combatV1BatchResultSnapshotJson(
       'generatedAt': generatedAt.toIso8601String(),
       'game': 'one_night_match',
       'simulator': 'combat_v1_batch_simulation',
-      'phase': '12B-1',
+      'phase': '12B-2A',
       'masterSeed': config.masterSeed,
       'matchesPerMatchup': config.matchesPerMatchup,
       'requestedMatchCount': result.requestedMatchCount,
@@ -60,6 +61,7 @@ Map<String, Object?> combatV1BatchResultSnapshotJson(
     'wrestlers': [for (final w in result.wrestlers) _wrestlerJson(w)],
     'seat': _seatJson(result.seat),
     'mirror': _mirrorJson(result.mirror),
+    'statistics': _statisticsJson(result.statistics),
   };
 }
 
@@ -151,6 +153,46 @@ Map<String, Object?> _mirrorJson(CombatV1MirrorAggregate mirror) => {
   'playerAWinRateCompletedMatches': mirror.playerAWinRateCompletedMatches,
   'absoluteDeviationFromFiftyPercent': mirror.absoluteDeviationFromFiftyPercent,
   'safetyLimitRate': mirror.safetyLimitRate,
+};
+
+/// Phase 12B-2A — [CombatV1NumericDistributionSummary]のJSON表現
+/// （sampleCount/mean/median/p90/p95/min/maxの7 key固定。emptyの場合
+/// `sampleCount: 0`、他はJSON nullのまま——`0`/`0.0`へfabricateしない）。
+Map<String, Object?> _numericDistributionSummaryJson(
+  CombatV1NumericDistributionSummary summary,
+) => {
+  'sampleCount': summary.sampleCount,
+  'mean': summary.mean,
+  'median': summary.median,
+  'p90': summary.p90,
+  'p95': summary.p95,
+  'min': summary.min,
+  'max': summary.max,
+};
+
+Map<String, Object?> _matchLengthStatisticsJson(
+  CombatV1MatchLengthStatistics length,
+) => {
+  'actionCount': _numericDistributionSummaryJson(length.actionCount),
+  'finalTurnNumber': _numericDistributionSummaryJson(length.finalTurnNumber),
+};
+
+/// Phase 12B-1 `orderedMatchups`と同じcanonical order
+/// （`result.statistics.matchups`）でmatchup別length statisticsを列挙する。
+/// `allExecuted`は実装しないため、`completed`の兄弟keyとしての空treeは
+/// 出力しない（design doc 22章「Snapshot Extension」）。
+Map<String, Object?> _statisticsJson(
+  CombatV1BatchDescriptiveStatistics statistics,
+) => {
+  'global': {'completed': _matchLengthStatisticsJson(statistics.global.length)},
+  'orderedMatchups': [
+    for (final entry in statistics.matchups)
+      {
+        'wrestlerAId': entry.matchup.wrestlerAId,
+        'wrestlerBId': entry.matchup.wrestlerBId,
+        'completed': _matchLengthStatisticsJson(entry.length),
+      },
+  ],
 };
 
 /// [CombatV1RulesConfig]の全outcome-affecting values（Phase 12Aの

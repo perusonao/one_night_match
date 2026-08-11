@@ -530,4 +530,93 @@ void main() {
       expect(identical(result.termination, result.global.termination), isTrue);
     });
   });
+
+  group('M. Phase 12B-2A — statistics統合', () {
+    test('statistics.global.length.actionCount/finalTurnNumberの'
+        'sampleCountがglobal.completedMatchesと一致する', () {
+      final config = _config(matchesPerMatchup: 3, masterSeed: 42);
+      final result = _runner.run(config);
+
+      expect(
+        result.statistics.global.length.actionCount.sampleCount,
+        result.global.completedMatches,
+      );
+      expect(
+        result.statistics.global.length.finalTurnNumber.sampleCount,
+        result.global.completedMatches,
+      );
+    });
+
+    test('statistics.matchupsはresult.matchupsと同じcanonical order・'
+        '同じ件数で対応し、各entryのsampleCountがcompletedMatchesと一致する', () {
+      final config = _config(matchesPerMatchup: 3, masterSeed: 42);
+      final result = _runner.run(config);
+
+      expect(result.statistics.matchups, hasLength(result.matchups.length));
+      for (var i = 0; i < result.matchups.length; i++) {
+        final core = result.matchups[i];
+        final stats = result.statistics.matchups[i];
+        expect(stats.matchup, core.matchup);
+        expect(stats.length.actionCount.sampleCount, core.completedMatches);
+        expect(
+          stats.length.finalTurnNumber.sampleCount,
+          core.completedMatches,
+        );
+      }
+
+      final matchupSampleSum = result.statistics.matchups.fold<int>(
+        0,
+        (sum, m) => sum + m.length.actionCount.sampleCount,
+      );
+      expect(
+        matchupSampleSum,
+        result.statistics.global.length.actionCount.sampleCount,
+      );
+    });
+
+    test('同一configを複数回runしてもstatisticsが同一になる（determinism）', () {
+      final config = _config(matchesPerMatchup: 4, masterSeed: 999);
+      final resultA = _runner.run(config);
+      final resultB = _runner.run(config);
+
+      expect(
+        resultA.statistics.global.length.actionCount.sampleCount,
+        resultB.statistics.global.length.actionCount.sampleCount,
+      );
+      expect(
+        resultA.statistics.global.length.actionCount.mean,
+        resultB.statistics.global.length.actionCount.mean,
+      );
+      expect(
+        resultA.statistics.global.length.actionCount.median,
+        resultB.statistics.global.length.actionCount.median,
+      );
+      expect(
+        resultA.statistics.global.length.actionCount.p90,
+        resultB.statistics.global.length.actionCount.p90,
+      );
+      expect(
+        resultA.statistics.global.length.actionCount.p95,
+        resultB.statistics.global.length.actionCount.p95,
+      );
+      for (var i = 0; i < resultA.statistics.matchups.length; i++) {
+        expect(
+          resultA.statistics.matchups[i].length.actionCount.sampleCount,
+          resultB.statistics.matchups[i].length.actionCount.sampleCount,
+        );
+      }
+    });
+
+    test('statistics.matchups listはunmodifiable', () {
+      final config = _config(
+        wrestlerIds: const ['misaki', 'jack'],
+        matchesPerMatchup: 1,
+      );
+      final result = _runner.run(config);
+      expect(
+        () => result.statistics.matchups.add(result.statistics.matchups.first),
+        throwsUnsupportedError,
+      );
+    });
+  });
 }
