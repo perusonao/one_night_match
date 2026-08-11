@@ -112,8 +112,22 @@ bool _isCpuAttackWithHumanCounterAvailable(CombatV1PlayableMatchSnapshot s) =>
     _isCpuAttackHumanDefend(s) &&
     s.legalActions.whereType<CombatV1CounterAction>().isNotEmpty;
 
+/// Humanが DOWN のまま、standUp/restのみが合法になる`action`フェーズの
+/// 手番へ到達したか（Codex exact-HEAD review指摘対応）。
+///
+/// `CombatV1LegalActionEnumerator.enumerate`は`phase`で先に分岐し
+/// （`combat_v1_legal_action_enumerator.dart`）、`discard`フェーズは
+/// postureを一切見ずにactive playerのhand全件をdiscard対象として列挙する
+/// （turn開始直後の強制discardはDOWNでも免除されない）。そのため
+/// 「Human DOWN + isHumanInputRequired」だけを条件にすると、
+/// `phase == discard`（legal actionsがdiscardのみ）のsnapshotを誤って
+/// fixtureとして採用してしまう——DOWNでstandUp/restのみが列挙されるのは
+/// `phase == action`（`_enumerateActionDown`）の場合のみなので、
+/// `phase == action`を明示的に要求する。
 bool _isHumanDownAndActive(CombatV1PlayableMatchSnapshot s) =>
-    s.human.posture == CombatV1WrestlerPosture.down && s.isHumanInputRequired;
+    s.human.posture == CombatV1WrestlerPosture.down &&
+    s.isHumanInputRequired &&
+    s.phase == CombatV1MatchPhase.action;
 
 void main() {
   group('22-23. Counter semantics / Counter actor test', () {
@@ -373,8 +387,14 @@ void main() {
       );
       final snap = controller!.snapshot;
       expect(snap.human.posture, CombatV1WrestlerPosture.down);
+      expect(
+        snap.currentActorPlayerIndex,
+        CombatV1PlayableMatchController.humanPlayerIndex,
+      );
+      expect(snap.phase, CombatV1MatchPhase.action);
 
-      // DOWN時はtechnique/PIN/endTurnは列挙されない。
+      // DOWN時はtechnique/PIN/endTurn/discardは列挙されない
+      // （discardが列挙されるのはphase==discardのみ、22章regression参照）。
       for (final action in snap.legalActions) {
         expect(
           action.kind,
@@ -396,6 +416,30 @@ void main() {
 
       if (chosen.kind == CombatV1LegalActionKind.standUp) {
         expect(controller.snapshot.human.posture, CombatV1WrestlerPosture.stand);
+      }
+    });
+
+    test('HumanがDOWNのままdiscardフェーズへ戻った場合はdiscardのみが合法'
+        '（DOWNでも強制discardは免除されない、Codex review指摘の'
+        'regression）', () {
+      final controller = _findScenario(
+        (s) =>
+            s.human.posture == CombatV1WrestlerPosture.down &&
+            s.isHumanInputRequired &&
+            s.phase == CombatV1MatchPhase.discard,
+      );
+      expect(
+        controller,
+        isNotNull,
+        reason: '探索範囲内でHumanがDOWNのままdiscardフェーズへ戻る局面が'
+            '見つかりませんでした',
+      );
+      final snap = controller!.snapshot;
+      expect(snap.human.posture, CombatV1WrestlerPosture.down);
+      expect(snap.phase, CombatV1MatchPhase.discard);
+      expect(snap.legalActions, isNotEmpty);
+      for (final action in snap.legalActions) {
+        expect(action.kind, CombatV1LegalActionKind.discard);
       }
     });
 
