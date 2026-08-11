@@ -9,6 +9,8 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_aggregate.dart';
+import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_matchup.dart';
 import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_simulation_config.dart';
 import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_simulation_result.dart';
 import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_simulation_runner.dart';
@@ -148,6 +150,9 @@ void main() {
         'completedMatches',
         'safetyLimitMatches',
         'invariantViolationMatches',
+        'completionRate',
+        'safetyLimitRate',
+        'invariantViolationRate',
         'playerAWins',
         'playerBWins',
         'playerAWinRateCompletedMatches',
@@ -165,6 +170,32 @@ void main() {
       expect(pairs, contains('akari-reina'));
       expect(pairs, contains('reina-akari'));
     });
+
+    test(
+      'orderedMatchups: completionRate/safetyLimitRate/invariantViolationRateは'
+      'CombatV1MatchupAggregateのdirect getter値と一致する（Codex review Major '
+      'Finding M4対応）',
+      () {
+        final matchups = json['orderedMatchups']! as List<Object?>;
+        final byId = {
+          for (final entry in matchups.cast<Map<String, Object?>>())
+            '${entry['wrestlerAId']}-${entry['wrestlerBId']}': entry,
+        };
+
+        for (final matchup in result.matchups) {
+          final key =
+              '${matchup.matchup.wrestlerAId}-'
+              '${matchup.matchup.wrestlerBId}';
+          final entry = byId[key]!;
+          expect(entry['completionRate'], matchup.completionRate);
+          expect(entry['safetyLimitRate'], matchup.safetyLimitRate);
+          expect(
+            entry['invariantViolationRate'],
+            matchup.invariantViolationRate,
+          );
+        }
+      },
+    );
 
     test('wrestlers fields一式（seat別内訳含む）', () {
       final wrestlers = json['wrestlers']! as List<Object?>;
@@ -271,6 +302,85 @@ void main() {
         expect(decodedGlobal['playerAWinRateCompletedMatches'], isNull);
       },
     );
+
+    test('matchup totalMatches==0（synthetic fixture）ならcompletionRate/'
+        'safetyLimitRate/invariantViolationRateはJSON nullになる（Codex review '
+        'Major Finding M4対応。通常のbatch実行ではmatchup total==0のentryは'
+        '発生しないため、serializer unit fixtureで直接構築して確認する）', () {
+      const matchup = CombatV1Matchup(
+        wrestlerAId: 'misaki',
+        wrestlerBId: 'jack',
+      );
+      const zeroTermination = CombatV1TerminationDistribution(
+        totalMatches: 0,
+        completedMatches: 0,
+        safetyLimitMatches: 0,
+        invariantViolationMatches: 0,
+      );
+      const zeroTerminalCauseCounts = CombatV1TerminalCauseCounts(
+        normalPin: 0,
+        directPin: 0,
+        submission: 0,
+        submissionFinisher: 0,
+        other: 0,
+      );
+
+      final syntheticResult = CombatV1BatchSimulationResult(
+        config: CombatV1BatchSimulationConfig(
+          wrestlerIds: const ['misaki', 'jack'],
+          matchesPerMatchup: 1,
+          masterSeed: 1,
+        ),
+        requestedMatchCount: 0,
+        executedMatchCount: 0,
+        global: const CombatV1GlobalAggregate(
+          termination: zeroTermination,
+          playerAWins: 0,
+          playerBWins: 0,
+          terminalCauseCounts: zeroTerminalCauseCounts,
+        ),
+        matchups: const [
+          CombatV1MatchupAggregate(
+            matchup: matchup,
+            termination: zeroTermination,
+            playerAWins: 0,
+            playerBWins: 0,
+            terminalCauseCounts: zeroTerminalCauseCounts,
+          ),
+        ],
+        wrestlers: const [],
+        seat: const CombatV1SeatAggregate(
+          playerACompletedMatches: 0,
+          playerBCompletedMatches: 0,
+          playerAWins: 0,
+          playerBWins: 0,
+        ),
+        mirror: const CombatV1MirrorAggregate(
+          termination: zeroTermination,
+          playerAWins: 0,
+          playerBWins: 0,
+        ),
+      );
+
+      final json = combatV1BatchResultSnapshotJson(
+        syntheticResult,
+        generatedAt: _generatedAt,
+      );
+      final matchupJson =
+          (json['orderedMatchups']! as List<Object?>).single
+              as Map<String, Object?>;
+
+      expect(matchupJson['completionRate'], isNull);
+      expect(matchupJson['safetyLimitRate'], isNull);
+      expect(matchupJson['invariantViolationRate'], isNull);
+
+      // JSON文字列化してもnullのまま。
+      final decoded = jsonDecode(jsonEncode(json)) as Map<String, Object?>;
+      final decodedMatchup =
+          (decoded['orderedMatchups']! as List<Object?>).single
+              as Map<String, Object?>;
+      expect(decodedMatchup['completionRate'], isNull);
+    });
   });
 
   group('combatV1BatchResultSnapshotJson — deterministic content', () {

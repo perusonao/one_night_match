@@ -95,6 +95,13 @@ Map<String, Object?> _matchupJson(CombatV1MatchupAggregate matchup) => {
   'completedMatches': matchup.completedMatches,
   'safetyLimitMatches': matchup.safetyLimitMatches,
   'invariantViolationMatches': matchup.invariantViolationMatches,
+  // matchup.completionRate/safetyLimitRate/invariantViolationRateは
+  // CombatV1MatchupAggregateのdelegating getter（M4対応、Global aggregate
+  // と同型のdirect API）からそのまま読み取るのみ——serializer側でrate計算を
+  // 再実装しない。
+  'completionRate': matchup.completionRate,
+  'safetyLimitRate': matchup.safetyLimitRate,
+  'invariantViolationRate': matchup.invariantViolationRate,
   'playerAWins': matchup.playerAWins,
   'playerBWins': matchup.playerBWins,
   'playerAWinRateCompletedMatches': matchup.playerAWinRateCompletedMatches,

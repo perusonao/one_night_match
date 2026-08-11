@@ -12,7 +12,9 @@ import 'package:one_night_match/src/combat_v1/combat_v1_cpu_match_runner.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_engine.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
+import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_aggregate.dart';
 import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_aggregator.dart';
+import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_matchup.dart';
 import 'package:one_night_match/src/combat_v1/simulation/combat_v1_match_simulation_result.dart';
 
 const CombatV1RulesConfig _rules = CombatV1RulesConfig();
@@ -255,6 +257,105 @@ void main() {
       ]);
       expect(bundle.matchups, hasLength(2));
     });
+  });
+
+  group('CombatV1MatchupAggregate — completionRate/safetyLimitRate/'
+      'invariantViolationRate direct API（Codex review Major Finding M4対応。'
+      'Global aggregateと同型のdelegating getterをMatchup aggregateへも'
+      '追加し、public schema非対称を解消した）', () {
+    test('normal counts: total=10, completed=7, safety=2, invariant=1', () {
+      final results = <CombatV1MatchSimulationResult>[
+        for (var i = 0; i < 7; i++)
+          _result(
+            id: 'completed-$i',
+            wrestlerAId: 'misaki',
+            wrestlerBId: 'jack',
+          ),
+        for (var i = 0; i < 2; i++)
+          _result(
+            id: 'safety-$i',
+            wrestlerAId: 'misaki',
+            wrestlerBId: 'jack',
+            termination: CombatV1CpuMatchTermination.safetyLimit,
+          ),
+        _rawResult(
+          id: 'invariant-0',
+          wrestlerAId: 'misaki',
+          wrestlerBId: 'jack',
+          termination: CombatV1CpuMatchTermination.invariantViolation,
+          invariantViolationMessage: 'engine bug',
+        ),
+      ];
+      final bundle = combatV1AggregateBatchResults(results);
+      final matchup = bundle.matchups.single;
+
+      expect(matchup.totalMatches, 10);
+      expect(matchup.completionRate, closeTo(0.7, 1e-9));
+      expect(matchup.safetyLimitRate, closeTo(0.2, 1e-9));
+      expect(matchup.invariantViolationRate, closeTo(0.1, 1e-9));
+    });
+
+    test(
+      'zero total → completionRate/safetyLimitRate/invariantViolationRateはnull',
+      () {
+        // aggregator経由ではmatchup bucketは初回追加時にしか生成されない
+        // ため、total==0のmatchup entryは通常生成され得ない——ここでは
+        // CombatV1MatchupAggregateを直接構築するunit fixtureで確認する。
+        const matchup = CombatV1MatchupAggregate(
+          matchup: CombatV1Matchup(wrestlerAId: 'misaki', wrestlerBId: 'jack'),
+          termination: CombatV1TerminationDistribution(
+            totalMatches: 0,
+            completedMatches: 0,
+            safetyLimitMatches: 0,
+            invariantViolationMatches: 0,
+          ),
+          playerAWins: 0,
+          playerBWins: 0,
+          terminalCauseCounts: CombatV1TerminalCauseCounts(
+            normalPin: 0,
+            directPin: 0,
+            submission: 0,
+            submissionFinisher: 0,
+            other: 0,
+          ),
+        );
+
+        expect(matchup.completionRate, isNull);
+        expect(matchup.safetyLimitRate, isNull);
+        expect(matchup.invariantViolationRate, isNull);
+      },
+    );
+
+    test(
+      'delegation consistency: matchup.rate == matchup.termination.rate',
+      () {
+        final bundle = combatV1AggregateBatchResults([
+          _result(id: 'm1', wrestlerAId: 'misaki', wrestlerBId: 'jack'),
+          _result(
+            id: 'm2',
+            wrestlerAId: 'misaki',
+            wrestlerBId: 'jack',
+            termination: CombatV1CpuMatchTermination.safetyLimit,
+          ),
+          _rawResult(
+            id: 'm3',
+            wrestlerAId: 'akari',
+            wrestlerBId: 'reina',
+            termination: CombatV1CpuMatchTermination.invariantViolation,
+            invariantViolationMessage: 'engine bug',
+          ),
+        ]);
+
+        for (final matchup in bundle.matchups) {
+          expect(matchup.completionRate, matchup.termination.completionRate);
+          expect(matchup.safetyLimitRate, matchup.termination.safetyLimitRate);
+          expect(
+            matchup.invariantViolationRate,
+            matchup.termination.invariantViolationRate,
+          );
+        }
+      },
+    );
   });
 
   group('combatV1AggregateBatchResults — wrestler grouping / A・B seat帰属', () {

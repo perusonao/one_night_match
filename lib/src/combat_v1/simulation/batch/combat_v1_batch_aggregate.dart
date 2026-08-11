@@ -118,6 +118,22 @@ class CombatV1MatchupAggregate {
   int get safetyLimitMatches => termination.safetyLimitMatches;
   int get invariantViolationMatches => termination.invariantViolationMatches;
 
+  /// [CombatV1GlobalAggregate.completionRate]と同型のdelegating getter
+  /// （Codex review Major Finding M4対応——Global aggregateとのAPI対称性を
+  /// 確保する）。分母は[totalMatches]（13章）。`totalMatches == 0`なら
+  /// `null`。
+  double? get completionRate => termination.completionRate;
+
+  /// [CombatV1GlobalAggregate.safetyLimitRate]と同型のdelegating getter
+  /// （M4対応）。分母は[totalMatches]（13章）。`totalMatches == 0`なら
+  /// `null`。
+  double? get safetyLimitRate => termination.safetyLimitRate;
+
+  /// [CombatV1GlobalAggregate.invariantViolationRate]と同型のdelegating
+  /// getter（M4対応）。分母は[totalMatches]（13章）。`totalMatches == 0`
+  /// なら`null`。
+  double? get invariantViolationRate => termination.invariantViolationRate;
+
   /// 分母は[completedMatches]（13章）。`completedMatches == 0`なら`null`。
   double? get playerAWinRateCompletedMatches =>
       completedMatches == 0 ? null : playerAWins / completedMatches;

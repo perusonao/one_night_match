@@ -6,8 +6,10 @@
   review 1ラウンド目「C. CHANGES REQUIRED」（Blocking Finding M1: simulationMatchId
   全件保持によるO(totalMatches) memory／M2: pure aggregatorのstructured result
   invariant不足）、2ラウンド目「C. CHANGES REQUIRED」（Blocking Finding M3:
-  invariantViolationのwinner shape制約がPhase 12A semanticsと不整合）を、いずれも
-  修正済み（15・17・18章参照）。
+  invariantViolationのwinner shape制約がPhase 12A semanticsと不整合）、PR #16 GitHub
+  Final Review（Major Finding M4: `CombatV1MatchupAggregate`のcompletionRate等
+  delegating getter未実装によるGlobal aggregateとのAPI非対称）を、いずれも修正済み
+  （15・17・18・21章参照）。
 - 関連: [`combat_v1_phase12a_simulation_core.md`](combat_v1_phase12a_simulation_core.md)（Phase
   12A、直接の基盤） / [`combat_v1_phase11b_cpu.md`](combat_v1_phase11b_cpu.md) /
   [`combat_v1_phase11a_production_match_setup.md`](combat_v1_phase11a_production_match_setup.md)
@@ -574,7 +576,16 @@ deterministic（6章のcanonical matrix順・`wrestlerIds`の初出順）。
 `CombatV1MatchupAggregate`:
 
 - `matchup: CombatV1Matchup`
-- `termination: CombatV1TerminationDistribution`（+ delegating getter、20章と同型）
+- `termination: CombatV1TerminationDistribution`（`totalMatches`/`completedMatches`/
+  `safetyLimitMatches`/`invariantViolationMatches`と3 rateを、20章の
+  `CombatV1GlobalAggregate`と同型のフラットなdelegating getterとしても公開:
+  `totalMatches`/`completedMatches`/`safetyLimitMatches`/`invariantViolationMatches`/
+  `completionRate`/`safetyLimitRate`/`invariantViolationRate`——Codex review Major
+  Finding M4対応。当初documented契約（本章の「20章と同型」という記述）どおりに
+  `completionRate`/`safetyLimitRate`/`invariantViolationRate`が実際には未実装で、
+  `matchup.termination.completionRate`経由でしか取得できずGlobal aggregateとAPIが
+  非対称だった。ロジックを複製せず`CombatV1TerminationDistribution`へdelegateする
+  形で解消した）
 - `playerAWins`/`playerBWins`
 - `playerAWinRateCompletedMatches`/`playerBWinRateCompletedMatches`
 - `terminalCauseCounts: CombatV1TerminalCauseCounts`
