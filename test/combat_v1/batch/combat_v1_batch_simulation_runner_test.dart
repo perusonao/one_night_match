@@ -177,6 +177,113 @@ void main() {
       // 直接確認は次のgroupで行う）。
       expect(isolatedResult.masterSeed, config.masterSeed);
     });
+
+    test('per-match identity: wrestlerIds順序（matrix traversal順）を変えても、代表'
+        '(matchup, localMatchIndex)のPhase 12A resultは完全に一致する（Codex '
+        'review Minor m1対応——aggregate比較だけでなく、simulationMatchId/seed/'
+        'termination/terminalCause/winner/actionCount/finalTurnNumber/'
+        'finalStateSummaryをbit単位で固定する）。BatchResultはaggregate-onlyの'
+        'ため、production APIへall match result retentionは追加せず、'
+        'batch configから公開APIのみでsingle matchを再構築して比較する。', () {
+      final configCanonical = _config(
+        wrestlerIds: const ['misaki', 'jack', 'akari', 'reina'],
+        matchesPerMatchup: 3,
+        masterSeed: 31415,
+      );
+      final configReversed = _config(
+        wrestlerIds: const ['reina', 'akari', 'jack', 'misaki'],
+        matchesPerMatchup: 3,
+        masterSeed: 31415,
+      );
+      final configShuffled = _config(
+        wrestlerIds: const ['akari', 'reina', 'misaki', 'jack'],
+        matchesPerMatchup: 3,
+        masterSeed: 31415,
+      );
+
+      const representativeMatchups = [
+        CombatV1Matchup(wrestlerAId: 'misaki', wrestlerBId: 'jack'),
+        CombatV1Matchup(wrestlerAId: 'jack', wrestlerBId: 'misaki'),
+        CombatV1Matchup(wrestlerAId: 'akari', wrestlerBId: 'akari'),
+        CombatV1Matchup(wrestlerAId: 'reina', wrestlerBId: 'misaki'),
+      ];
+
+      for (final matchup in representativeMatchups) {
+        for (var localMatchIndex = 0; localMatchIndex < 3; localMatchIndex++) {
+          final fromCanonical = _simulationRunner.runSingleMatch(
+            _singleMatchConfigFor(configCanonical, matchup),
+            localMatchIndex,
+          );
+          final fromReversed = _simulationRunner.runSingleMatch(
+            _singleMatchConfigFor(configReversed, matchup),
+            localMatchIndex,
+          );
+          final fromShuffled = _simulationRunner.runSingleMatch(
+            _singleMatchConfigFor(configShuffled, matchup),
+            localMatchIndex,
+          );
+
+          for (final other in [fromReversed, fromShuffled]) {
+            final reason = '$matchup localMatchIndex:$localMatchIndex';
+            expect(
+              other.simulationMatchId,
+              fromCanonical.simulationMatchId,
+              reason: '$reason simulationMatchId',
+            );
+            expect(
+              other.matchSeed,
+              fromCanonical.matchSeed,
+              reason: '$reason matchSeed',
+            );
+            expect(
+              other.engineSeed,
+              fromCanonical.engineSeed,
+              reason: '$reason engineSeed',
+            );
+            expect(
+              other.playerAPolicySeed,
+              fromCanonical.playerAPolicySeed,
+              reason: '$reason playerAPolicySeed',
+            );
+            expect(
+              other.playerBPolicySeed,
+              fromCanonical.playerBPolicySeed,
+              reason: '$reason playerBPolicySeed',
+            );
+            expect(
+              other.termination,
+              fromCanonical.termination,
+              reason: '$reason termination',
+            );
+            expect(
+              other.terminalCause,
+              fromCanonical.terminalCause,
+              reason: '$reason terminalCause',
+            );
+            expect(
+              other.winnerPlayerIndex,
+              fromCanonical.winnerPlayerIndex,
+              reason: '$reason winnerPlayerIndex',
+            );
+            expect(
+              other.actionCount,
+              fromCanonical.actionCount,
+              reason: '$reason actionCount',
+            );
+            expect(
+              other.finalTurnNumber,
+              fromCanonical.finalTurnNumber,
+              reason: '$reason finalTurnNumber',
+            );
+            expect(
+              other.finalStateSummary,
+              fromCanonical.finalStateSummary,
+              reason: '$reason finalStateSummary',
+            );
+          }
+        }
+      }
+    });
   });
 
   group('G. Determinism — different master seed', () {
@@ -232,10 +339,19 @@ void main() {
       expect(replayed.simulationMatchId, replayedAgain.simulationMatchId);
       expect(replayed.matchSeed, replayedAgain.matchSeed);
       expect(replayed.engineSeed, replayedAgain.engineSeed);
+      expect(replayed.playerAPolicySeed, replayedAgain.playerAPolicySeed);
+      expect(replayed.playerBPolicySeed, replayedAgain.playerBPolicySeed);
       expect(replayed.termination, replayedAgain.termination);
+      expect(replayed.terminalCause, replayedAgain.terminalCause);
       expect(replayed.winnerPlayerIndex, replayedAgain.winnerPlayerIndex);
       expect(replayed.winnerWrestlerId, replayedAgain.winnerWrestlerId);
+      expect(replayed.actionCount, replayedAgain.actionCount);
+      expect(replayed.finalTurnNumber, replayedAgain.finalTurnNumber);
       expect(replayed.finalStateSummary, replayedAgain.finalStateSummary);
+      // owner metadata（playerAOwnerId/playerBOwnerId）も、masterSeed +
+      // matchIndexから決定論的に導出されるため一致する（8章）。
+      expect(replayed.playerAOwnerId, replayedAgain.playerAOwnerId);
+      expect(replayed.playerBOwnerId, replayedAgain.playerBOwnerId);
       expect(replayed.wrestlerAId, 'akari');
       expect(replayed.wrestlerBId, 'jack');
       expect(replayed.matchIndex, 1);

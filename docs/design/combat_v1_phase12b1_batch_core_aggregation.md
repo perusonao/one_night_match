@@ -2,7 +2,10 @@
 
 - ステータス: Phase 12B-1（Deterministic Batch Matrix / Core Aggregation）実装。
   Phase 12A（`b4e13a4aad65d26be4cd56ae90276844fc4949cc`、merge済み）のpublic APIのみを
-  利用し、Core Engine・Production Data・UIは変更しない。
+  利用し、Core Engine・Production Data・UIは変更しない。Codex exact-HEAD independent
+  review 1ラウンド目「C. CHANGES REQUIRED」（Blocking Finding M1: simulationMatchId
+  全件保持によるO(totalMatches) memory／M2: pure aggregatorのstructured result
+  invariant不足）を修正済み（15・17・18章参照）。
 - 関連: [`combat_v1_phase12a_simulation_core.md`](combat_v1_phase12a_simulation_core.md)（Phase
   12A、直接の基盤） / [`combat_v1_phase11b_cpu.md`](combat_v1_phase11b_cpu.md) /
   [`combat_v1_phase11a_production_match_setup.md`](combat_v1_phase11a_production_match_setup.md)
@@ -279,17 +282,36 @@ fail-fast、Phase 12B自身の構造的invariantのみが対象——Engine inva
 - `result.matchIndex` == 呼び出したlocal matchIndex
 - `executedMatchCount == requestedMatchCount`（`matrix.length * matchesPerMatchup`）
 
-Aggregator（`CombatV1BatchAggregationAccumulator`）が検証する:
+これらはいずれもRunnerのexecution planning（matrix × local index loop）と1件の結果を
+突き合わせるcross-check——O(1)の比較のみで、試合数に比例するcollectionは一切保持しない。
 
-- `simulationMatchId`の重複なし（`add`のたびにチェック、重複時は即fail-fast——32-bit
-  identity hash衝突の理論リスクをここで検知する。Phase 12Aのhash width変更は行わない）
-- `termination == matchOver`なら`winnerPlayerIndex`が0/1のいずれかであること
-- `termination == matchOver`なら`terminalCause`が非null であること
-- `build()`時: `total == completed + safetyLimit + invariantViolation`
-- `build()`時: `completed == playerAWins + playerBWins`
-- `build()`時: `terminalCause counts合計 == completedMatches`
-- `build()`時: `global.totalMatches == Σ matchup.totalMatches`
-- `build()`時: `Σ wrestler.appearances == 2 × global.totalMatches`
+### Aggregator（`CombatV1BatchAggregationAccumulator`）が検証するもの
+
+**`add()`が1件ごとに検証する（M2対応、Codex review Blocking Finding M2）**:
+
+`result`が「Phase 12Aの実際のstructured termination契約」と矛盾しないことを検証する
+（`_validateStructuredResultInvariants`）。矛盾したresultを黙って集計へ混入させない
+——検証内容の詳細・Phase 12Aの実際の契約との対応関係は18章「Pure Aggregator」の
+「Structured Result Invariants（M2）」を参照。
+
+**`add()`が1件ごとに検証しないもの（M1対応、Codex review Blocking Finding M1）**:
+
+`simulationMatchId`のbatch全体でのglobal uniqueness——17章「Streaming Aggregation /
+Aggregate-Only Memory Strategy」の「Execution Identity と simulationMatchId（M1対応）」
+を参照。試合数に比例するidentity collectionを持たないというmemory契約を優先し、
+global duplicate検出はPhase 12B-1のMUSTから外している。
+
+**`build()`時に検証する（既存のsum invariant、変更なし）**:
+
+- `total == completed + safetyLimit + invariantViolation`
+- `completed == playerAWins + playerBWins`
+- `terminalCause counts合計 == completedMatches`
+- `global.totalMatches == Σ matchup.totalMatches`
+- `Σ wrestler.appearances == 2 × global.totalMatches`
+
+いずれも`_matchupBuckets`/`_wrestlerBuckets`（O(distinct matchup/wrestler数)のみ）と
+globalスカラーcounterから計算する防御的チェックであり、追加のO(match数)状態を必要と
+しない。
 
 ## 16. Player A/B vs First-Player Semantics
 
@@ -317,6 +339,63 @@ O(distinct matchup数)・O(distinct wrestler数)のサイズ）のみを保持�
 Phase 12B-1では**aggregate-only result**を正式契約とする。all-match retention option
 （個別match resultを保持する実行モード）は実装しない（Phase 12B-2以降のスコープ）。
 
+### Execution Identity と simulationMatchId（M1対応、Codex review Blocking Finding M1）
+
+**問題**: Phase 12B-1の初期実装は、`CombatV1BatchAggregationAccumulator`内に全試合の
+`simulationMatchId`を保持する`Set<String>`（`_seenSimulationMatchIds`）を持ち、`add`の
+たびにglobal duplicate検出を行っていた。これは個別match resultを保持していなくても、
+accumulatorのmemoryを**O(totalMatches)**にしてしまう——17章冒頭の「O(match数)のメモリを
+消費しない」というaggregate-only契約と矛盾する。Codex exact-HEAD reviewでBlocking
+Finding M1として指摘された。
+
+**設計判断**: 「batch全体でsimulationMatchIdの任意hash collisionを完全検出する」ことを
+Phase 12B-1のMUSTから**意図的に外す**。完全なglobal duplicate検出と、O(totalMatches)
+memoryを使わないstrict streamingは一般に両立しない——重複を検出するには、少なくとも
+「これまで見たID」を何らかの形で保持する必要があり、それ自体が試合数に比例するためである。
+
+**Phase 12B-1におけるexecution identityの正本**: `(CombatV1Matchup, localMatchIndex)`。
+`CombatV1BatchSimulationRunner`はordered matrix（6章）× local index `0..matchesPerMatchup-1`
+（10章）という決定論的な二重ループでmatchを1つずつ生成し、各`(matchup, localMatchIndex)`
+の組み合わせをちょうど1回だけ訪問する——この実行計画の構造自体が、実行計画上の重複
+（「同じmatchupの同じlocal indexを2回実行してしまう」）を構造的に防止する。Runnerは
+さらに、各resultが期待した`matchup`/`policy`/`masterSeed`/`maxActions`/`rules`/
+`localMatchIndex`と一致するかをcross-checkする（15章、いずれもO(1)の比較）。
+
+**simulationMatchIdの位置付け**: Phase 12Aの`simulationMatchId`
+（`deriveV1SimulationMatchId`、`combat_v1_simulation_seed.dart`）自体は変更しない。
+Phase 12B-1においては、これは以下の用途に限定して使う:
+
+- replay metadata（`CombatV1MatchSimulationResult`の1 field、11・39章参照）
+- audit metadata（結果を人間が参照する際のcanonical single-match identity）
+- エラーメッセージ中の識別子（M2 validation failureの`simulationMatchId: ...`表記等）
+
+**Aggregatorレベルでのglobal uniqueness検査はしない**——32-bit suffixの理論的hash
+collisionリスク（Phase 12A設計doc参照）を、batch全体のSetで検査することは、Phase
+12B-1のmemory契約上の理由により行わない。将来、`simulationMatchId`をDB keyや永続的な
+global identityとして使う必要が生じた場合は、より広いdigest（例: 64-bit以上）や
+別の仕組みを、その時点の別Phaseで検討する——Phase 12B-1のスコープ外。
+
+### Memory Contract（修正後）
+
+Production batch executionが保持してよいmutable stateは、概ね以下のみ
+（いずれもO(distinct matchup数 + distinct wrestler数)、試合数に非依存）:
+
+- global scalar counters（`_totalMatches`等）
+- matchup別counter bucket（`_matchupBuckets`、`Map<CombatV1Matchup, _MatchupBucket>`）
+- wrestler別counter bucket（`_wrestlerBuckets`、`Map<String, _WrestlerBucket>`）
+- seat/mirror用scalar counter
+- termination/terminal cause別scalar counter
+- 現在処理中の1件の`CombatV1MatchSimulationResult`参照（loop変数、次iterationで破棄）
+
+以下は禁止（M1修正で除去済み・今後も追加しない）:
+
+- 全match resultを保持するList
+- 全simulationMatchIdを保持するSet（またはそれに類する試合数比例のidentity collection）
+- 全seedを保持するList
+- 全local indexを保持するList
+- 全replay metadataを保持するList
+- full action trace
+
 ## 18. Pure Aggregator
 
 Aggregation logicはexecutionから完全に分離する（`combat_v1_batch_aggregator.dart`）。
@@ -332,6 +411,70 @@ Aggregation logicはexecutionから完全に分離する（`combat_v1_batch_aggr
 
 両方とも入力として受け取る`CombatV1MatchSimulationResult`以外の外部stateに依存しない
 （現在時刻・グローバル変数・Random等を一切使わない）。
+
+### Structured Result Invariants（M2対応、Codex review Blocking Finding M2）
+
+**問題**: 修正前の`add()`は、矛盾した`CombatV1MatchSimulationResult`
+（例: `termination == matchOver`なのに`winnerPlayerIndex`が`null`）を検証せずに
+黙って集計へ混入させてしまう余地があった。Codex exact-HEAD reviewでBlocking Finding
+M2として指摘された。
+
+**修正内容**: `add()`は、集計を行う前に`_validateStructuredResultInvariants(result)`で
+Phase 12Aの実際のstructured termination契約（`CombatV1CpuMatchRunner`/
+`CombatV1MatchSimulationResult.fromCpuResult`、`combat_v1_cpu_match_runner.dart`/
+`combat_v1_match_simulation_result.dart`）と整合しているかを検証する。矛盾があれば
+`CombatV1IllegalActionException`でfail-fastする。
+
+検証内容は以下の3グループ（`termination`の値ごと）＋termination共通の1項目:
+
+**termination共通**（Phase 12Aの`fromCpuResult`が保証するmapping）:
+
+- `winnerPlayerIndex`が0/1/nullのいずれかであること
+- `winnerWrestlerId`が`winnerPlayerIndex`に対応する`wrestlerId`（0→`wrestlerAId`、
+  1→`wrestlerBId`、null→`null`）と一致すること
+
+**`termination == matchOver`**（`CombatV1CpuMatchResult`が`state.isOver`から構築される
+場合に常に保証される組み合わせ）:
+
+- `winnerPlayerIndex`が0または1（非null）
+- `terminalCause`が非null
+- `safetyLimitReached == false`
+- `invariantViolationMessage == null`
+
+**`termination == safetyLimit`**（`CombatV1CpuMatchRunner.run`が`state.isOver == false`
+の場合にのみsafetyLimitを返すため、winnerは常にnullであることが保証される）:
+
+- `winnerPlayerIndex == null`（したがって`winnerWrestlerId == null`も共通項目から従う）
+- `terminalCause == null`
+- `safetyLimitReached == true`
+- `invariantViolationMessage == null`
+
+**`termination == invariantViolation`**（`CombatV1CpuMatchRunner`の全invariantViolation
+経路で常に成立）:
+
+- `terminalCause == null`
+- `safetyLimitReached == false`
+- `invariantViolationMessage`が非null・非空
+
+**重要な設計判断（invariantViolationの`winnerPlayerIndex`について）**: 上記
+`invariantViolation`の検証には、`winnerPlayerIndex == null`（したがって
+`winnerWrestlerId == null`）も含める。ただし、この制約はPhase 12Aの型シグネチャ自体が
+構造的に保証するものでは**ない**——事前にPhase 12Aの実装（`CombatV1CpuMatchRunner._buildResult`）
+を確認したところ、result返却直前の最終invariant再検証（checkpoint 3）が、既に
+`matchOver`と判定された直後のstate（`winnerPlayerIndex`が既に0/1でセット済み、
+`state.isOver == true`）を`invariantViolation`へ再分類する経路を持つことが分かった。
+この経路が実際に発生するのはCore Engine自体にbugがあり、「決着済みのstate」と「他の
+invariant違反」が同時に成立してしまった場合のみだが、発生した場合
+`finalState.winnerPlayerIndex`はセットされたまま`termination`だけが
+`invariantViolation`へ変わる。
+
+Phase 12B-1は、この（本来ほぼ到達しないはずの）経路が実際に観測された場合、それを黙って
+aggregateへ混入させず、fail-fastすることを意図的に選択する——これはPhase 12Aが保証しない
+制約をPhase 12B側で追加していることになるが、「Core Engine invariant違反の兆候を
+batch統計へ埋没させない」という安全側の判断であり、3章で述べたPhase 12B自身の
+structural/config invariant違反はfail-fastしてよいという方針とも整合する。この判断・
+根拠は`combat_v1_batch_aggregator.dart`の`_validateStructuredResultInvariants`の
+doc commentにも明記している。
 
 ## 19. Result Hierarchy
 
@@ -494,14 +637,28 @@ lib/src/combat_v1/simulation/
   `CombatV1MatchSimulationResult`（engine実行なし）で、total/completed/safety/
   invariant・A/B wins・completed分母・completed=0→null・matchup分類・wrestler分類・
   A/B seat帰属・mirror分類・mirror deviation・terminal cause分布・aggregate sum
-  invariant・duplicate simulationMatchId拒否を検証
+  invariant・**同一simulationMatchIdを2回addしても拒否されないこと（M1、17章参照）**・
+  **matchOver/safetyLimit/invariantViolationそれぞれの structured result invariant
+  違反negative test（M2、18章「Structured Result Invariants」参照、winner
+  null/invalid/mismatch・terminalCause不整合・safetyLimitReached不整合・
+  invariantViolationMessage不整合の網羅）**・**accumulatorのbuild() snapshot
+  immutability（m3、build()取得後に追加addしても既存snapshotが変化しないこと）**を検証
 - **Determinism**（`combat_v1_batch_simulation_runner_test.dart`）: 同一config→同一
   aggregate（複数回run）・execution order independence（wrestlerIds順を変えてmatrix
-  traversal順を変えても、matchup単位のaggregate値が不変）・異なるmasterSeedで
-  identity/seedが変化すること
+  traversal順を変えても、matchup単位のaggregate値が不変。**加えてm1対応として、代表
+  `(matchup, localMatchIndex)`について、異なるwrestlerIds順序から再構築した
+  `CombatV1SimulationConfig`で`runSingleMatch`を直接呼び、simulationMatchId/matchSeed/
+  engineSeed/playerA・BPolicySeed/termination/terminalCause/winnerPlayerIndex/
+  actionCount/finalTurnNumber/finalStateSummaryが完全一致することを直接固定**）・
+  異なるmasterSeedでidentity/seedが変化すること
 - **Replay**（同上）: 代表matchについて、`config` + `matchup` + `localMatchIndex`から
   `CombatV1SimulationConfig` + `CombatV1SimulationRunner.runSingleMatch`を再構築し、
-  `simulationMatchId`/seed/termination/winner/summaryが一致することを確認
+  `simulationMatchId`/matchSeed/engineSeed/playerA・BPolicySeed/termination/
+  terminalCause/winnerPlayerIndex/winnerWrestlerId/actionCount/finalTurnNumber/
+  finalStateSummary/owner metadata（playerA・BOwnerId）が一致することを確認（m2対応で
+  比較項目を拡充）。BatchResultはaggregate-onlyのため、この比較は公開APIのみで
+  single matchを再構築して行い、production `CombatV1BatchSimulationResult`へall
+  match result retentionを追加することはしない
 - **Policy Pairings**（同上）: FF/RR/FR/RFの4 built-in pairingsをsmall smokeで確認
   （defaultはRR）
 - **Safety/Invariant**（同上）: 低い`maxActions`でsafetyLimitを発生させ、batch継続・

@@ -95,6 +95,48 @@ CombatV1MatchSimulationResult _result({
   );
 }
 
+/// [_result]と異なり、`termination`と各fieldの整合性を一切自動調整しない
+/// 低レベルtest helper——M2 structured result invariant違反を意図的に
+/// 組み立てるためのもの。
+CombatV1MatchSimulationResult _rawResult({
+  String id = 'raw',
+  String wrestlerAId = 'misaki',
+  String wrestlerBId = 'jack',
+  int matchIndex = 0,
+  required CombatV1CpuMatchTermination termination,
+  CombatV1CpuMatchTerminalCause? terminalCause,
+  int? winnerPlayerIndex,
+  String? winnerWrestlerId,
+  bool safetyLimitReached = false,
+  String? invariantViolationMessage,
+}) => CombatV1MatchSimulationResult(
+  matchIndex: matchIndex,
+  simulationMatchId: id,
+  wrestlerAId: wrestlerAId,
+  wrestlerBId: wrestlerBId,
+  playerAOwnerId: 'sim-1-$matchIndex-a',
+  playerBOwnerId: 'sim-1-$matchIndex-b',
+  playerAPolicyId: 'randomLegal',
+  playerBPolicyId: 'randomLegal',
+  masterSeed: 1,
+  matchSeed: 2,
+  engineSeed: 3,
+  playerAPolicySeed: 4,
+  playerBPolicySeed: 5,
+  seedDerivationVersion: 1,
+  maxActions: 500,
+  rules: _rules,
+  termination: termination,
+  actionCount: 10,
+  finalTurnNumber: 5,
+  safetyLimitReached: safetyLimitReached,
+  finalStateSummary: _summary(),
+  terminalCause: terminalCause,
+  winnerPlayerIndex: winnerPlayerIndex,
+  winnerWrestlerId: winnerWrestlerId,
+  invariantViolationMessage: invariantViolationMessage,
+);
+
 void main() {
   group('combatV1AggregateBatchResults — termination / denominator', () {
     test('total/completed/safety/invariantの内訳', () {
@@ -459,17 +501,242 @@ void main() {
     });
   });
 
-  group('combatV1AggregateBatchResults — duplicate simulationMatchId', () {
-    test('重複したsimulationMatchIdはfail-fast', () {
-      expect(
-        () => combatV1AggregateBatchResults([
+  group(
+    'combatV1AggregateBatchResults — simulationMatchId is not tracked (M1)',
+    () {
+      test('同一simulationMatchIdの結果を2回addしても拒否されない（execution identityの'
+          '正本は(matchup, localMatchIndex)であり、accumulatorはsimulationMatchIdの'
+          'batch全体でのglobal uniquenessを検査しない——O(totalMatches)のidentity '
+          'collectionを保持しないため）', () {
+        final bundle = combatV1AggregateBatchResults([
           _result(id: 'dup'),
           _result(id: 'dup', matchIndex: 1),
-        ]),
-        throwsA(isA<CombatV1IllegalActionException>()),
-      );
-    });
-  });
+        ]);
+        // 拒否されず、両方ともaggregateへ計上される。
+        expect(bundle.global.totalMatches, 2);
+      });
+    },
+  );
+
+  group(
+    'combatV1AggregateBatchResults — structured result invariants (M2)',
+    () {
+      void expectRejected(CombatV1MatchSimulationResult result) {
+        expect(
+          () => combatV1AggregateBatchResults([result]),
+          throwsA(isA<CombatV1IllegalActionException>()),
+        );
+      }
+
+      group('matchOver', () {
+        test('winner null → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.matchOver,
+              terminalCause: CombatV1CpuMatchTerminalCause.normalPin,
+              winnerPlayerIndex: null,
+              winnerWrestlerId: null,
+            ),
+          );
+        });
+
+        test('winner index invalid → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.matchOver,
+              terminalCause: CombatV1CpuMatchTerminalCause.normalPin,
+              winnerPlayerIndex: 5,
+              winnerWrestlerId: null,
+            ),
+          );
+        });
+
+        test('winnerWrestlerId null → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.matchOver,
+              terminalCause: CombatV1CpuMatchTerminalCause.normalPin,
+              winnerPlayerIndex: 0,
+              winnerWrestlerId: null,
+            ),
+          );
+        });
+
+        test('winnerWrestlerId mismatch → reject', () {
+          expectRejected(
+            _rawResult(
+              wrestlerAId: 'misaki',
+              wrestlerBId: 'jack',
+              termination: CombatV1CpuMatchTermination.matchOver,
+              terminalCause: CombatV1CpuMatchTerminalCause.normalPin,
+              winnerPlayerIndex: 0,
+              winnerWrestlerId: 'jack',
+            ),
+          );
+        });
+
+        test('terminalCause null → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.matchOver,
+              terminalCause: null,
+              winnerPlayerIndex: 0,
+              winnerWrestlerId: 'misaki',
+            ),
+          );
+        });
+
+        test('safetyLimitReached true → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.matchOver,
+              terminalCause: CombatV1CpuMatchTerminalCause.normalPin,
+              winnerPlayerIndex: 0,
+              winnerWrestlerId: 'misaki',
+              safetyLimitReached: true,
+            ),
+          );
+        });
+
+        test('invariantViolationMessage非null → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.matchOver,
+              terminalCause: CombatV1CpuMatchTerminalCause.normalPin,
+              winnerPlayerIndex: 0,
+              winnerWrestlerId: 'misaki',
+              invariantViolationMessage: 'unexpected',
+            ),
+          );
+        });
+      });
+
+      group('safetyLimit', () {
+        test('winnerあり → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.safetyLimit,
+              winnerPlayerIndex: 0,
+              winnerWrestlerId: 'misaki',
+              safetyLimitReached: true,
+            ),
+          );
+        });
+
+        test('winnerWrestlerIdあり（winnerPlayerIndexはnull） → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.safetyLimit,
+              winnerPlayerIndex: null,
+              winnerWrestlerId: 'misaki',
+              safetyLimitReached: true,
+            ),
+          );
+        });
+
+        test('terminalCauseあり → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.safetyLimit,
+              terminalCause: CombatV1CpuMatchTerminalCause.normalPin,
+              safetyLimitReached: true,
+            ),
+          );
+        });
+
+        test('safetyLimitReached false → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.safetyLimit,
+              safetyLimitReached: false,
+            ),
+          );
+        });
+
+        test('invariantViolationMessage非null → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.safetyLimit,
+              safetyLimitReached: true,
+              invariantViolationMessage: 'unexpected',
+            ),
+          );
+        });
+      });
+
+      group('invariantViolation', () {
+        test('winnerあり → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              winnerPlayerIndex: 0,
+              winnerWrestlerId: 'misaki',
+              invariantViolationMessage: 'engine bug',
+            ),
+          );
+        });
+
+        test('winnerWrestlerIdあり（winnerPlayerIndexはnull） → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              winnerPlayerIndex: null,
+              winnerWrestlerId: 'misaki',
+              invariantViolationMessage: 'engine bug',
+            ),
+          );
+        });
+
+        test('terminalCauseあり → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              terminalCause: CombatV1CpuMatchTerminalCause.normalPin,
+              invariantViolationMessage: 'engine bug',
+            ),
+          );
+        });
+
+        test('safetyLimitReached true → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              safetyLimitReached: true,
+              invariantViolationMessage: 'engine bug',
+            ),
+          );
+        });
+
+        test('invariantViolationMessage null → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              invariantViolationMessage: null,
+            ),
+          );
+        });
+
+        test('invariantViolationMessage空文字列 → reject', () {
+          expectRejected(
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              invariantViolationMessage: '   ',
+            ),
+          );
+        });
+
+        test('正常系: winner/terminalCause/safetyLimitReachedすべて既定値なら受理される', () {
+          final bundle = combatV1AggregateBatchResults([
+            _rawResult(
+              termination: CombatV1CpuMatchTermination.invariantViolation,
+              invariantViolationMessage: 'engine bug',
+            ),
+          ]);
+          expect(bundle.global.invariantViolationMatches, 1);
+        });
+      });
+    },
+  );
 
   group('CombatV1BatchAggregationAccumulator — streaming', () {
     test('addを1件ずつ呼んでも一括aggregateと同じ結果になる', () {
@@ -500,6 +767,62 @@ void main() {
       expect(streamed.global.completedMatches, batch.global.completedMatches);
       expect(streamed.global.playerAWins, batch.global.playerAWins);
       expect(streamed.matchups.length, batch.matchups.length);
+    });
+
+    test('build()で取得したbundleは、その後の追加addで一切変化しないsnapshot（m3）', () {
+      final accumulator = CombatV1BatchAggregationAccumulator();
+      accumulator.add(
+        _result(
+          id: 'm1',
+          wrestlerAId: 'misaki',
+          wrestlerBId: 'misaki',
+          winnerPlayerIndex: 0,
+        ),
+      );
+      final bundleA = accumulator.build();
+
+      // bundleA取得後にさらに結果を追加する。
+      accumulator.add(
+        _result(
+          id: 'm2',
+          wrestlerAId: 'misaki',
+          wrestlerBId: 'jack',
+          winnerPlayerIndex: 1,
+        ),
+      );
+      accumulator.add(
+        _result(
+          id: 'm3',
+          wrestlerAId: 'akari',
+          wrestlerBId: 'reina',
+          termination: CombatV1CpuMatchTermination.safetyLimit,
+        ),
+      );
+      final bundleB = accumulator.build();
+
+      // bundleBは新しい内容を反映する。
+      expect(bundleB.global.totalMatches, 3);
+      expect(bundleB.matchups, hasLength(3));
+      expect(bundleB.wrestlers, hasLength(4));
+      expect(bundleB.global.safetyLimitMatches, 1);
+      expect(bundleB.global.terminalCauseCounts.total, 2);
+
+      // bundleAは追加addの影響を一切受けず、取得時点のまま。
+      expect(bundleA.global.totalMatches, 1);
+      expect(bundleA.global.completedMatches, 1);
+      expect(bundleA.global.playerAWins, 1);
+      expect(bundleA.global.playerBWins, 0);
+      expect(bundleA.global.safetyLimitMatches, 0);
+      expect(bundleA.global.terminalCauseCounts.total, 1);
+      expect(bundleA.global.terminalCauseCounts.normalPin, 1);
+      expect(bundleA.matchups, hasLength(1));
+      expect(bundleA.matchups.single.totalMatches, 1);
+      expect(bundleA.wrestlers, hasLength(1));
+      expect(bundleA.wrestlers.single.wrestlerId, 'misaki');
+      expect(bundleA.wrestlers.single.appearances, 2);
+      expect(bundleA.mirror.totalMatches, 1);
+      expect(bundleA.mirror.playerAWins, 1);
+      expect(bundleA.seat.playerACompletedMatches, 1);
     });
   });
 }

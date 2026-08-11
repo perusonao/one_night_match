@@ -1,5 +1,6 @@
 /// Combat Ver.1 Phase 12B-1 — Pure Aggregator
-/// （docs/design/combat_v1_phase12b1_batch_core_aggregation.md 17〜18章）。
+/// （docs/design/combat_v1_phase12b1_batch_core_aggregation.md 17〜18章、
+/// Codex review Blocking Finding M1/M2対応）。
 ///
 /// Aggregation logicをexecutionから完全に分離する。[CombatV1MatchSimulationResult]
 /// （Phase 12A）を1件ずつ受け取り、matchup毎・wrestler毎の小さいmutable
@@ -7,6 +8,25 @@
 /// `Map<String, ...>`、いずれもO(distinct matchup/wrestler数)のサイズ）——
 /// O(match数)のメモリを消費しない（17章「Aggregate-Only Memory Strategy /
 /// Streaming Aggregation」）。
+///
+/// **M1対応（simulationMatchId非保持）**: このaccumulatorは
+/// `simulationMatchId`（や、その他試合数に比例するidentity）を1件も
+/// 保持しない——batch全体のsimulationMatchId setを保持してglobal
+/// duplicate検出を行う設計は、production batch executionのmemoryを
+/// O(totalMatches)にしてしまうため採用しない。Phase 12B-1における
+/// execution identityの正本は`(CombatV1Matchup, localMatchIndex)`
+/// ——`CombatV1BatchSimulationRunner`がmatrix/local indexを決定論的に
+/// 生成する構造そのものが実行計画上の重複を防ぐ（17章参照）。
+/// `simulationMatchId`はPhase 12A由来のreplay/audit identityとしては
+/// 引き続き各resultに保持されるが、このaccumulatorレベルでのglobal
+/// uniqueness検査の対象にはしない。
+///
+/// **M2対応（structured result invariant検証）**: [add]は、矛盾した
+/// [CombatV1MatchSimulationResult]（例: `termination==matchOver`なのに
+/// `winnerPlayerIndex`がnull）を集計へ混入させない——Phase 12Aの実際の
+/// structured termination契約（`CombatV1CpuMatchRunner`/
+/// `CombatV1MatchSimulationResult.fromCpuResult`）と整合する検証を
+/// [_validateStructuredResultInvariants]で行う。
 ///
 /// [CombatV1BatchAggregationAccumulator]自身はPhase 12A/Core Engineを一切
 /// importしない——`CombatV1MatchSimulationResult`（Phase 12Aのpublic result
@@ -82,9 +102,14 @@ class _WrestlerBucket {
 /// [add]を呼び、`result`への参照はそのループiteration内でしか保持しない
 /// （17章）。[build]は最終的な[CombatV1BatchAggregateBundle]を構築し、あわせて
 /// 内部invariant（15章）を検証する。
+///
+/// 保持するmutable stateは、matchup毎・wrestler毎の小さいcounter bucket
+/// （`Map<CombatV1Matchup, _MatchupBucket>`・`Map<String, _WrestlerBucket>`）
+/// とglobal/mirror用のスカラーcounterのみ——`O(distinct matchup数 +
+/// distinct wrestler数)`。試合数に比例して増えるcollection（全
+/// simulationMatchIdのSet・全match resultのList等）は一切保持しない
+/// （M1対応、上記library doc参照）。
 class CombatV1BatchAggregationAccumulator {
-  final Set<String> _seenSimulationMatchIds = {};
-
   int _totalMatches = 0;
   int _completedMatches = 0;
   int _safetyLimitMatches = 0;
@@ -110,17 +135,18 @@ class CombatV1BatchAggregationAccumulator {
   int _mirrorPlayerAWins = 0;
   int _mirrorPlayerBWins = 0;
 
-  /// [result]を1件aggregateする。同一の[CombatV1MatchSimulationResult.simulationMatchId]
-  /// を2度[add]した場合はfail-fast（[CombatV1IllegalActionException]、15章
-  /// 「Internal Invariants」——32-bit simulationMatchId hash衝突の理論
-  /// リスクをここで検知する）。
+  /// [result]を1件aggregateする。集計の前に
+  /// [_validateStructuredResultInvariants]で、Phase 12Aの実際の
+  /// structured termination契約と矛盾しないことを検証する
+  /// （[CombatV1IllegalActionException]でfail-fast、M2対応）。
+  ///
+  /// simulationMatchIdのbatch全体でのglobal duplicate検査は行わない
+  /// （M1対応、class doc参照）——execution identityの正本は
+  /// `(CombatV1Matchup, localMatchIndex)`であり、それは
+  /// `CombatV1BatchSimulationRunner`の実行計画（matrix × local index
+  /// loop）自体が構造的に重複させない。
   void add(CombatV1MatchSimulationResult result) {
-    if (!_seenSimulationMatchIds.add(result.simulationMatchId)) {
-      throw CombatV1IllegalActionException(
-        'batch内でsimulationMatchIdが重複しています: '
-        '${result.simulationMatchId}',
-      );
-    }
+    _validateStructuredResultInvariants(result);
 
     final matchup = CombatV1Matchup(
       wrestlerAId: result.wrestlerAId,
@@ -161,21 +187,11 @@ class CombatV1BatchAggregationAccumulator {
         wrestlerBBucket.playerBCompletedAppearances++;
         if (isMirror) _mirrorCompleted++;
 
+        // winnerPlayerIndex∈{0,1}・terminalCause非nullは
+        // _validateStructuredResultInvariantsが呼び出し時点で既に
+        // 保証済み（M2対応）。
         final winnerPlayerIndex = result.winnerPlayerIndex;
-        if (winnerPlayerIndex != 0 && winnerPlayerIndex != 1) {
-          throw CombatV1IllegalActionException(
-            'termination==matchOverですがwinnerPlayerIndexが0/1のいずれでも'
-            'ありません（simulationMatchId: ${result.simulationMatchId}, '
-            'winnerPlayerIndex: $winnerPlayerIndex）',
-          );
-        }
-        final terminalCause = result.terminalCause;
-        if (terminalCause == null) {
-          throw CombatV1IllegalActionException(
-            'termination==matchOverですがterminalCauseがnullです'
-            '（simulationMatchId: ${result.simulationMatchId}）',
-          );
-        }
+        final terminalCause = result.terminalCause!;
 
         if (winnerPlayerIndex == 0) {
           _globalPlayerAWins++;
@@ -334,6 +350,151 @@ class CombatV1BatchAggregationAccumulator {
         '内部invariant違反: wrestler別appearancesの合計が'
         '2×global.totalMatchesと一致しません',
       );
+    }
+  }
+
+  /// [result]が、Phase 12Aの実際のstructured termination契約
+  /// （`CombatV1CpuMatchRunner`/`CombatV1MatchSimulationResult.fromCpuResult`）
+  /// と矛盾しないことを検証する（Codex review Blocking Finding M2対応）。
+  ///
+  /// Phase 12Aが実際に保証する制約のみを検証し、保証していない制約は
+  /// 追加しない——ただし`termination == invariantViolation`について1点、
+  /// Phase 12Aの型シグネチャ自体が許容する余地よりも意図的に厳格な制約を
+  /// 課している（下記参照）。
+  ///
+  /// - `termination == matchOver`: [CombatV1MatchSimulationResult.winnerPlayerIndex]
+  ///   が0/1、[CombatV1MatchSimulationResult.terminalCause]が非null、
+  ///   [CombatV1MatchSimulationResult.safetyLimitReached] == false、
+  ///   [CombatV1MatchSimulationResult.invariantViolationMessage] == null
+  ///   （いずれも`CombatV1CpuMatchResult`/`fromCpuResult`が常に保証する
+  ///   組み合わせ）
+  /// - `termination == safetyLimit`: winnerPlayerIndex == null、
+  ///   terminalCause == null、safetyLimitReached == true、
+  ///   invariantViolationMessage == null（`CombatV1CpuMatchRunner.run`は
+  ///   `state.isOver`が`false`の場合のみsafetyLimitを返すため、winnerは
+  ///   常にnull）
+  /// - `termination == invariantViolation`: terminalCause == null、
+  ///   safetyLimitReached == false、invariantViolationMessageが非null・
+  ///   非空（いずれも`CombatV1CpuMatchRunner`の全invariantViolation経路で
+  ///   常に成立）。**winnerPlayerIndex/winnerWrestlerIdも == nullを要求する
+  ///   ——ただしこれはPhase 12Aの型シグネチャが構造的に保証する制約では
+  ///   ない**。`CombatV1CpuMatchRunner._buildResult`のcheckpoint 3
+  ///   （result返却直前の最終invariant再検証）は、既に`matchOver`と
+  ///   判定された直後のstate（`winnerPlayerIndex`が既に0/1でセット
+  ///   済み・`state.isOver == true`）を`invariantViolation`へ再分類する
+  ///   経路を持つ——この経路が実際に発生するのはCore Engine自体に
+  ///   bugがある場合のみだが、発生した場合`finalState.winnerPlayerIndex`
+  ///   はセットされたままになる。Phase 12B-1はこの経路を黙って
+  ///   aggregateに混入させず、fail-fastすることを意図的に選択する
+  ///   （Core Engine invariant違反の兆候をstatisticsへ埋没させないため）。
+  void _validateStructuredResultInvariants(
+    CombatV1MatchSimulationResult result,
+  ) {
+    final id = result.simulationMatchId;
+    final winnerPlayerIndex = result.winnerPlayerIndex;
+    final winnerWrestlerId = result.winnerWrestlerId;
+
+    // termination共通: winnerWrestlerIdはwinnerPlayerIndexに対応する
+    // wrestlerIdと一致していなければならない
+    // （`CombatV1MatchSimulationResult.fromCpuResult`のmapping）。
+    final expectedWinnerWrestlerId = switch (winnerPlayerIndex) {
+      0 => result.wrestlerAId,
+      1 => result.wrestlerBId,
+      null => null,
+      _ => throw CombatV1IllegalActionException(
+        'winnerPlayerIndexが0/1/nullのいずれでもありません'
+        '（simulationMatchId: $id, winnerPlayerIndex: $winnerPlayerIndex）',
+      ),
+    };
+    if (winnerWrestlerId != expectedWinnerWrestlerId) {
+      throw CombatV1IllegalActionException(
+        'winnerWrestlerIdがwinnerPlayerIndexに対応するwrestlerIdと'
+        '一致しません（simulationMatchId: $id, winnerPlayerIndex: '
+        '$winnerPlayerIndex, winnerWrestlerId: $winnerWrestlerId, '
+        'expected: $expectedWinnerWrestlerId）',
+      );
+    }
+
+    switch (result.termination) {
+      case CombatV1CpuMatchTermination.matchOver:
+        if (winnerPlayerIndex != 0 && winnerPlayerIndex != 1) {
+          throw CombatV1IllegalActionException(
+            'termination==matchOverですがwinnerPlayerIndexが0/1のいずれでも'
+            'ありません（simulationMatchId: $id, winnerPlayerIndex: '
+            '$winnerPlayerIndex）',
+          );
+        }
+        if (result.terminalCause == null) {
+          throw CombatV1IllegalActionException(
+            'termination==matchOverですがterminalCauseがnullです'
+            '（simulationMatchId: $id）',
+          );
+        }
+        if (result.safetyLimitReached) {
+          throw CombatV1IllegalActionException(
+            'termination==matchOverですがsafetyLimitReached==trueです'
+            '（simulationMatchId: $id）',
+          );
+        }
+        if (result.invariantViolationMessage != null) {
+          throw CombatV1IllegalActionException(
+            'termination==matchOverですがinvariantViolationMessageが'
+            '非nullです（simulationMatchId: $id）',
+          );
+        }
+      case CombatV1CpuMatchTermination.safetyLimit:
+        if (winnerPlayerIndex != null) {
+          throw CombatV1IllegalActionException(
+            'termination==safetyLimitですがwinnerPlayerIndexが非nullです'
+            '（simulationMatchId: $id, winnerPlayerIndex: '
+            '$winnerPlayerIndex）',
+          );
+        }
+        if (result.terminalCause != null) {
+          throw CombatV1IllegalActionException(
+            'termination==safetyLimitですがterminalCauseが非nullです'
+            '（simulationMatchId: $id）',
+          );
+        }
+        if (!result.safetyLimitReached) {
+          throw CombatV1IllegalActionException(
+            'termination==safetyLimitですがsafetyLimitReached==falseです'
+            '（simulationMatchId: $id）',
+          );
+        }
+        if (result.invariantViolationMessage != null) {
+          throw CombatV1IllegalActionException(
+            'termination==safetyLimitですがinvariantViolationMessageが'
+            '非nullです（simulationMatchId: $id）',
+          );
+        }
+      case CombatV1CpuMatchTermination.invariantViolation:
+        if (winnerPlayerIndex != null) {
+          throw CombatV1IllegalActionException(
+            'termination==invariantViolationですがwinnerPlayerIndexが'
+            '非nullです（simulationMatchId: $id, winnerPlayerIndex: '
+            '$winnerPlayerIndex）',
+          );
+        }
+        if (result.terminalCause != null) {
+          throw CombatV1IllegalActionException(
+            'termination==invariantViolationですがterminalCauseが非nullです'
+            '（simulationMatchId: $id）',
+          );
+        }
+        if (result.safetyLimitReached) {
+          throw CombatV1IllegalActionException(
+            'termination==invariantViolationですがsafetyLimitReached=='
+            'trueです（simulationMatchId: $id）',
+          );
+        }
+        final message = result.invariantViolationMessage;
+        if (message == null || message.trim().isEmpty) {
+          throw CombatV1IllegalActionException(
+            'termination==invariantViolationですがinvariantViolationMessage'
+            'が空です（simulationMatchId: $id）',
+          );
+        }
     }
   }
 }
