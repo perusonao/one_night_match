@@ -15,6 +15,7 @@ import 'technique_deck/technique_match_screen.dart';
 import 'technique_deck/technique_match_setup_screen.dart';
 import 'playtest_analytics/playtest_analytics_screen.dart';
 import 'combat_v1/dashboard/combat_v1_balance_dashboard_screen.dart';
+import 'combat_v1/playable_ui/combat_v1_playable_setup_screen.dart';
 import 'app_build_info.dart';
 
 const _pink = Color(0xffff477e);
@@ -40,134 +41,187 @@ class TitleScreen extends StatelessWidget {
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.sports_mma, size: 70, color: _pink),
-                const SizedBox(height: 14),
-                Text(
-                  'ONE NIGHT',
-                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                    letterSpacing: 5,
-                    fontWeight: FontWeight.w300,
-                  ),
-                ),
-                Text(
-                  'MATCH',
-                  style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: _pink,
-                    letterSpacing: 3,
-                  ),
-                ),
-                const Text('女子プロレスカードバトル  Ver.0.3'),
-                const SizedBox(height: 10),
-                const Text(
-                  '技をつなぎ、観客を沸かせ、3カウントを奪え。',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70),
-                ),
-                const SizedBox(height: 42),
-                FilledButton.icon(
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 13),
-                    child: Text('クラシックマッチ  Ver.0.2'),
-                  ),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => WrestlerSelectScreen(catalog: catalog),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                FilledButton.tonalIcon(
-                  icon: const Icon(Icons.layers),
-                  label: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-                    child: Text('レベルカードマッチ  Ver.0.7'),
-                  ),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const LevelMatchIntroScreen(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                // 【ゲームサイクル整理ラウンド 優先度10】これまでTechnique
-                // Matchは「Debug分析」経由でしか開始できなかったため、一般
-                // プレイヤー向けの正式な開始導線をトップページへ追加した。
-                FilledButton.tonalIcon(
-                  icon: const Icon(Icons.sports_kabaddi),
-                  label: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-                    child: Text('試合を始める（Technique Match）'),
-                  ),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const TechniqueMatchSetupScreen(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  children: [
-                    TextButton.icon(
-                      icon: const Icon(Icons.style),
-                      label: const Text('レスラーカードエディタ'),
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const WrestlerEditorListScreen(),
+            // Playable 1B導線追加でボタン数が増え、低い画面高（狭幅スマホ・
+            // 一部のtest surface）ではcenter固定Columnがoverflowしうる
+            // ため、はみ出す場合のみscrollできるようにする（収まる場合の
+            // 見た目は従来通り中央寄せのまま）。
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.sports_mma, size: 70, color: _pink),
+                      const SizedBox(height: 14),
+                      Text(
+                        'ONE NIGHT',
+                        style: Theme.of(context).textTheme.headlineLarge
+                            ?.copyWith(
+                              letterSpacing: 5,
+                              fontWeight: FontWeight.w300,
+                            ),
+                      ),
+                      Text(
+                        'MATCH',
+                        style: Theme.of(context).textTheme.displayMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: _pink,
+                              letterSpacing: 3,
+                            ),
+                      ),
+                      const Text('女子プロレスカードバトル  Ver.0.3'),
+                      const SizedBox(height: 10),
+                      const Text(
+                        '技をつなぎ、観客を沸かせ、3カウントを奪え。',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                      const SizedBox(height: 42),
+                      FilledButton.icon(
+                        icon: const Icon(Icons.play_arrow),
+                        label: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 13,
+                          ),
+                          child: Text('クラシックマッチ  Ver.0.2'),
+                        ),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                WrestlerSelectScreen(catalog: catalog),
+                          ),
                         ),
                       ),
-                    ),
-                    TextButton.icon(
-                      icon: const Icon(Icons.dashboard_customize_outlined),
-                      label: const Text('デッキを作る'),
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const TechniqueDeckBuilderScreen(),
+                      const SizedBox(height: 10),
+                      FilledButton.tonalIcon(
+                        icon: const Icon(Icons.layers),
+                        label: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 13,
+                          ),
+                          child: Text('レベルカードマッチ  Ver.0.7'),
+                        ),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const LevelMatchIntroScreen(),
+                          ),
                         ),
                       ),
-                    ),
-                    TextButton.icon(
-                      icon: const Icon(Icons.menu_book),
-                      label: const Text('遊び方'),
-                      onPressed: () => _showRules(context),
-                    ),
-                    TextButton.icon(
-                      icon: const Icon(Icons.new_releases_outlined),
-                      label: const Text('更新内容'),
-                      onPressed: () => _showChangelog(context),
-                    ),
-                    TextButton.icon(
-                      icon: const Icon(Icons.analytics_outlined),
-                      label: const Text('Debug分析'),
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const DebugScreen()),
+                      const SizedBox(height: 10),
+                      // 【ゲームサイクル整理ラウンド 優先度10】これまでTechnique
+                      // Matchは「Debug分析」経由でしか開始できなかったため、一般
+                      // プレイヤー向けの正式な開始導線をトップページへ追加した。
+                      FilledButton.tonalIcon(
+                        icon: const Icon(Icons.sports_kabaddi),
+                        label: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 13,
+                          ),
+                          child: Text('試合を始める（Technique Match）'),
+                        ),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const TechniqueMatchSetupScreen(),
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 10),
+                      // Playable 1B: Combat Ver.1のHuman vs CPU対戦を、一般
+                      // プレイヤーが直接試せる導線。Balance Dashboard（開発用、
+                      // Debug分析経由）とは別の入口とし、実験的機能である旨を
+                      // ボタン文言で明示する。
+                      FilledButton.tonalIcon(
+                        icon: const Icon(Icons.sports_mma),
+                        label: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 13,
+                          ),
+                          child: Text('Combat Ver.1 対戦（Experimental）'),
+                        ),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const CombatV1PlayableSetupScreen(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        children: [
+                          TextButton.icon(
+                            icon: const Icon(Icons.style),
+                            label: const Text('レスラーカードエディタ'),
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const WrestlerEditorListScreen(),
+                              ),
+                            ),
+                          ),
+                          TextButton.icon(
+                            icon: const Icon(
+                              Icons.dashboard_customize_outlined,
+                            ),
+                            label: const Text('デッキを作る'),
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const TechniqueDeckBuilderScreen(),
+                              ),
+                            ),
+                          ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.menu_book),
+                            label: const Text('遊び方'),
+                            onPressed: () => _showRules(context),
+                          ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.new_releases_outlined),
+                            label: const Text('更新内容'),
+                            onPressed: () => _showChangelog(context),
+                          ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.analytics_outlined),
+                            label: const Text('Debug分析'),
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const DebugScreen(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      // 【Phase 8.5A-2 ⑩、Playtest Analytics Phase A】アプリ全体の
+                      // バージョン・Buildラベルを、ゲーム開始ボタンを邪魔しない位置
+                      // （最下部）に常時・控えめに表示する。値はAppBuildInfoが
+                      // 唯一の定義元（「どのビルドでプレイしたログか」を後から
+                      // 見分けられるようにするBuild Provenanceの最小版。
+                      // gitCommitの自動注入は別フェーズで対応）。
+                      Text(
+                        'Ver. ${AppBuildInfo.version} ・ Build ${AppBuildInfo.buildLabel}',
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 10),
-                // 【Phase 8.5A-2 ⑩、Playtest Analytics Phase A】アプリ全体の
-                // バージョン・Buildラベルを、ゲーム開始ボタンを邪魔しない位置
-                // （最下部）に常時・控えめに表示する。値はAppBuildInfoが
-                // 唯一の定義元（「どのビルドでプレイしたログか」を後から
-                // 見分けられるようにするBuild Provenanceの最小版。
-                // gitCommitの自動注入は別フェーズで対応）。
-                Text(
-                  'Ver. ${AppBuildInfo.version} ・ Build ${AppBuildInfo.buildLabel}',
-                  style: const TextStyle(color: Colors.white38, fontSize: 12),
-                ),
-              ],
+              ),
             ),
           ),
         ),
