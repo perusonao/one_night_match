@@ -173,20 +173,65 @@ void main() {
 
     test('Test C: CombatV1RulesConfigの各outcome-affecting fieldについて、'
         'そのfieldだけを変えるとsimulationMatchIdが変わる（table-driven、'
-        '全19 field網羅）', () {
+        'deckCompositionの4 subfieldを個別caseとして含む全22 case網羅、'
+        'Codex review Minor Finding「deckComposition test granularity」'
+        '対応）', () {
+      // deriveV1SimulationSeedsはrulesを引数に取らない——このtable内の
+      // どのcaseでもRNG seed群（matchSeed/engineSeed/playerAPolicySeed/
+      // playerBPolicySeed）は不変であることが型シグネチャ自体で構造的に
+      // 保証される（Test A/Bと同じ根拠）。
+      final seeds = _seeds();
+      expect(seeds.matchSeed, isNotNull);
+
       final baseId = _id();
 
+      // deckCompositionは既定値（CombatV1DeckComposition()のdefault:
+      // normal18/signature4/finisher2/counter6、combat_v1_deck.dart参照）
+      // から、4 subfieldのうち1つだけを変更する——「deckComposition全体を
+      // まとめて変更する1 case」ではなく、各subfieldが個別に
+      // simulationMatchIdへ反映されることを直接確認する（Codex review
+      // Minor Finding対応。実装（`_rulesIdentityComponents`）は既に
+      // 4 subfieldを個別のtag/value pairとして列挙しているため、この
+      // testはregression guardの強化——実装変更は不要）。
+      const defaultNormalCount = 18;
+      const defaultSignatureCount = 4;
+      const defaultFinisherCount = 2;
+      const defaultCounterCount = 6;
       final variants = <String, CombatV1RulesConfig>{
         'startingHp': const CombatV1RulesConfig(startingHp: 999),
         'startingKoc': const CombatV1RulesConfig(startingKoc: 99),
         'startingPinCards': const CombatV1RulesConfig(startingPinCards: 9),
         'startingHandSize': const CombatV1RulesConfig(startingHandSize: 9),
-        'deckComposition': const CombatV1RulesConfig(
+        'deckComposition.normalCount': const CombatV1RulesConfig(
           deckComposition: CombatV1DeckComposition(
             normalCount: 19,
-            signatureCount: 3,
-            finisherCount: 2,
-            counterCount: 6,
+            signatureCount: defaultSignatureCount,
+            finisherCount: defaultFinisherCount,
+            counterCount: defaultCounterCount,
+          ),
+        ),
+        'deckComposition.signatureCount': const CombatV1RulesConfig(
+          deckComposition: CombatV1DeckComposition(
+            normalCount: defaultNormalCount,
+            signatureCount: 5,
+            finisherCount: defaultFinisherCount,
+            counterCount: defaultCounterCount,
+          ),
+        ),
+        'deckComposition.finisherCount': const CombatV1RulesConfig(
+          deckComposition: CombatV1DeckComposition(
+            normalCount: defaultNormalCount,
+            signatureCount: defaultSignatureCount,
+            finisherCount: 3,
+            counterCount: defaultCounterCount,
+          ),
+        ),
+        'deckComposition.counterCount': const CombatV1RulesConfig(
+          deckComposition: CombatV1DeckComposition(
+            normalCount: defaultNormalCount,
+            signatureCount: defaultSignatureCount,
+            finisherCount: defaultFinisherCount,
+            counterCount: 7,
           ),
         ),
         'normalSameNameLimit': const CombatV1RulesConfig(

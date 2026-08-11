@@ -1,12 +1,13 @@
 # Combat Ver.1 Phase 12A — Simulation Core 設計文書
 
-- ステータス: Phase 12A（Simulation Core 実装）完了時点。Codex reviewの3ラウンド
+- ステータス: Phase 12A（Simulation Core 実装）完了時点。Codex reviewの4ラウンド
   （1ラウンド目「C. CHANGES REQUIRED」— Major Finding M1: policy factory closure
   問題、Minor Finding: seed serializationの曖昧性／2ラウンド目「C. CHANGES
   REQUIRED」— Blocking Finding M2: simulation match ID・owner ID metadata不足／
   3ラウンド目（PR #15）「C. CHANGES REQUIRED BEFORE MERGE」— Blocking Finding M3:
-  simulationMatchIdがmaxActions/rulesを識別子へ含んでいなかった）を、いずれも
-  修正済み。
+  simulationMatchIdがmaxActions/rulesを識別子へ含んでいなかった／4ラウンド目
+  （PR #15 M3 fix re-review）「B. APPROVE WITH NON-BLOCKING FOLLOW-UP」— Minor
+  Finding: deckComposition table-driven testの粒度）を、いずれも修正済み。
 - 関連: [`../combat_rules_v1.md`](../combat_rules_v1.md)（SSOT） /
   [`combat_v1_phase11a_production_match_setup.md`](combat_v1_phase11a_production_match_setup.md) /
   [`combat_v1_phase11b_cpu.md`](combat_v1_phase11b_cpu.md)
@@ -435,8 +436,11 @@ scopeでは意図的に採用していない——明示的・小規模・review
 **Future Rule Addition Risk**: `CombatV1RulesConfig`に新しいfieldが追加された場合、
 `_rulesIdentityComponents`への追加を忘れると、そのfieldの違いが`simulationMatchId`へ
 反映されなくなる。これを検知しやすくするため、`combat_v1_simulation_seed_test.dart`の
-「I. simulationMatchId identity」group「Test C」が、現時点で列挙済みの19 fieldそれぞれに
-ついて「その1 fieldだけを変えると`simulationMatchId`が変わる」ことを網羅的に固定して
+「I. simulationMatchId identity」group「Test C」が、現時点で列挙済みの全22 case
+（`deckComposition`以外の18 field + `deckComposition`の4 subfield [`normalCount`/
+`signatureCount`/`finisherCount`/`counterCount`]をそれぞれ個別caseとして展開したもの、
+Codex review Minor Finding「deckComposition test granularity」対応）それぞれについて
+「その1 fieldだけを変えると`simulationMatchId`が変わる」ことを網羅的に固定して
 いる。新fieldを追加する際は、`_rulesIdentityComponents`とTest Cの両方を更新すること
 （コード上のコメントにも同じ注意書きを記載）。
 
@@ -525,8 +529,10 @@ Phase 12Aでは原則としてPhase 11B Runnerの通常invariant validationを�
 - `combat_v1_simulation_seed_test.dart`: pure function・determinism・matchIndex/wrestler/
   policy/masterSeed差異によるmatchSeed分離・engine/A/B seed分離・derivation version固定・
   **I. simulationMatchId identity**（Codex review Blocking Finding M3直接固定: Test A
-  maxActions差／Test B rules差／Test C 全19 rule fieldの網羅的table-driven確認／Test D
-  determinism、およびmatchIndex/wrestler/policy差での分離の維持確認）
+  maxActions差／Test B rules差／Test C rule fieldの網羅的table-driven確認、
+  `deckComposition`の4 subfieldを個別caseとして展開した全22 case（Codex review Minor
+  Finding「deckComposition test granularity」対応）／Test D determinism、および
+  matchIndex/wrestler/policy差での分離の維持確認）
 - `combat_v1_simulation_seed_golden_test.dart`: RNG seed derivation（group A、golden値
   M3でも不変）とsimulation identity derivation（group B、golden値はM3で全面更新）の
   golden vector、VM/Web両方で算出・一致確認済み
