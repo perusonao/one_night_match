@@ -15,7 +15,10 @@ import '../../combat_v1_rules_config.dart';
 import '../combat_v1_match_simulation_result.dart';
 import '../combat_v1_simulation_config.dart';
 import '../combat_v1_simulation_runner.dart';
+import 'combat_v1_batch_aggregate.dart';
 import 'combat_v1_batch_aggregator.dart';
+import 'combat_v1_batch_length_statistics.dart';
+import 'combat_v1_batch_length_statistics_accumulator.dart';
 import 'combat_v1_batch_matchup.dart';
 import 'combat_v1_batch_simulation_config.dart';
 import 'combat_v1_batch_simulation_result.dart';
@@ -46,6 +49,7 @@ class CombatV1BatchSimulationRunner {
 
     const simulationRunner = CombatV1SimulationRunner();
     final accumulator = CombatV1BatchAggregationAccumulator();
+    final statisticsAccumulator = CombatV1BatchDescriptiveStatisticsAccumulator();
 
     var executedMatchCount = 0;
     for (final matchup in matrix) {
@@ -76,6 +80,7 @@ class CombatV1BatchSimulationRunner {
           localMatchIndex: localMatchIndex,
         );
         accumulator.add(result);
+        statisticsAccumulator.add(result);
         executedMatchCount++;
       }
     }
@@ -88,6 +93,8 @@ class CombatV1BatchSimulationRunner {
     }
 
     final bundle = accumulator.build();
+    final statistics = statisticsAccumulator.build();
+    _verifyStatisticsInvariants(bundle: bundle, statistics: statistics);
 
     return CombatV1BatchSimulationResult(
       config: config,
@@ -98,7 +105,66 @@ class CombatV1BatchSimulationRunner {
       wrestlers: bundle.wrestlers,
       seat: bundle.seat,
       mirror: bundle.mirror,
+      statistics: statistics,
     );
+  }
+
+  /// Phase 12B-2A `statistics`（[CombatV1BatchDescriptiveStatistics]）が、
+  /// 同じrun内で構築したPhase 12B-1 core aggregate（[bundle]）と構造的に
+  /// 対応することを検証する（docs/design/
+  /// combat_v1_phase12b2a_match_length_statistics.md 17章「Internal
+  /// Invariants」／18章「Matchup Statistics Order」）。
+  void _verifyStatisticsInvariants({
+    required CombatV1BatchAggregateBundle bundle,
+    required CombatV1BatchDescriptiveStatistics statistics,
+  }) {
+    if (statistics.global.length.actionCount.sampleCount !=
+        bundle.global.completedMatches) {
+      throw CombatV1IllegalActionException(
+        '内部invariant違反: statistics.global.length.actionCount.'
+        'sampleCountがglobal.completedMatchesと一致しません',
+      );
+    }
+    if (statistics.global.length.finalTurnNumber.sampleCount !=
+        bundle.global.completedMatches) {
+      throw CombatV1IllegalActionException(
+        '内部invariant違反: statistics.global.length.finalTurnNumber.'
+        'sampleCountがglobal.completedMatchesと一致しません',
+      );
+    }
+    if (statistics.matchups.length != bundle.matchups.length) {
+      throw CombatV1IllegalActionException(
+        '内部invariant違反: statistics.matchups件数(${statistics.matchups.length})'
+        'がbundle.matchups件数(${bundle.matchups.length})と一致しません',
+      );
+    }
+    for (var i = 0; i < bundle.matchups.length; i++) {
+      final coreEntry = bundle.matchups[i];
+      final statsEntry = statistics.matchups[i];
+      if (statsEntry.matchup != coreEntry.matchup) {
+        throw CombatV1IllegalActionException(
+          '内部invariant違反: statistics.matchups[$i]のmatchup'
+          '(${statsEntry.matchup})がbundle.matchups[$i]'
+          '(${coreEntry.matchup})と一致しません',
+        );
+      }
+      if (statsEntry.length.actionCount.sampleCount !=
+          coreEntry.completedMatches) {
+        throw CombatV1IllegalActionException(
+          '内部invariant違反: statistics.matchups[$i].length.actionCount.'
+          'sampleCountが対応するmatchup.completedMatchesと一致しません'
+          '（matchup: ${coreEntry.matchup}）',
+        );
+      }
+      if (statsEntry.length.finalTurnNumber.sampleCount !=
+          coreEntry.completedMatches) {
+        throw CombatV1IllegalActionException(
+          '内部invariant違反: statistics.matchups[$i].length.'
+          'finalTurnNumber.sampleCountが対応するmatchup.completedMatchesと'
+          '一致しません（matchup: ${coreEntry.matchup}）',
+        );
+      }
+    }
   }
 
   /// [result]が、要求した[matchup]・[config]（pairing/masterSeed/maxActions/

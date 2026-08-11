@@ -113,5 +113,23 @@ void _printSummary(CombatV1BatchSimulationResult result) {
       'totalMatches: ${result.mirror.totalMatches}, '
       'playerAWinRate: ${rate(result.mirror.playerAWinRateCompletedMatches)}%, '
       'deviationFrom50%: ${result.mirror.absoluteDeviationFromFiftyPercent}',
+    )
+    ..writeln('')
+    ..writeln('--- Match Length (completed, Phase 12B-2A) ---');
+
+  final length = result.statistics.global.length;
+  stdout
+    ..writeln(
+      'actionCount: sampleCount=${length.actionCount.sampleCount} '
+      'mean=${length.actionCount.mean} median=${length.actionCount.median} '
+      'p90=${length.actionCount.p90} p95=${length.actionCount.p95} '
+      'min=${length.actionCount.min} max=${length.actionCount.max}',
+    )
+    ..writeln(
+      'finalTurnNumber: sampleCount=${length.finalTurnNumber.sampleCount} '
+      'mean=${length.finalTurnNumber.mean} '
+      'median=${length.finalTurnNumber.median} '
+      'p90=${length.finalTurnNumber.p90} p95=${length.finalTurnNumber.p95} '
+      'min=${length.finalTurnNumber.min} max=${length.finalTurnNumber.max}',
     );
 }

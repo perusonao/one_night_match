@@ -4,9 +4,15 @@
 /// [CombatV1BatchSimulationRunner]（`combat_v1_batch_simulation_runner.dart`）
 /// がbatch実行を完了した結果全体。個別match resultは一切保持しない
 /// （aggregate-only、17章）。
+///
+/// [statistics]（Phase 12B-2A、
+/// docs/design/combat_v1_phase12b2a_match_length_statistics.md 7章）は、
+/// 既存field群への後方互換なadditive extension——既存fieldのrename・
+/// semantic変更は一切行わない。
 library;
 
 import 'combat_v1_batch_aggregate.dart';
+import 'combat_v1_batch_length_statistics.dart';
 import 'combat_v1_batch_simulation_config.dart';
 
 /// [CombatV1BatchSimulationRunner.run]の結果（Phase 12B-1）。immutable。
@@ -20,6 +26,7 @@ class CombatV1BatchSimulationResult {
     required List<CombatV1WrestlerAggregate> wrestlers,
     required this.seat,
     required this.mirror,
+    required this.statistics,
   }) : matchups = List.unmodifiable(matchups),
        wrestlers = List.unmodifiable(wrestlers);
 
@@ -43,6 +50,10 @@ class CombatV1BatchSimulationResult {
 
   final CombatV1SeatAggregate seat;
   final CombatV1MirrorAggregate mirror;
+
+  /// Phase 12B-2A — completed-only match length descriptive statistics
+  /// （Global / Ordered Matchup単位）。
+  final CombatV1BatchDescriptiveStatistics statistics;
 
   /// [global.termination]と同一instance（19章「Result Hierarchy」——別途
   /// 再計算しない利便性field）。

@@ -10,6 +10,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_aggregate.dart';
+import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_length_statistics.dart';
 import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_matchup.dart';
 import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_simulation_config.dart';
 import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_simulation_result.dart';
@@ -49,7 +50,7 @@ void main() {
       expect(metadata['generatedAt'], _generatedAt.toIso8601String());
       expect(metadata['game'], 'one_night_match');
       expect(metadata['simulator'], 'combat_v1_batch_simulation');
-      expect(metadata['phase'], '12B-1');
+      expect(metadata['phase'], '12B-2A');
       expect(metadata['masterSeed'], 2024);
       expect(metadata['matchesPerMatchup'], 1);
       expect(metadata['requestedMatchCount'], result.requestedMatchCount);
@@ -258,6 +259,62 @@ void main() {
       }
     });
 
+    test('statistics.global.completed: actionCount/finalTurnNumberの7 field', () {
+      final statistics = json['statistics']! as Map<String, Object?>;
+      final global = statistics['global']! as Map<String, Object?>;
+      final completed = global['completed']! as Map<String, Object?>;
+      const expectedSummaryKeys = [
+        'sampleCount',
+        'mean',
+        'median',
+        'p90',
+        'p95',
+        'min',
+        'max',
+      ];
+      for (final metric in ['actionCount', 'finalTurnNumber']) {
+        final summary = completed[metric]! as Map<String, Object?>;
+        for (final key in expectedSummaryKeys) {
+          expect(
+            summary.containsKey(key),
+            isTrue,
+            reason: 'statistics.global.completed.$metric.$key',
+          );
+        }
+      }
+      expect(
+        completed['actionCount']! as Map<String, Object?>,
+        containsPair('sampleCount', result.global.completedMatches),
+      );
+      // allExecutedは実装しないため、completedの兄弟keyとして存在しない。
+      expect(completed.containsKey('allExecuted'), isFalse);
+      expect(global.containsKey('allExecuted'), isFalse);
+    });
+
+    test(
+      'statistics.orderedMatchups: 16件・canonical orderがresult.matchupsと'
+      '一致・各entryのsampleCountがcompletedMatchesと一致',
+      () {
+        final statistics = json['statistics']! as Map<String, Object?>;
+        final matchups = statistics['orderedMatchups']! as List<Object?>;
+        expect(matchups, hasLength(16));
+
+        for (var i = 0; i < result.matchups.length; i++) {
+          final coreEntry = result.matchups[i];
+          final statsEntry = matchups[i] as Map<String, Object?>;
+          expect(statsEntry['wrestlerAId'], coreEntry.matchup.wrestlerAId);
+          expect(statsEntry['wrestlerBId'], coreEntry.matchup.wrestlerBId);
+          final completed = statsEntry['completed']! as Map<String, Object?>;
+          final actionCount =
+              completed['actionCount']! as Map<String, Object?>;
+          final finalTurnNumber =
+              completed['finalTurnNumber']! as Map<String, Object?>;
+          expect(actionCount['sampleCount'], coreEntry.completedMatches);
+          expect(finalTurnNumber['sampleCount'], coreEntry.completedMatches);
+        }
+      },
+    );
+
     test('jsonEncodeでそのままJSON文字列化できる', () {
       expect(() => jsonEncode(json), returnsNormally);
     });
@@ -295,11 +352,45 @@ void main() {
           expect(wrestler['winRateCompletedMatches'], isNull);
         }
 
+        final statistics = json['statistics']! as Map<String, Object?>;
+        final globalCompleted =
+            (statistics['global']! as Map<String, Object?>)['completed']!
+                as Map<String, Object?>;
+        final globalActionCount =
+            globalCompleted['actionCount']! as Map<String, Object?>;
+        expect(globalActionCount['sampleCount'], 0);
+        expect(globalActionCount['mean'], isNull);
+        expect(globalActionCount['median'], isNull);
+        expect(globalActionCount['p90'], isNull);
+        expect(globalActionCount['p95'], isNull);
+        expect(globalActionCount['min'], isNull);
+        expect(globalActionCount['max'], isNull);
+
+        final statsMatchups =
+            statistics['orderedMatchups']! as List<Object?>;
+        for (final entry in statsMatchups.cast<Map<String, Object?>>()) {
+          final completedEntry =
+              entry['completed']! as Map<String, Object?>;
+          final actionCount =
+              completedEntry['actionCount']! as Map<String, Object?>;
+          expect(actionCount['sampleCount'], 0);
+          expect(actionCount['mean'], isNull);
+        }
+
         // JSON文字列化してもnullのまま（0.0へ変換されない）。
         final encoded = jsonEncode(json);
         final decoded = jsonDecode(encoded) as Map<String, Object?>;
         final decodedGlobal = decoded['global']! as Map<String, Object?>;
         expect(decodedGlobal['playerAWinRateCompletedMatches'], isNull);
+        final decodedStatisticsGlobal =
+            (decoded['statistics']! as Map<String, Object?>)['global']!
+                as Map<String, Object?>;
+        final decodedCompleted =
+            decodedStatisticsGlobal['completed']! as Map<String, Object?>;
+        expect(
+          (decodedCompleted['actionCount']! as Map<String, Object?>)['mean'],
+          isNull,
+        );
       },
     );
 
@@ -360,6 +451,17 @@ void main() {
           playerAWins: 0,
           playerBWins: 0,
         ),
+        statistics: CombatV1BatchDescriptiveStatistics(
+          global: const CombatV1GlobalDescriptiveStatistics(
+            length: CombatV1MatchLengthStatistics.empty,
+          ),
+          matchups: const [
+            CombatV1MatchupDescriptiveStatistics(
+              matchup: matchup,
+              length: CombatV1MatchLengthStatistics.empty,
+            ),
+          ],
+        ),
       );
 
       final json = combatV1BatchResultSnapshotJson(
@@ -411,6 +513,10 @@ void main() {
       expect(jsonEncode(jsonA['wrestlers']), jsonEncode(jsonB['wrestlers']));
       expect(jsonEncode(jsonA['seat']), jsonEncode(jsonB['seat']));
       expect(jsonEncode(jsonA['mirror']), jsonEncode(jsonB['mirror']));
+      expect(
+        jsonEncode(jsonA['statistics']),
+        jsonEncode(jsonB['statistics']),
+      );
     });
 
     test('同一config・masterSeedで2回runしても同一snapshot内容になる', () {
