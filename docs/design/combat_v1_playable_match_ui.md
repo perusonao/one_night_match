@@ -1,23 +1,28 @@
 # Combat Ver.1 — Playable Match UI 設計文書（Playable 1A / 1B 共通SSOT）
 
-- ステータス: Playable 1A（Interactive Controller / Session）実装。
-  Balance Dashboard 1A（`d473f709430d325aa67394111fd0b6d5e11a2e22`、merge済み）の
+- ステータス: Playable 1A（Interactive Controller / Session）
+  COMPLETE / MERGED。Playable 1B（Minimal Playable Match UI、24章以降）
+  実装済み。いずれもBalance Dashboard 1A
+  （`d473f709430d325aa67394111fd0b6d5e11a2e22`、merge済み）の
   public APIのみを利用し、Core Engine・Phase 11A/11B・Phase 12A/12B-1/12B-2A・
   Balance Dashboardは一切変更しない（`combat_v1_cpu_match_runner.dart`の
   内部実装をPlayable 1Aと共通のlifecycle helperへ抽出するrefactorのみ例外、
-  6章参照）。
+  6章参照）。Playable 1BはPlayable 1Aのpublic API（20章「Public Types」）を
+  一切変更していない。
 - 関連: [`combat_v1_phase11a_production_match_setup.md`](combat_v1_phase11a_production_match_setup.md) /
   [`combat_v1_phase11b_cpu.md`](combat_v1_phase11b_cpu.md) /
   [`combat_v1_phase12a_simulation_core.md`](combat_v1_phase12a_simulation_core.md) /
   [`combat_v1_balance_dashboard_1a.md`](combat_v1_balance_dashboard_1a.md)
-- 実装:
+- 実装（Playable 1A）:
   `lib/src/combat_v1/combat_v1_match_lifecycle.dart`（CPU
   runner／Playable共有のterminal cause分類・統合invariant検証helper）/
   `lib/src/combat_v1/playable/combat_v1_playable_match_config.dart` /
   `lib/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart` /
   `lib/src/combat_v1/playable/combat_v1_playable_match_result.dart` /
   `lib/src/combat_v1/playable/combat_v1_playable_match_controller.dart`
-- テスト: `test/combat_v1/playable/`配下（10章参照）。
+- 実装（Playable 1B）: `lib/src/combat_v1/playable_ui/`配下（24章以降参照）。
+- テスト: `test/combat_v1/playable/`配下（Playable 1A、10章参照）・
+  `test/combat_v1/playable_ui/`配下（Playable 1B、31章参照）。
 
 ---
 
@@ -486,3 +491,215 @@ actionsExecuted`でループ継続要否を判定できる）。`advanceCpuUntil
 持たないplain Dart classであるため、Flutter側のwidget lifecycle（dispose
 等）と結合しない——Playable 1Bはcontroller instanceの生成・破棄
 タイミングを自由に設計できる。
+
+---
+
+# Playable 1B — Minimal Playable Match UI（実装追記）
+
+以下はPlayable 1B（Human A vs CPU Bの1試合をブラウザ上で最後まで遊べる
+状態にする）で確定した実装判断。Playable 1A契約（1〜23章）は無断変更
+していない——Playable 1Bが直接呼び出すのは`CombatV1PlayableMatchConfig`/
+`CombatV1PlayableMatchController`/`CombatV1PlayableMatchSnapshot`/
+`CombatV1PlayableMatchResult`・`submitHumanAction`・`advanceCpuOneAction`/
+`advanceCpuUntilHumanInput`のみ（20章「Public Types」の範囲内）。
+`CombatV1MatchState`・`CombatV1LegalActionEnumerator`・
+`CombatV1ActionExecutor`をWidgetから直接呼び出すことは一切ない。
+
+## 24. Screen Flow / Entry Point
+
+2画面構成:
+
+- `CombatV1PlayableSetupScreen`（wrestler selection・Start Match）
+- `CombatV1PlayableMatchScreen`（試合本体・Counter bottom sheet・
+  result overlay）
+
+別Result Screenは作らない——result overlayはMatch Screen内の
+`Positioned.fill`カード（`_ResultOverlay`）として実装する。
+
+Title画面（`lib/src/screens.dart`）の`TitleScreen`へ、既存の
+`Navigator.push` + `MaterialPageRoute`パターンのまま新しいボタン
+「Combat Ver.1 対戦（Experimental）」を追加した（Balance Dashboardの
+「Combat V1 Balance Dashboard（開発用）」導線とは別で、Debug分析画面の
+中ではなくTitle画面上に直接置く——一般プレイヤーが直接試せる場所に置き、
+かつ「Experimental」であることをボタン文言で明示する、という7〜8章の
+要件に対応）。
+
+ボタン追加でTitle画面のボタン総数が増えたため、既存の中央寄せ固定
+`Column`が低い画面高（狭幅スマホ・一部widget test surface）でoverflow
+する回帰が発生した。`LayoutBuilder` + `SingleChildScrollView` +
+`ConstrainedBox(minHeight: ...)`でラップし、収まる場合は従来通り中央
+寄せ、収まらない場合のみscrollできるようにして解消した（既存
+`test/screens_title_test.dart`は無変更のまま全passすることを確認済み）。
+
+## 25. Setup Screen
+
+`CombatV1PlayableSetupScreen`（StatefulWidget）:
+
+- Human/CPU wrestler選択（production 4体、固定表示順
+  `combatV1PlayableWrestlerOrder = ['misaki','jack','akari','reina']`
+  ——`combatV1DefaultBatchWrestlerIds`（Simulation/Batch package）へは
+  依存させず、Playable UI専用に独立して同じ値を再定義する。12章と同じ
+  設計思想）
+- display nameは`combatV1ProductionWrestlerRegistry[id].wrestler.name`
+  （唯一のsource of truth、`combatV1PlayableWrestlerDisplayName`
+  helper経由）——UI literalでレスラー名を重複管理しない
+- mirror match（同一wrestler）を禁止しない
+- 既定選択: Human=`akari`、CPU=`reina`
+- Start Matchで`CombatV1PlayableMatchScreen(humanWrestlerId:,
+  cpuWrestlerId:)`へ`Navigator.push`
+
+## 26. Match Session Adapter（Controller Factory Injection）
+
+`lib/src/combat_v1/playable_ui/combat_v1_playable_match_session.dart`に、
+`CombatV1PlayableMatchController`のうちMatch Screenが実際に使う
+API（`snapshot`/`result`/`submitHumanAction`/`advanceCpuOneAction`）だけを
+抽出した`abstract interface class CombatV1PlayableMatchSession`を定義し、
+production既定実装`CombatV1PlayableRealMatchSession`は該当APIを
+そのままcontrollerへ委譲するだけの薄いadapter（ロジックの再実装は一切
+行わない）。
+
+`CombatV1PlayableSessionFactory = CombatV1PlayableMatchSession Function(
+CombatV1PlayableMatchConfig config)`をMatch Screenのconstructor
+parameterとして注入可能にする（既定は`combatV1PlayableDefaultSessionFactory`
+——実controllerを構築する）。widget testはこのfactoryへscripted fake
+session（`FakePlayableMatchSession`、test専用）を差し込むことで、実Engine
+を一切経由せずCPU loop・Counter promptなどの複雑な状態遷移を検証できる
+（74・84章の設計意図をそのまま実現）。
+
+## 27. Seed Strategy（実装）
+
+`combat_v1_playable_match_session.dart`の
+`combatV1PlayableGenerateSeeds()`が、UI/application層専用のseed生成の
+唯一の実装:
+
+```dart
+typedef CombatV1PlayableSeedPair = ({int engineSeed, int cpuPolicySeed});
+CombatV1PlayableSeedPair combatV1PlayableGenerateSeeds() {
+  final source = Random();
+  final engineSeed = source.nextInt(1 << 31);
+  var cpuPolicySeed = source.nextInt(1 << 31);
+  if (cpuPolicySeed == engineSeed) cpuPolicySeed = (cpuPolicySeed + 1) & 0x7fffffff;
+  return (engineSeed: engineSeed, cpuPolicySeed: cpuPolicySeed);
+}
+```
+
+`Random()`（seedなし、システムentropy由来）を使用——`DateTime.now()`を
+UI層でも直接読まない設計とした（Web/native両対応、同一microsecond内の
+複数呼び出しでも異なる値になる）。この関数はcontroller/domain層には
+一切持ち込まない——`CombatV1PlayableMatchScreen`が`initState`/Rematch時に
+1度だけ呼び出し、結果を`CombatV1PlayableMatchConfig.engineSeed`/
+`.cpuPolicySeed`へ明示的に渡す。widget testは
+`CombatV1PlayableSeedGenerator`（`CombatV1PlayableSeedPair Function()`）を
+constructor経由で差し替え、固定値を返す。
+
+Seedは画面右上の「Match Details」アイコンボタン（`AlertDialog`）で
+`Engine Seed`/`CPU Policy Seed`/`Max Actions`/`Rules`として表示できる。
+
+## 28. Match Screen — State / CPU Loop / Counter Prompt
+
+`CombatV1PlayableMatchScreen`（StatefulWidget）の最小state: `_session`
+（`CombatV1PlayableMatchSession`）・`_snapshot`・`_config`（debug表示用）・
+`_selectedCardInstanceId`・`_submitErrorMessage`・`_cpuBusy`・
+`_counterSheetOpen`。
+
+- **CPU one-step progression**: `advanceCpuOneAction()`を`Future.delayed
+  (widget.cpuDelay)`ループから呼び、1step毎に`setState`する（16章）。
+  `advanceCpuUntilHumanInput()`は使わない。既定delay
+  `combatV1PlayableDefaultCpuDelay = Duration(milliseconds: 400)`
+  （17章の推奨範囲内）、widget testは`Duration.zero`または任意値を
+  constructor経由で注入する。
+- **CPU loop停止条件**: `status == active && !isHumanInputRequired`の間
+  ループを継続し、Human手番（Counterの防御側逆転を含む）または
+  terminal/safety/invariant/errorで自然に停止する（8・13章の
+  actor解決にそのまま従う）。
+- **Reentrancy guard**: `_cpuBusy`フラグで二重loop起動を防止（20章）。
+  loop中は`IgnorePointer`でHuman hand/primary actionsを無効化する。
+- **Mounted safety**: `Future.delayed`後・`advanceCpuOneAction`後の両方で
+  `if (!mounted) return;`を確認する（19章）。
+- **Counter prompt**: `isHumanInputRequired && pendingAttack != null`に
+  なった時点で`showModalBottomSheet`（`isDismissible: false` +
+  `enableDrag: false` + 内部を`PopScope(canPop: false, ...)`でラップ）を
+  1度だけ開く（`_counterSheetOpen`フラグで多重表示防止）。CPU防御時
+  （`isHumanInputRequired == false`）はpromptを一切出さない。
+
+## 29. Action Presentation
+
+Human手番のprimary actionsは`snapshot.legalActions`の`kind`集合から
+機械的に導出する（UI側でlegality判定を再実装しない）:
+
+- `phase == discard`: 「手札から1枚捨ててください」＋Discard buttonのみ
+  （Technique等は隠す）
+- Human DOWN（`posture == down && phase == action`）: 大きな`DOWN`表示
+  ＋Stand Up/Restのみ（hand行自体を非表示）
+- それ以外（action phase・STAND）: 選択中card + `kind`一致で
+  Technique button・PIN/End Turn（End Turnは`OutlinedButton`で視覚
+  優先度を下げる、38章）
+- Counter応答局面: 下部barではなくbottom sheetが担当
+
+card tapは即実行せず選択のみ（30章）。選択済みcardと一致する
+`CombatV1LegalAction`が現在のlegal action snapshotに無ければbuttonは
+disabledのまま（`onPressed: null`）。
+
+hand cardには`displayName`/`category`/技属性・DMG・HEAT・Cost（`counter`
+の場合はCost属性のみ）・FINISHER/COUNTER badge・`isUsable`disabled
+styling（「現在は使用できません」）を表示する——`CombatV1PlayableHandCard`
+が持つmetadataのみを使い、reasonをUI側で再計算しない（31章）。
+
+## 30. Recent Action Log（実装判断・簡略化）
+
+`recentObservations`のHuman-readable mapping
+（`combatV1PlayableObservationLabel`）は、actor（`YOU`/`CPU`）＋
+action **kind**（例: 「技を使用」「PINを宣言」「RESTでHPを回復」）のみで
+構成し、カード表示名は含めない。
+
+理由: Human自身のcardは実行後handから既に取り除かれており（discard/
+technique使用済み）、CPUのcardは常に非公開のため、`cardInstanceId`から
+安全に表示名を逆引きできる経路が hidden-safe snapshot API上に存在しない
+（`CombatV1PlayableObservation.action`は`cardInstanceId`のみ保持し、
+displayNameは保持しない、16章）。Catalogを直接引いてinstanceIdから
+名前を解決する実装も可能だが、それはUI層がEngineの内部identityへ
+直接アクセスすることになり、hidden information境界を弱める設計になる
+ため意図的に採用しなかった。kindベースのlabelはdamage等を再計算せず、
+hidden information違反のリスクもない。
+
+## 31. Widget / Integration Tests
+
+`test/combat_v1/playable_ui/`配下（実Engineを経由しないsynthetic
+snapshot中心、`combat_v1_playable_ui_test_fixtures.dart`が共有fixture）:
+
+- `combat_v1_playable_ui_formatters_test.dart` — pure formatter単体test
+- `combat_v1_playable_setup_screen_test.dart` — Setup画面
+- `combat_v1_playable_match_screen_test.dart` — Match初期表示・Discard・
+  Technique・DOWN・PIN・Hidden Info・Result overlay（matchOver/
+  safetyLimit/invariantViolation/error全4状態、"53章 Winner Display
+  Guard"の直接検証を含む）
+- `combat_v1_playable_match_screen_cpu_test.dart` — CPU loop（busy
+  indicator・delay injection・Human手番での停止）・Counter prompt
+  （選択→submit・Decline・外側tap不可・CPU防御時は非表示）
+- `combat_v1_playable_mobile_overflow_test.dart` — 320px幅でSetup/
+  Match（action/DOWN）/Counter prompt/Result overlayがoverflowしない
+  ことを`tester.takeException()`で確認
+- `combat_v1_playable_match_screen_integration_test.dart` — 実
+  `CombatV1PlayableMatchController`（`combatV1PlayableDefaultSessionFactory`
+  経由）でSetup config → controller → Match UIの接続を確認する
+  integration test。無理に賢い自動選択ロジックは作らず、単純な
+  button優先順位（Counter decline > Discard > StandUp/PIN/EndTurn/Rest）
+  で数手だけ進める（terminalまでの完走は必須にしない、88章）
+
+## 32. Browser Smoke Test（実施結果）
+
+`flutter build web`成功後、ローカルでbuildを配信し、Playwright +
+Chromium（headless、`--enable-unsafe-swiftshader`）で実際にbrowser
+smoke testを実施した。Title → Setup（wrestler選択・mirror確認）→
+Start Match → Discard → Technique → PIN → Counter（decline）→ CPU
+自動進行 → `試合終了` → `YOU WIN`（PIN）→ Rematch → 新しい試合が
+Turn 1から再開、まで実際に完走することを確認した（console error 0件・
+page error 0件、layout overflow無し）。Match Detailsダイアログ
+（Engine Seed表示）も確認済み。
+
+（sandboxed環境固有の注記: headless Chromiumの既定proxy設定では
+`fonts.gstatic.com`・`www.gstatic.com`（canvaskit CDN）への外部fetchが
+失敗するため、smoke test実行時のみ`build/web/flutter_bootstrap.js`の
+`useLocalCanvasKit`を有効化し、Google Fontsのfetchをproxy経由へ
+route替えした。production build成果物・アプリコードには一切影響しない、
+テスト実行環境限定の回避策。）
