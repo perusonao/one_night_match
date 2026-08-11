@@ -2,8 +2,8 @@
 /// （docs/design/combat_v1_phase12a_simulation_core.md）。
 ///
 /// 「同じ設定＋同じseedなら再現可能」を保証するための、masterSeedから
-/// matchSeed・engineSeed・playerAPolicySeed・playerBPolicySeedを導出する
-/// deterministic pure function群。
+/// matchSeed・engineSeed・playerAPolicySeed・playerBPolicySeed・
+/// simulationMatchIdを導出するdeterministic pure function群。
 ///
 /// 制約（Phase 12A要件）:
 ///
@@ -33,6 +33,7 @@ class CombatV1SimulationSeedSet {
     required this.playerAPolicySeed,
     required this.playerBPolicySeed,
     required this.derivationVersion,
+    required this.simulationMatchId,
   });
 
   final int matchIndex;
@@ -40,7 +41,7 @@ class CombatV1SimulationSeedSet {
 
   /// `masterSeed` + `matchIndex` + config（wrestlerA/B・policyA/B id）から
   /// 導出された、この試合固有のseed。[engineSeed]/[playerAPolicySeed]/
-  /// [playerBPolicySeed]はすべてこの値から派生する。
+  /// [playerBPolicySeed]/[simulationMatchId]はすべてこの値から派生する。
   final int matchSeed;
 
   /// `CombatV1Engine`のCommand実行（shuffle/draw/PIN/COUNTER解決）専用に
@@ -60,6 +61,17 @@ class CombatV1SimulationSeedSet {
   /// この結果を生成したseed derivationロジックのバージョン
   /// （[combatV1SeedDerivationVersion]と同じ値）。
   final int derivationVersion;
+
+  /// Simulator独自のdeterministic match identity（Codex review M2対応、
+  /// `docs/design/combat_v1_phase12a_simulation_core.md`参照）。
+  ///
+  /// `CombatV1Engine.start`が生成する時刻依存の`matchId`
+  /// （`DateTime.now().microsecondsSinceEpoch`由来）とは完全に独立
+  /// ——[matchSeed]（`masterSeed`/`matchIndex`/wrestlerA・B/policyA・Bから
+  /// 決定論的に導出される）のみから生成するため、Engine側matchIdが
+  /// 変化してもこの値は変化しない。`Random`を一切消費しない
+  /// （pure functionのみで構成）。
+  final String simulationMatchId;
 }
 
 /// masterSeedから1試合分の[CombatV1SimulationSeedSet]を導出する（Phase 12A
@@ -92,6 +104,18 @@ CombatV1SimulationSeedSet deriveV1SimulationSeeds({
   final playerAPolicySeed = _deriveV1(<Object>[matchSeed], 'policyA');
   final playerBPolicySeed = _deriveV1(<Object>[matchSeed], 'policyB');
 
+  // simulationMatchId専用のlaneを追加するだけであり、既存の
+  // 'engine'/'policyA'/'policyB' laneの導出（したがって既存golden
+  // vectorのengineSeed/playerAPolicySeed/playerBPolicySeed）には一切
+  // 影響しない——各laneは`matchSeed`とlane文字列のみから独立に導出される
+  // ため（Codex review M2対応）。
+  final matchIdValue = _deriveV1(<Object>[matchSeed], 'matchId');
+  final simulationMatchId = _formatSimulationMatchId(
+    masterSeed: masterSeed,
+    matchIndex: matchIndex,
+    matchIdValue: matchIdValue,
+  );
+
   return CombatV1SimulationSeedSet(
     matchIndex: matchIndex,
     masterSeed: masterSeed,
@@ -100,8 +124,21 @@ CombatV1SimulationSeedSet deriveV1SimulationSeeds({
     playerAPolicySeed: playerAPolicySeed,
     playerBPolicySeed: playerBPolicySeed,
     derivationVersion: combatV1SeedDerivationVersion,
+    simulationMatchId: simulationMatchId,
   );
 }
+
+/// [masterSeed]/[matchIndex]（人間可読な先頭部分）と[matchIdValue]
+/// （`matchSeed`から`'matchId'` laneで導出した32-bit値、衝突耐性の
+/// ための一意化サフィックス）から、[CombatV1SimulationSeedSet.simulationMatchId]
+/// の文字列表現を組み立てる。
+String _formatSimulationMatchId({
+  required int masterSeed,
+  required int matchIndex,
+  required int matchIdValue,
+}) =>
+    'sim-v$combatV1SeedDerivationVersion-$masterSeed-$matchIndex-'
+    '${matchIdValue.toRadixString(16).padLeft(8, '0')}';
 
 /// [components]（順序を含めて意味を持つ）と[lane]（同じcomponentsから複数の
 /// 独立したseedを分岐させるための識別子、例:`'engine'`/`'policyA'`）から、

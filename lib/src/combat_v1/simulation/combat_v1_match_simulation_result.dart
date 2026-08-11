@@ -158,8 +158,11 @@ class CombatV1MatchFinalStateSummary {
 class CombatV1MatchSimulationResult {
   const CombatV1MatchSimulationResult({
     required this.matchIndex,
+    required this.simulationMatchId,
     required this.wrestlerAId,
     required this.wrestlerBId,
+    required this.playerAOwnerId,
+    required this.playerBOwnerId,
     required this.playerAPolicyId,
     required this.playerBPolicyId,
     required this.masterSeed,
@@ -186,8 +189,25 @@ class CombatV1MatchSimulationResult {
   /// `matchIndex`と同じ値）。
   final int matchIndex;
 
+  /// Simulator独自のdeterministic match identity（Codex review M2対応）。
+  /// `CombatV1SimulationSeedSet.simulationMatchId`をそのまま転記する
+  /// ——`CombatV1Engine.start`が生成する時刻依存の`matchId`
+  /// （`finalState.matchId`）とは独立した、canonicalなidentityであり、
+  /// Phase 12Bの集計・監査・replay boundaryとして利用できる。同一の
+  /// `CombatV1SimulationConfig` + `matchIndex`からは常に同じ値になる。
+  final String simulationMatchId;
+
   final String wrestlerAId;
   final String wrestlerBId;
+
+  /// `CombatV1ProductionMatchConfig.playerAOwnerId`/`playerBOwnerId`へ
+  /// 実際に渡した値をそのまま転記する（Codex review M2対応）——Result用に
+  /// 別途再計算した値ではない。これにより「Resultに記録されたowner
+  /// namespace」と「実際にphysical card instance生成へ使用されたowner
+  /// namespace」の一致を構造的に保証する（`CombatV1SimulationRunner`
+  /// 参照）。
+  final String playerAOwnerId;
+  final String playerBOwnerId;
 
   /// [CombatV1CpuMatchResult.policyAId]/[CombatV1CpuMatchResult.policyBId]
   /// と同じ値（実際に実行されたPolicyの`id`）。
@@ -242,6 +262,8 @@ class CombatV1MatchSimulationResult {
     required int matchIndex,
     required String wrestlerAId,
     required String wrestlerBId,
+    required String playerAOwnerId,
+    required String playerBOwnerId,
     required CombatV1RulesConfig rules,
     required CombatV1SimulationSeedSet seeds,
     required CombatV1CpuMatchResult cpuResult,
@@ -255,8 +277,11 @@ class CombatV1MatchSimulationResult {
 
     return CombatV1MatchSimulationResult(
       matchIndex: matchIndex,
+      simulationMatchId: seeds.simulationMatchId,
       wrestlerAId: wrestlerAId,
       wrestlerBId: wrestlerBId,
+      playerAOwnerId: playerAOwnerId,
+      playerBOwnerId: playerBOwnerId,
       playerAPolicyId: cpuResult.policyAId,
       playerBPolicyId: cpuResult.policyBId,
       masterSeed: seeds.masterSeed,

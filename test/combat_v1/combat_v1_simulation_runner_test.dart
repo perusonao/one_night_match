@@ -455,6 +455,10 @@ void main() {
       expect(replay.engineSeed, target.engineSeed);
       expect(replay.playerAPolicySeed, target.playerAPolicySeed);
       expect(replay.playerBPolicySeed, target.playerBPolicySeed);
+      // Codex review M2: simulationMatchId/ownerIdもreplayで再現すること。
+      expect(replay.simulationMatchId, target.simulationMatchId);
+      expect(replay.playerAOwnerId, target.playerAOwnerId);
+      expect(replay.playerBOwnerId, target.playerBOwnerId);
     });
   });
 
@@ -491,6 +495,119 @@ void main() {
           reason: '$wrestlerId: ${result.invariantViolationMessage}',
         );
       }
+    });
+  });
+
+  group('J. simulationMatchId / owner metadata（Codex review M2対応）', () {
+    test('simulation match ID determinism: 同一config/matchIndexなら同一'
+        'simulationMatchId', () {
+      final config = _config(masterSeed: 4321, matchCount: 1);
+      const runner = CombatV1SimulationRunner();
+
+      final resultA = runner.runSingleMatch(config, 0);
+      final resultB = runner.runSingleMatch(config, 0);
+
+      expect(resultA.simulationMatchId, resultB.simulationMatchId);
+      expect(resultA.simulationMatchId, isNotEmpty);
+    });
+
+    test('matchIndex separation: matchIndexが異なれば別simulationMatchId', () {
+      final config = _config(masterSeed: 4321, matchCount: 3);
+      const runner = CombatV1SimulationRunner();
+
+      final ids = [
+        for (var i = 0; i < config.matchCount; i++)
+          runner.runSingleMatch(config, i).simulationMatchId,
+      ];
+
+      expect(ids.toSet().length, ids.length, reason: 'simulationMatchIdが重複しています');
+    });
+
+    test('Engine matchId independence: Engineの時刻依存matchIdが試行ごとに'
+        '異なっていても、simulationMatchIdは常に同一である', () {
+      final config = _config(masterSeed: 9090, matchCount: 1);
+      const runner = CombatV1SimulationRunner();
+
+      // _rawFinalStateはCombatV1SimulationRunnerと同じ手順（公開されている
+      // 関数のみ）でEngineの生stateまで再構築する——finalState.matchId
+      // （CombatV1Engine.startがDateTime.now()から生成する時刻依存値）へ
+      // 直接アクセスできる唯一の経路。
+      final stateA = _rawFinalState(config, 0);
+      final stateB = _rawFinalState(config, 0);
+
+      final resultA = runner.runSingleMatch(config, 0);
+      final resultB = runner.runSingleMatch(config, 0);
+
+      // Engineのmatch idは時刻依存のため、通常は試行ごとに異なる
+      // （生成にmicrosecondsSinceEpochを使うため、同一microsecond内での
+      // 極めて稀な衝突は理論上あり得るが、simulationMatchIdの独立性
+      // 主張には影響しない——以下のsimulationMatchId一致こそが本来の
+      // 検証対象）。
+      expect(
+        resultA.simulationMatchId,
+        resultB.simulationMatchId,
+        reason: 'Engine matchId（${stateA.matchId} / ${stateB.matchId}）が'
+            '試行ごとに変化しても、simulationMatchIdは変化してはならない',
+      );
+    });
+
+    test('owner metadata: Resultのplayer{A,B}OwnerIdは実際に使用した'
+        'deterministic owner namespaceと一致する', () {
+      final config = _config(masterSeed: 5566, matchCount: 1);
+      const runner = CombatV1SimulationRunner();
+      final result = runner.runSingleMatch(config, 0);
+
+      final expectedA = combatV1SimulationOwnerId(
+        masterSeed: config.masterSeed,
+        matchIndex: 0,
+        playerSuffix: 'a',
+      );
+      final expectedB = combatV1SimulationOwnerId(
+        masterSeed: config.masterSeed,
+        matchIndex: 0,
+        playerSuffix: 'b',
+      );
+
+      expect(result.playerAOwnerId, expectedA);
+      expect(result.playerBOwnerId, expectedB);
+    });
+
+    test('owner A/B separation: 同一matchでもplayerAOwnerId != playerBOwnerId', () {
+      final config = _config(masterSeed: 7788, matchCount: 1);
+      const runner = CombatV1SimulationRunner();
+      final result = runner.runSingleMatch(config, 0);
+
+      expect(result.playerAOwnerId, isNot(result.playerBOwnerId));
+    });
+
+    test('match separation: matchIndexが異なればowner IDsが分離される', () {
+      final config = _config(masterSeed: 8899, matchCount: 4);
+      const runner = CombatV1SimulationRunner();
+
+      final ownerIds = <String>{};
+      for (var i = 0; i < config.matchCount; i++) {
+        final result = runner.runSingleMatch(config, i);
+        expect(ownerIds.contains(result.playerAOwnerId), isFalse);
+        expect(ownerIds.contains(result.playerBOwnerId), isFalse);
+        ownerIds
+          ..add(result.playerAOwnerId)
+          ..add(result.playerBOwnerId);
+      }
+      expect(ownerIds.length, config.matchCount * 2);
+    });
+
+    test('mirror match: misaki vs misakiでもplayerAOwnerId != playerBOwnerId', () {
+      final config = _config(
+        wrestlerAId: 'misaki',
+        wrestlerBId: 'misaki',
+        masterSeed: 6060,
+        matchCount: 1,
+      );
+      const runner = CombatV1SimulationRunner();
+      final result = runner.runSingleMatch(config, 0);
+
+      expect(result.playerAOwnerId, isNot(result.playerBOwnerId));
+      expect(result.wrestlerAId, result.wrestlerBId);
     });
   });
 }

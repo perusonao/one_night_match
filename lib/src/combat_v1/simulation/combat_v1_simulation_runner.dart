@@ -96,6 +96,20 @@ class CombatV1SimulationRunner {
       playerBPolicyId: config.playerBPolicy.policyId,
     );
 
+    // playerAOwnerId/playerBOwnerIdは1度だけ計算し、starterへ渡す値と
+    // Resultへ記録する値を同じ変数から取る——Result用に別途再計算しない
+    // ことで、両者の一致を構造的に保証する（Codex review M2対応）。
+    final playerAOwnerId = combatV1SimulationOwnerId(
+      masterSeed: config.masterSeed,
+      matchIndex: matchIndex,
+      playerSuffix: 'a',
+    );
+    final playerBOwnerId = combatV1SimulationOwnerId(
+      masterSeed: config.masterSeed,
+      matchIndex: matchIndex,
+      playerSuffix: 'b',
+    );
+
     // Engine Randomは試合開始（deckシャッフル・初期手札配布）からrunnerの
     // Engine Command実行まで、1本のRandom instanceを継続して使う——「Engine
     // Random」を試合全体で単一のRNG streamとして扱う（7章）。
@@ -107,16 +121,8 @@ class CombatV1SimulationRunner {
       CombatV1ProductionMatchConfig(
         wrestlerAId: config.wrestlerAId,
         wrestlerBId: config.wrestlerBId,
-        playerAOwnerId: combatV1SimulationOwnerId(
-          masterSeed: config.masterSeed,
-          matchIndex: matchIndex,
-          playerSuffix: 'a',
-        ),
-        playerBOwnerId: combatV1SimulationOwnerId(
-          masterSeed: config.masterSeed,
-          matchIndex: matchIndex,
-          playerSuffix: 'b',
-        ),
+        playerAOwnerId: playerAOwnerId,
+        playerBOwnerId: playerBOwnerId,
         rules: config.rules,
       ),
       random: engineRandom,
@@ -142,6 +148,8 @@ class CombatV1SimulationRunner {
       matchIndex: matchIndex,
       wrestlerAId: config.wrestlerAId,
       wrestlerBId: config.wrestlerBId,
+      playerAOwnerId: playerAOwnerId,
+      playerBOwnerId: playerBOwnerId,
       rules: config.rules,
       seeds: seeds,
       cpuResult: cpuResult,
