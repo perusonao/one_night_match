@@ -107,16 +107,36 @@ CombatV1SimulationSeedSet deriveV1SimulationSeeds({
 /// 独立したseedを分岐させるための識別子、例:`'engine'`/`'policyA'`）から、
 /// 32-bit非負整数のseedを1つ決定論的に導出する。
 ///
-/// `components`を`'|'`区切りの文字列へ直列化してFNV-1aでハッシュ化した後、
-/// [_mix32]でavalanche（1bitの変化が出力全体へ広がる性質）を高める
-/// 2段構成。`Random`の逐次呼び出しには依存しない。
+/// [components]を[_encodeLengthPrefixed]でbijectiveに直列化してFNV-1aで
+/// ハッシュ化した後、[_mix32]でavalanche（1bitの変化が出力全体へ広がる
+/// 性質）を高める2段構成。`Random`の逐次呼び出しには依存しない。
 int _deriveV1(List<Object> components, String lane) {
-  final key = <String>[
+  final parts = <String>[
     'combatV1SimSeed.v$combatV1SeedDerivationVersion',
     for (final component in components) component.toString(),
     lane,
-  ].join('|');
-  return _mix32(_fnv1a32(key));
+  ];
+  return _mix32(_fnv1a32(_encodeLengthPrefixed(parts)));
+}
+
+/// [parts]を長さ接頭辞（length-prefix）方式でbijectiveに直列化する
+/// （Codex review指摘「Seed serialization」対応）。
+///
+/// 単純な区切り文字joinでは、要素の内容次第で異なる[parts]列が同じ直列化
+/// 結果になり得る（例: `['a', 'b|c']`と`['a|b', 'c']`はどちらも単純joinで
+/// `'a|b|c'`になってしまう）。各要素の直前にUTF-16 code unit数
+/// （`String.length`、プラットフォーム非依存）と`':'`を書き込むことで、
+/// 直列化結果から常に一意に元の[parts]列を復元できる——異なる[parts]列が
+/// 同じ直列化結果になることは構造上あり得ない。
+String _encodeLengthPrefixed(List<String> parts) {
+  final buffer = StringBuffer();
+  for (final part in parts) {
+    buffer
+      ..write(part.length)
+      ..write(':')
+      ..write(part);
+  }
+  return buffer.toString();
 }
 
 /// 文字列の32-bit FNV-1aハッシュ（`String.hashCode`は使用しない——
@@ -128,7 +148,7 @@ int _fnv1a32(String input) {
   var hash = offsetBasis;
   for (final unit in input.codeUnits) {
     hash = (hash ^ unit) & 0xFFFFFFFF;
-    hash = (hash * prime) & 0xFFFFFFFF;
+    hash = _mul32(hash, prime);
   }
   return hash;
 }
@@ -139,8 +159,30 @@ int _fnv1a32(String input) {
 /// （Phase 12A要件）。
 int _mix32(int seed) {
   var x = seed & 0xFFFFFFFF;
-  x = ((x ^ (x >>> 16)) * 0x85EBCA6B) & 0xFFFFFFFF;
-  x = ((x ^ (x >>> 13)) * 0xC2B2AE35) & 0xFFFFFFFF;
+  x = _mul32(x ^ (x >>> 16), 0x85EBCA6B);
+  x = _mul32(x ^ (x >>> 13), 0xC2B2AE35);
   x = (x ^ (x >>> 16)) & 0xFFFFFFFF;
   return x;
+}
+
+/// [a]・[b]（いずれも32-bit unsigned値として扱う）の積を、下位32-bitへ
+/// 切り詰めて返す（`(a * b) & 0xFFFFFFFF`と数学的に同値）。
+///
+/// `a * b`をそのまま計算すると、32-bit×32-bit＝最大64-bit相当の中間結果に
+/// なり得る。Dart VM上の`int`は64-bit整数として正確に計算できるが、
+/// dart2js/dartdevcでコンパイルされたWeb上では`int`がJavaScriptの
+/// number（53-bit精度のdouble）で表現されるため、64-bit相当の中間結果は
+/// 精度を失い、VMと異なる結果になり得る（実測で確認済み）。
+///
+/// 16-bit×16-bitへ分割してから合成する標準的な安全乗算により、すべての
+/// 中間値を53-bit精度でも誤差なく表現できる範囲（最大でも約2^33）に
+/// 収め、VM/Web双方で常に同一の結果になるようにする。
+int _mul32(int a, int b) {
+  final aLo = a & 0xFFFF;
+  final aHi = (a >>> 16) & 0xFFFF;
+  final bLo = b & 0xFFFF;
+  final bHi = (b >>> 16) & 0xFFFF;
+  final low = aLo * bLo;
+  final mid = (aHi * bLo + aLo * bHi) & 0xFFFF;
+  return (low + (mid << 16)) & 0xFFFFFFFF;
 }

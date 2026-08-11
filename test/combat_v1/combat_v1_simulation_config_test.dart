@@ -1,13 +1,21 @@
 // Combat Ver.1 Phase 12A: CombatV1SimulationConfig
 // （lib/src/combat_v1/simulation/combat_v1_simulation_config.dart）のtest。
 //
-// fail-fast validation（matchCount/maxActions<=0・unknown wrestler・空
-// policy id）と、validな入力が正しく保持されることを検証する。
+// fail-fast validation（matchCount/maxActions<=0・unknown wrestler）と、
+// validな入力が正しく保持されることを検証する。
+//
+// 旧「E. invalid policy拒否」（playerAPolicy.idが空白のみのcustom
+// CombatV1SimulationPolicySpecを拒否する）は、Codex review Major Finding
+// M1対応でCombatV1SimulationPolicySpec（任意のfactory closureを注入できる
+// public API）自体を廃止したため、テスト対象のAPI面がもう存在しない。
+// 置き換えとして「E. policy APIが構造的に2種類へ閉じている」を追加し、
+// 同じ懸念（任意のpolicyを注入できてしまう）を新しいAPI形状で確認する。
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_engine.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
 import 'package:one_night_match/src/combat_v1/simulation/combat_v1_simulation_config.dart';
+import 'package:one_night_match/src/combat_v1/simulation/combat_v1_simulation_policy.dart';
 
 CombatV1SimulationConfig _validConfig({
   int matchCount = 1,
@@ -17,8 +25,8 @@ CombatV1SimulationConfig _validConfig({
 }) => CombatV1SimulationConfig(
   wrestlerAId: wrestlerAId,
   wrestlerBId: wrestlerBId,
-  playerAPolicy: CombatV1SimulationPolicySpec.firstLegal,
-  playerBPolicy: CombatV1SimulationPolicySpec.randomLegal,
+  playerAPolicy: CombatV1SimulationPolicyKind.firstLegal,
+  playerBPolicy: CombatV1SimulationPolicyKind.randomLegal,
   matchCount: matchCount,
   masterSeed: 42,
   maxActions: maxActions,
@@ -31,8 +39,10 @@ void main() {
 
       expect(config.wrestlerAId, 'misaki');
       expect(config.wrestlerBId, 'jack');
-      expect(config.playerAPolicy.id, 'firstLegal');
-      expect(config.playerBPolicy.id, 'randomLegal');
+      expect(config.playerAPolicy, CombatV1SimulationPolicyKind.firstLegal);
+      expect(config.playerBPolicy, CombatV1SimulationPolicyKind.randomLegal);
+      expect(config.playerAPolicy.policyId, 'firstLegal');
+      expect(config.playerBPolicy.policyId, 'randomLegal');
       expect(config.matchCount, 1);
       expect(config.masterSeed, 42);
       expect(config.maxActions, 500);
@@ -51,8 +61,8 @@ void main() {
       final config = CombatV1SimulationConfig(
         wrestlerAId: 'akari',
         wrestlerBId: 'reina',
-        playerAPolicy: CombatV1SimulationPolicySpec.firstLegal,
-        playerBPolicy: CombatV1SimulationPolicySpec.firstLegal,
+        playerAPolicy: CombatV1SimulationPolicyKind.firstLegal,
+        playerBPolicy: CombatV1SimulationPolicyKind.firstLegal,
         matchCount: 1,
         masterSeed: 1,
         rules: customRules,
@@ -109,22 +119,28 @@ void main() {
     });
   });
 
-  group('E. invalid policy拒否', () {
-    test('playerAPolicy.idが空白のみなら拒否', () {
+  group('E. policy APIが構造的に2種類へ閉じている（Codex review M1対応）', () {
+    test('CombatV1SimulationPolicyKindはfirstLegal/randomLegalの2種類のみ', () {
+      expect(CombatV1SimulationPolicyKind.values, hasLength(2));
       expect(
-        () => CombatV1SimulationConfig(
-          wrestlerAId: 'misaki',
-          wrestlerBId: 'jack',
-          playerAPolicy: CombatV1SimulationPolicySpec(
-            id: '   ',
-            create: CombatV1SimulationPolicySpec.randomLegal.create,
-          ),
-          playerBPolicy: CombatV1SimulationPolicySpec.firstLegal,
-          matchCount: 1,
-          masterSeed: 1,
-        ),
-        throwsA(isA<CombatV1IllegalActionException>()),
+        CombatV1SimulationPolicyKind.values,
+        containsAll(<CombatV1SimulationPolicyKind>[
+          CombatV1SimulationPolicyKind.firstLegal,
+          CombatV1SimulationPolicyKind.randomLegal,
+        ]),
       );
+    });
+
+    test('playerAPolicy/playerBPolicyはCombatV1SimulationPolicyKind型のみを'
+        '受け付ける（任意のfactory closureをpublic APIへ注入する経路が'
+        '存在しない）', () {
+      // CombatV1SimulationConfigのplayerAPolicy/playerBPolicyフィールドは
+      // enum型で宣言されているため、CombatV1SimulationPolicyKind.values
+      // 以外の値は型システム上そもそも渡せない
+      // （コンパイルエラーになる。実行時validationではなく型による保証）。
+      final config = _validConfig();
+      expect(config.playerAPolicy, isA<CombatV1SimulationPolicyKind>());
+      expect(config.playerBPolicy, isA<CombatV1SimulationPolicyKind>());
     });
   });
 }

@@ -20,6 +20,7 @@ import 'package:one_night_match/src/combat_v1/combat_v1_production_match_setup.d
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
 import 'package:one_night_match/src/combat_v1/simulation/combat_v1_match_simulation_result.dart';
 import 'package:one_night_match/src/combat_v1/simulation/combat_v1_simulation_config.dart';
+import 'package:one_night_match/src/combat_v1/simulation/combat_v1_simulation_policy.dart';
 import 'package:one_night_match/src/combat_v1/simulation/combat_v1_simulation_runner.dart';
 import 'package:one_night_match/src/combat_v1/simulation/combat_v1_simulation_seed.dart';
 
@@ -29,16 +30,16 @@ const List<String> _productionWrestlerIds = ['misaki', 'jack', 'akari', 'reina']
 CombatV1SimulationConfig _config({
   String wrestlerAId = 'misaki',
   String wrestlerBId = 'jack',
-  CombatV1SimulationPolicySpec? playerAPolicy,
-  CombatV1SimulationPolicySpec? playerBPolicy,
+  CombatV1SimulationPolicyKind? playerAPolicy,
+  CombatV1SimulationPolicyKind? playerBPolicy,
   int matchCount = 1,
   int masterSeed = 100,
   int maxActions = 500,
 }) => CombatV1SimulationConfig(
   wrestlerAId: wrestlerAId,
   wrestlerBId: wrestlerBId,
-  playerAPolicy: playerAPolicy ?? CombatV1SimulationPolicySpec.randomLegal,
-  playerBPolicy: playerBPolicy ?? CombatV1SimulationPolicySpec.randomLegal,
+  playerAPolicy: playerAPolicy ?? CombatV1SimulationPolicyKind.randomLegal,
+  playerBPolicy: playerBPolicy ?? CombatV1SimulationPolicyKind.randomLegal,
   matchCount: matchCount,
   masterSeed: masterSeed,
   maxActions: maxActions,
@@ -58,8 +59,8 @@ CombatV1MatchState _rawFinalState(
     matchIndex: matchIndex,
     wrestlerAId: config.wrestlerAId,
     wrestlerBId: config.wrestlerBId,
-    playerAPolicyId: config.playerAPolicy.id,
-    playerBPolicyId: config.playerBPolicy.id,
+    playerAPolicyId: config.playerAPolicy.policyId,
+    playerBPolicyId: config.playerBPolicy.policyId,
   );
 
   final engineRandom = Random(seeds.engineSeed);
@@ -82,8 +83,12 @@ CombatV1MatchState _rawFinalState(
     random: engineRandom,
   );
 
-  final policyA = config.playerAPolicy.create(Random(seeds.playerAPolicySeed));
-  final policyB = config.playerBPolicy.create(Random(seeds.playerBPolicySeed));
+  final policyA = config.playerAPolicy.createFresh(
+    Random(seeds.playerAPolicySeed),
+  );
+  final policyB = config.playerBPolicy.createFresh(
+    Random(seeds.playerBPolicySeed),
+  );
 
   final cpuRunner = CombatV1CpuMatchRunner(
     catalog: productionCardCatalog,
@@ -284,8 +289,8 @@ void main() {
         wrestlerAId: 'akari',
         wrestlerBId: 'reina',
         masterSeed: 5150,
-        playerAPolicy: CombatV1SimulationPolicySpec.randomLegal,
-        playerBPolicy: CombatV1SimulationPolicySpec.randomLegal,
+        playerAPolicy: CombatV1SimulationPolicyKind.randomLegal,
+        playerBPolicy: CombatV1SimulationPolicyKind.randomLegal,
       );
       const runner = CombatV1SimulationRunner();
       final a = runner.runSingleMatch(config, 0);
@@ -301,8 +306,8 @@ void main() {
         wrestlerAId: 'jack',
         wrestlerBId: 'reina',
         masterSeed: 6161,
-        playerAPolicy: CombatV1SimulationPolicySpec.firstLegal,
-        playerBPolicy: CombatV1SimulationPolicySpec.firstLegal,
+        playerAPolicy: CombatV1SimulationPolicyKind.firstLegal,
+        playerBPolicy: CombatV1SimulationPolicyKind.firstLegal,
       );
       const runner = CombatV1SimulationRunner();
       final a = runner.runSingleMatch(config, 0);

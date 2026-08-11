@@ -1,14 +1,18 @@
 # Combat Ver.1 Phase 12A — Simulation Core 設計文書
 
-- ステータス: Phase 12A（Simulation Core 実装）完了時点。
+- ステータス: Phase 12A（Simulation Core 実装）完了時点。Codex exact-HEAD review
+  「C. CHANGES REQUIRED」（Major Finding M1: policy factory closure問題、Minor
+  Finding: seed serializationの曖昧性）を修正済み。
 - 関連: [`../combat_rules_v1.md`](../combat_rules_v1.md)（SSOT） /
   [`combat_v1_phase11a_production_match_setup.md`](combat_v1_phase11a_production_match_setup.md) /
   [`combat_v1_phase11b_cpu.md`](combat_v1_phase11b_cpu.md)
 - 実装: `lib/src/combat_v1/simulation/combat_v1_simulation_seed.dart` /
-  `combat_v1_simulation_config.dart` / `combat_v1_match_simulation_result.dart` /
-  `combat_v1_simulation_result.dart` / `combat_v1_simulation_runner.dart`
+  `combat_v1_simulation_policy.dart` / `combat_v1_simulation_config.dart` /
+  `combat_v1_match_simulation_result.dart` / `combat_v1_simulation_result.dart` /
+  `combat_v1_simulation_runner.dart`
 - テスト: `test/combat_v1/combat_v1_simulation_seed_test.dart` /
-  `combat_v1_simulation_config_test.dart` / `combat_v1_simulation_runner_test.dart`
+  `combat_v1_simulation_seed_golden_test.dart` / `combat_v1_simulation_config_test.dart` /
+  `combat_v1_simulation_policy_test.dart` / `combat_v1_simulation_runner_test.dart`
 
 ---
 
@@ -80,7 +84,8 @@ Simulator側で新規に持つ責務（Phase 11Bが持たないもの）:
 - masterSeedから複数試合分のseed群を導出するseed derivation
 - 試合をまたいだowner namespace管理（physical instanceId衝突回避）
 - 複数試合の実行ループと結果集約（`CombatV1SimulationResult`）
-- Policyの生成をmatch単位で遅延させる`CombatV1SimulationPolicySpec`（Policy metadata）
+- Policyの生成をmatch単位で遅延させる`CombatV1SimulationPolicyKind`（Policy metadata、
+  5章参照）
 
 Core Engine（`combat_v1_engine.dart`）は変更していない。Production wrestler/deck/card
 balance dataも変更していない。
@@ -93,8 +98,8 @@ balance dataも変更していない。
 CombatV1SimulationConfig({
   required String wrestlerAId,
   required String wrestlerBId,
-  required CombatV1SimulationPolicySpec playerAPolicy,
-  required CombatV1SimulationPolicySpec playerBPolicy,
+  required CombatV1SimulationPolicyKind playerAPolicy,
+  required CombatV1SimulationPolicyKind playerBPolicy,
   required int matchCount,
   required int masterSeed,
   int maxActions = 500,
@@ -107,33 +112,74 @@ CombatV1SimulationConfig({
 - `wrestlerAId`/`wrestlerBId`が`combatV1ProductionWrestlerRegistry`（Phase 11A）に存在する
   こと——`CombatV1ProductionMatchStarter`と同じレジストリを使い、同じ形で未知wrestlerを拒否
   する
-- `playerAPolicy.id`/`playerBPolicy.id`が空白のみでないこと
 - `matchCount > 0`
 - `maxActions > 0`
 
 Config自身はRandomインスタンスを一切保持しない（`masterSeed`という整数のみを持ち、実際の
 `Random`は`CombatV1SimulationRunner`が試合ごとに生成する）。
 
-### Policy metadata
+### Policy metadata（Codex review Major Finding M1対応）
 
-`CombatV1SimulationPolicySpec`（同ファイル）は、Policyの安定したid（`CombatV1DecisionPolicy.id`
-と同じ値、例: `firstLegal`/`randomLegal`）と、match毎に導出されたPolicy Randomを受け取って
-`CombatV1DecisionPolicy`を生成するfactoryの組。
+**当初の設計とその問題**: Phase 12A初期実装では、Policyを`String id`＋任意の
+`CombatV1DecisionPolicy Function(Random) create`クロージャの組（`CombatV1SimulationPolicySpec`）
+で表現していた。Codex exact-HEAD reviewで、これはpublic `CombatV1SimulationConfig`から任意の
+factory closureを注入できることを意味し、以下を防げないというMajor Finding（M1）が指摘された:
+
+- external mutable stateをclosureへcaptureできる
+- 同じpolicy instanceを複数matchで使い回せる
+- closureが供給されたRandomを無視できる
+- `id`文字列と実際に生成されたpolicyの`id`を不一致にできる
+
+これらはいずれもPhase 12Aの最重要契約「同じ`CombatV1SimulationConfig` + `masterSeed` +
+`matchIndex`から同じsimulationを再現できる」をpublic API上保証できないことを意味する。
+
+**修正後の設計**: `CombatV1SimulationPolicyKind`（`combat_v1_simulation_policy.dart`、新規）は、
+Simulationで利用可能なPolicyをPhase 11Bの built-in 2種類（`CombatV1FirstLegalPolicy`/
+`CombatV1RandomLegalPolicy`）へ閉じたenum。
 
 ```dart
-class CombatV1SimulationPolicySpec {
-  final String id;
-  final CombatV1DecisionPolicy Function(Random policyRandom) create;
+enum CombatV1SimulationPolicyKind {
+  firstLegal,
+  randomLegal;
 
-  static const firstLegal = CombatV1SimulationPolicySpec(...);
-  static const randomLegal = CombatV1SimulationPolicySpec(...);
+  String get policyId => switch (this) { ... }; // 実際のPhase 11B policy.idから読み取る
+  CombatV1DecisionPolicy createFresh(Random policyRandom) => switch (this) { ... };
 }
 ```
 
-`CombatV1RandomLegalPolicy`はconstructorでRandomを要求するstateful policyのため、Config側で
-単一インスタンスとして保持すると複数試合で同じ乱数sequenceを使い回してしまう。`create`を
-match毎に呼び出すことで、試合ごとに独立したPolicy Randomを注入する。Phase 12Aでは
-`firstLegal`/`randomLegal`の2種のみを想定し、heuristic policy framework等の拡張は行わない。
+enumであるため、以下がすべて構造的に保証される（第三者custom policy registry等の汎用拡張
+機構はPhase 12Aでは追加しない——必要になった場合は将来Phaseで扱う）:
+
+1. validな`CombatV1SimulationConfig`から任意closureを注入できない——`playerAPolicy`/
+   `playerBPolicy`の型が`CombatV1SimulationPolicyKind`である以上、`values`の2種類以外は
+   コンパイル時に受け付けない
+2. external mutable stateをpolicy生成へ持ち込めない——enum variantはfieldを持たない
+   （instance固有のstateを保持しようがない）
+3. 各matchでfresh policy instanceを生成する——`createFresh`は毎回新規instanceを返す
+   （`CombatV1FirstLegalPolicy`はstateless policyだが、それでも`const`を使わずに
+   毎回再構築する——「stateの有無に関わらずinstanceを使い回さない」ことを構造で保証する
+   ため）
+4. `randomLegal`は必ず[createFresh]へ渡されたRandomをそのまま
+   `CombatV1RandomLegalPolicy`のconstructorへ渡す——独自のRandomを新規生成したり、供給
+   されたRandomを無視したりしない
+5. `firstLegal`はRandomを消費しなくても毎match再構築する（3と同じ理由）
+6. `policyId`と実際のPhase 11B policyの`id`が構造上不一致にならない——`policyId`は
+   `'firstLegal'`/`'randomLegal'`という文字列literalをSimulation層で別途保持せず、常に
+   実際にPhase 11B policyクラスをinstantiateしてその`.id`を読み取ることで値を得る
+   （`static final`で1度だけ計算）。Phase 11B側で`id`文字列が変更されれば自動的に
+   追従するため、descriptor IDとruntime policy IDが構造的に乖離することはない
+7. Simulation Resultの`playerAPolicyId`/`playerBPolicyId`は、実際に実行された
+   `CombatV1DecisionPolicy.id`（`CombatV1CpuMatchResult.policyAId`/`policyBId`）から
+   転記する——使用policyを識別できる
+8. 同一`CombatV1SimulationConfig`と`matchIndex`から`CombatV1SimulationRunner.runSingleMatch`
+   を呼び直せば、同じ`CombatV1SimulationPolicyKind`から同じderived seedで同じPolicy
+   implementationが再構築される（replayが可能、11章）
+9. Phase 11B policy実装（`CombatV1FirstLegalPolicy`/`CombatV1RandomLegalPolicy`）自体を
+   複製しない——`createFresh`は既存classのconstructorを呼ぶだけ
+10. Phase 11B public API（`combat_v1_decision_policy.dart`）のみを利用する
+
+`combat_v1_simulation_policy_test.dart`が、この10項目のうち直接test可能な性質
+（fresh instance保証・descriptor ID一致・供給Random尊重・enum closure）を固定している。
 
 ## 6. Seed Strategy
 
@@ -159,7 +205,7 @@ masterSeed
 ### derivation方式
 
 1. `masterSeed`/`matchIndex`/`wrestlerAId`/`wrestlerBId`/`playerAPolicyId`/`playerBPolicyId`
-   と`lane`識別子（`'match'`）を`'|'`区切りの文字列へ直列化する
+   と`lane`識別子（`'match'`）を、[長さ接頭辞方式](#seed-serialization)でbijectiveに直列化する
 2. 自前実装の32-bit FNV-1aハッシュで整数化する（`String.hashCode`/`Object.hashCode`は
    プラットフォーム間の安定性が保証されないため使用しない）
 3. MurmurHash3 finalizer相当の32-bit deterministic mixer（`_mix32`）でavalancheを高める
@@ -173,6 +219,66 @@ masterSeed
 場合は必ずインクリメントする。
 
 Phase 12Aでは32-bit mixerによる小規模実装で十分とし、暗号学的な強度は要求しない。
+
+### Seed serialization（Codex review Minor Finding対応）<a name="seed-serialization"></a>
+
+**当初の問題**: `components`を単純に`'|'`区切りでjoinしていたため、要素の内容次第で異なる
+`components`列が同じ直列化結果になり得た（例: `['a', 'b|c']`と`['a|b', 'c']`はどちらも単純
+joinで`'a|b|c'`になってしまう）。wrestlerId/policyIdは現状レジストリ由来の既知文字列に
+限られるため実害は無かったが、任意の文字列を将来受け付けるようになった場合に備え、Codex
+reviewは「異なるcomponents列が同じserialized keyになる余地」自体を構造的に排除するよう
+指摘した。
+
+**修正内容**: 各要素の直前にUTF-16 code unit数（`String.length`、プラットフォーム非依存）と
+`':'`を書き込む長さ接頭辞（length-prefix）方式へ変更した（`_encodeLengthPrefixed`）。
+
+```
+parts = ['combatV1SimSeed.v1', '42', '0', 'misaki', 'jack', 'firstLegal', 'randomLegal', 'match']
+→ "18:combatV1SimSeed.v1" + "2:42" + "1:0" + "6:misaki" + "4:jack" + "10:firstLegal" + "11:randomLegal" + "5:match"
+```
+
+長さが明示されているため、直列化結果から常に一意に元の`parts`列を復元できる——異なる
+`parts`列が同じ直列化結果になることは構造上あり得ない（bijective encoding）。
+
+この変更は`hashCode`/`Object.hash`/runtime依存hash/時刻/Engine matchIdのいずれも使用しない
+という既存制約を維持したまま行った。Phase 12Aはまだmergeされていないため、この直列化方式を
+seed derivation version 1の正式仕様として確定する（バージョンのインクリメントは行わない）。
+
+### VM/Web数値精度の修正（`_mul32`）
+
+Codex reviewの「可能な範囲でVM/Web双方で同一golden値になることを確認する」という要求に
+従って実測したところ、`_fnv1a32`/`_mix32`内の乗算（`(hash * prime) & 0xFFFFFFFF`等）が
+Dart VM（`dart run`）と dart2js（`dart compile js` + Node.jsで実行）で異なる結果を返す
+ことを確認した——32-bit×32-bitの素朴な乗算は最大64-bit相当の中間結果になり得るが、Dart
+VM上の`int`は64-bitとして正確に計算できる一方、dart2js/dartdevcでコンパイルされたWeb上
+では`int`がJavaScriptのnumber（53-bit精度のdouble）で表現されるため、64-bit相当の中間結果
+は精度を失う。
+
+これを`_mul32(a, b)`という16-bit分割の安全乗算へ置き換えて修正した（`aLo*bLo`・
+`(aHi*bLo + aLo*bHi) & 0xFFFF`・最終結果、いずれも最大でも約2^33までしか到達せず、
+53-bit精度でも誤差なく表現できる）。修正後、`combat_v1_simulation_seed_golden_test.dart`の
+9シナリオすべてでDart VMとdart2js（Node.js経由）の出力がbit単位で一致することを確認した。
+
+### Golden Seed Tests
+
+`combat_v1_simulation_seed_golden_test.dart`が、seed derivation version 1の既知入力→
+既知出力を固定literalとしてpinする（実装からその場で計算した値をexpectedにはしない）。
+将来アルゴリズムが意図せず変化した場合、この既存golden testがfailすることで検出できる。
+
+カバーするシナリオ:
+
+- normal positive masterSeed
+- masterSeed = 0
+- negative masterSeed
+- mirror wrestler matchup（wrestlerA == wrestlerB）
+- wrestlerA/Bが異なるケース（akari vs reina）
+- policy identity差（同一masterSeed/matchIndex/wrestlerで、playerAPolicyIdだけを
+  firstLegal/randomLegalで変えた場合の両方のgolden値）
+- matchIndex差（matchIndex 0/1双方のgolden値、およびEngine/policyA/policyB domain
+  separationの確認）
+
+golden値は本テスト追加時に、Dart VM（`dart run`）とdart2js（`dart compile js` +
+Node.jsで実行）の両方で実際に算出し、bit単位で一致することを確認済み。
 
 ## 7. RNG Separation
 
@@ -272,12 +378,14 @@ full action traceやfinalState自体（`CombatV1MatchState`全体）は保持し
 `engineSeed`/`playerAPolicySeed`/`playerBPolicySeed`/`seedDerivationVersion`/`maxActions`/
 `rules`/`matchIndex`）をすべて保持する。
 
-ただし実際の再実行には、Policy id文字列からPolicy Random生成factoryへ戻すこと（closureの
-serialization）が必要であり、Phase 12Aではこれを行わない。そのためreplayは、同一の
-`CombatV1SimulationConfig`（`CombatV1SimulationResult.config`から取得）と対象の`matchIndex`
-を組み合わせて`CombatV1SimulationRunner.runSingleMatch`を呼び直す形で行う
-（`combat_v1_simulation_runner_test.dart`「G. Replay」参照）。Phase 12Aではreplay UIや
-result全体のserializationは実装しない。
+ただし実際の再実行には、`CombatV1SimulationPolicyKind`から`CombatV1DecisionPolicy`を生成し
+直す処理（`createFresh`）が必要であり、Phase 12Aではresult全体のserializationを行わない。
+そのためreplayは、同一の`CombatV1SimulationConfig`（`CombatV1SimulationResult.config`から
+取得）と対象の`matchIndex`を組み合わせて`CombatV1SimulationRunner.runSingleMatch`を呼び直す
+形で行う（`combat_v1_simulation_runner_test.dart`「G. Replay」参照）。
+`CombatV1SimulationPolicyKind`はenumのため、同じkindからは常に同じPolicy実装
+（`CombatV1FirstLegalPolicy`/`CombatV1RandomLegalPolicy`）が再構築される（5章）。Phase 12A
+ではreplay UIは実装しない。
 
 ## 12. safetyLimit / invariantViolation Semantics
 
@@ -298,8 +406,13 @@ Phase 12Aでは原則としてPhase 11B Runnerの通常invariant validationを�
 
 - `combat_v1_simulation_seed_test.dart`: pure function・determinism・matchIndex/wrestler/
   policy/masterSeed差異によるmatchSeed分離・engine/A/B seed分離・derivation version固定
+- `combat_v1_simulation_seed_golden_test.dart`: seed derivation version 1のgolden vector
+  （固定literal、VM/Web両方で算出・一致確認済み）
 - `combat_v1_simulation_config_test.dart`: valid config・matchCount/maxActions<=0拒否・
-  unknown wrestler拒否・invalid policy拒否
+  unknown wrestler拒否・policy APIが構造的に2種類へ閉じていること
+- `combat_v1_simulation_policy_test.dart`: Codex review Major Finding M1の直接固定
+  （descriptor ID/runtime policy ID一致・fresh instance保証・供給Random尊重・external
+  mutable state不可）
 - `combat_v1_simulation_runner_test.dart`: 1試合実行・複数試合実行（matchIndex安定・owner
   namespace非衝突・match seed一意・card conservation/instanceId uniqueness）・
   determinism（FirstLegal/RandomLegal双方、複数masterSeed）・RNG分離（Simulation Runner

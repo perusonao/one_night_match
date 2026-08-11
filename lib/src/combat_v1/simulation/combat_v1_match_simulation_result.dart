@@ -149,12 +149,12 @@ class CombatV1MatchFinalStateSummary {
 ///
 /// Replay metadata（12章）として、この1試合を同一条件で再実行するために
 /// 必要な値（wrestler/policy/seed/rules/maxActions/matchIndex）をすべて
-/// 保持する。ただし実際の再実行には、Policy Randomから
-/// [CombatV1DecisionPolicy]を生成するfactory（`CombatV1SimulationPolicySpec`）
-/// が別途必要——Phase 12Aではclosureのserializationは行わないため、
-/// replayは同一の`CombatV1SimulationConfig`（`CombatV1SimulationResult.config`）
-/// と[matchIndex]を組み合わせて`CombatV1SimulationRunner.runSingleMatch`を
-/// 呼び直す形で行う。
+/// 保持する。ただし実際の再実行には、`CombatV1SimulationPolicyKind`
+/// （`combat_v1_simulation_policy.dart`）から[CombatV1DecisionPolicy]を
+/// 生成し直す必要がある——Phase 12Aではresult全体のserializationは行わない
+/// ため、replayは同一の`CombatV1SimulationConfig`
+/// （`CombatV1SimulationResult.config`）と[matchIndex]を組み合わせて
+/// `CombatV1SimulationRunner.runSingleMatch`を呼び直す形で行う。
 class CombatV1MatchSimulationResult {
   const CombatV1MatchSimulationResult({
     required this.matchIndex,

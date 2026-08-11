@@ -92,8 +92,8 @@ class CombatV1SimulationRunner {
       matchIndex: matchIndex,
       wrestlerAId: config.wrestlerAId,
       wrestlerBId: config.wrestlerBId,
-      playerAPolicyId: config.playerAPolicy.id,
-      playerBPolicyId: config.playerBPolicy.id,
+      playerAPolicyId: config.playerAPolicy.policyId,
+      playerBPolicyId: config.playerBPolicy.policyId,
     );
 
     // Engine Randomは試合開始（deckシャッフル・初期手札配布）からrunnerの
@@ -122,8 +122,8 @@ class CombatV1SimulationRunner {
       random: engineRandom,
     );
 
-    final policyA = config.playerAPolicy.create(playerAPolicyRandom);
-    final policyB = config.playerBPolicy.create(playerBPolicyRandom);
+    final policyA = config.playerAPolicy.createFresh(playerAPolicyRandom);
+    final policyB = config.playerBPolicy.createFresh(playerBPolicyRandom);
 
     final runner = CombatV1CpuMatchRunner(
       catalog: productionCardCatalog,
