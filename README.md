@@ -46,12 +46,44 @@ Technique Matchの開発状況・次に何をすべきかは、以下のドキ�
   `workflow_dispatch` にも対応しており、Actionsタブから手動実行も可能。
   - 本番URL: https://perusonao.github.io/one_night_match/
   - deployが失敗した場合はGitHub Actionsの実行ログを確認する。
-  - **前提**: リポジトリの `Settings → Pages → Build and deployment → Source`
-    が `GitHub Actions` になっている必要がある（`gh-pages` ブランチ配信の
-    レガシー設定のままだとこのworkflowのdeployは反映されない）。
-  - `./deploy_web.sh`（`flutter build web --release` してから `gh-pages`
-    ブランチへ直接push）は、緊急時やActions外での手動デプロイ手段として
-    引き続き利用できる。ただし通常運用ではActions経由の自動デプロイを使う。
+  - **前提（初回Actions deployment前に必ず確認する）**:
+    1. `Settings → Pages → Build and deployment → Source` を
+       `GitHub Actions` へ変更する。
+    2. `Settings → Environments → github-pages → Deployment branches /
+       Deployment branch policy` を確認する。**現状は `gh-pages` のみが
+       許可されている想定**であり、このworkflowは `main` からdeployする
+       ため、`main` からのdeploymentを明示的に許可しないとenvironment
+       protectionによりdeployが拒否される。GitHub UIがSource切替時に
+       policyを自動調整する可能性に依存せず、必ず自分の目で確認すること。
+  - **`./deploy_web.sh` の位置づけ（Source切替後）**: このscriptは
+    `gh-pages` ブランチへ直接pushするだけの、旧来の
+    「Deploy from a branch」方式専用のlegacy scriptである。Pages Source
+    を `GitHub Actions` へ切り替えた後は、`gh-pages` ブランチを更新しても
+    **production Pagesには反映されない**（Actions Sourceの場合、Pagesは
+    `deploy-pages` actionによるdeploymentのみで更新される）。したがって
+    Source切替後は通常のproduction deployにこのscriptを使用しない。
+    手動でproduction deployしたい場合はGitHub Actionsの
+    `workflow_dispatch`（Actionsタブから該当workflowの
+    "Run workflow"）を使う。`deploy_web.sh` を再びproduction反映に使う
+    には、Pages SourceをBranch方式へ戻す必要があるが、通常運用では
+    行わない。
+  - **移行手順（初回のみ）**: 上記2点はrepository settingの変更が
+    必要なため、Claude Codeでは実施せずここに手順として記録する。
+    実施順序:
+    1. Auto Deploy workflow（本節冒頭のworkflow）を `main` へmergeする。
+    2. 現在のproduction（`gh-pages` ブランチ配信）が引き続き公開されて
+       いることを確認する。
+    3. `Settings → Pages → Build and deployment → Source` を
+       `GitHub Actions` へ変更する。
+    4. `Settings → Environments → github-pages` を確認する。
+    5. `main` からのdeploymentを許可する（Deployment branch policyに
+       `main` を追加、または対象を緩和する）。
+    6. `Actions` → `Deploy to GitHub Pages` workflow → `Run workflow`
+       で `workflow_dispatch` を実行する。
+    7. workflow_dispatchが成功することを確認する。
+    8. production URL（https://perusonao.github.io/one_night_match/）が
+       正しく更新されていることを確認する。
+    9. 以後は `main` へのmergeで自動deployされる。
 - **Firebase Hosting（Preview、Playtest Analytics検証用）**: このリポジトリ管理下の
   `firebase.json` / `.firebaserc`（プロジェクト: `one-night-match-preview`、
   Hostingのみ。Firestore/Authentication/Security Rulesは未設定＝Phase B以降）
