@@ -15,6 +15,7 @@ import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_match_lifecycle.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_rules_config.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_technique.dart';
+import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_action_feedback.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_controller.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_result.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart';
@@ -162,6 +163,52 @@ CombatV1PlayableObservation testObservation({
   action: action ?? const CombatV1EndTurnAction(actorPlayerIndex: 0),
 );
 
+CombatV1PlayableActionFeedback testActionFeedback({
+  int actionIndex = 0,
+  int turnNumber = 1,
+  CombatV1PlayableFeedbackKind kind = CombatV1PlayableFeedbackKind.techniqueResolved,
+  int actorPlayerIndex = 0,
+  int? opponentPlayerIndex = 1,
+  String? actionDisplayName = 'テストストライク',
+  String? relatedActionDisplayName,
+  int? damage,
+  int? hpOwnerPlayerIndex,
+  int? hpBefore,
+  int? hpAfter,
+  int? postureOwnerPlayerIndex,
+  CombatV1WrestlerPosture? postureBefore,
+  CombatV1WrestlerPosture? postureAfter,
+  int? heatBefore,
+  int? heatAfter,
+  int? kocOwnerPlayerIndex,
+  int? kocBefore,
+  int? kocAfter,
+  CombatV1PlayablePinFeedbackOutcome? pinOutcome,
+  CombatV1PlayableSubmissionFeedbackOutcome? submissionOutcome,
+}) => CombatV1PlayableActionFeedback(
+  actionIndex: actionIndex,
+  turnNumber: turnNumber,
+  kind: kind,
+  actorPlayerIndex: actorPlayerIndex,
+  opponentPlayerIndex: opponentPlayerIndex,
+  actionDisplayName: actionDisplayName,
+  relatedActionDisplayName: relatedActionDisplayName,
+  damage: damage,
+  hpOwnerPlayerIndex: hpOwnerPlayerIndex,
+  hpBefore: hpBefore,
+  hpAfter: hpAfter,
+  postureOwnerPlayerIndex: postureOwnerPlayerIndex,
+  postureBefore: postureBefore,
+  postureAfter: postureAfter,
+  heatBefore: heatBefore,
+  heatAfter: heatAfter,
+  kocOwnerPlayerIndex: kocOwnerPlayerIndex,
+  kocBefore: kocBefore,
+  kocAfter: kocAfter,
+  pinOutcome: pinOutcome,
+  submissionOutcome: submissionOutcome,
+);
+
 CombatV1PlayableMatchSnapshot testSnapshot({
   int revision = 0,
   int turnNumber = 1,
@@ -181,6 +228,8 @@ CombatV1PlayableMatchSnapshot testSnapshot({
   CombatV1PlayablePendingAttackView? pendingAttack,
   List<CombatV1PlayableObservation> recentObservations = const [],
   String? diagnosticMessage,
+  CombatV1PlayableActionFeedback? latestFeedback,
+  List<CombatV1PlayableActionFeedback> recentFeedback = const [],
 }) => CombatV1PlayableMatchSnapshot(
   revision: revision,
   turnNumber: turnNumber,
@@ -199,6 +248,8 @@ CombatV1PlayableMatchSnapshot testSnapshot({
   pendingAttack: pendingAttack,
   recentObservations: recentObservations,
   diagnosticMessage: diagnosticMessage,
+  latestFeedback: latestFeedback,
+  recentFeedback: recentFeedback,
 );
 
 CombatV1PlayableMatchResult testResult({

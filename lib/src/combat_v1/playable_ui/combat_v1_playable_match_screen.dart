@@ -12,11 +12,13 @@ import 'package:flutter/material.dart';
 
 import '../combat_v1_enums.dart';
 import '../combat_v1_legal_action.dart';
+import '../playable/combat_v1_playable_action_feedback.dart';
 import '../playable/combat_v1_playable_match_config.dart';
 import '../playable/combat_v1_playable_match_controller.dart'
     show CombatV1PlayableMatchController;
 import '../playable/combat_v1_playable_match_result.dart';
 import '../playable/combat_v1_playable_match_snapshot.dart';
+import 'combat_v1_playable_feedback_formatters.dart';
 import 'combat_v1_playable_match_session.dart';
 import 'combat_v1_playable_ui_formatters.dart';
 
@@ -64,7 +66,8 @@ class CombatV1PlayableMatchScreen extends StatefulWidget {
 
 class _CombatV1PlayableMatchScreenState
     extends State<CombatV1PlayableMatchScreen> {
-  static const int _humanPlayerIndex = CombatV1PlayableMatchController.humanPlayerIndex;
+  static const int _humanPlayerIndex =
+      CombatV1PlayableMatchController.humanPlayerIndex;
 
   late CombatV1PlayableMatchSession _session;
   late CombatV1PlayableMatchSnapshot _snapshot;
@@ -82,7 +85,9 @@ class _CombatV1PlayableMatchScreenState
   void initState() {
     super.initState();
     _startNewMatch();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _afterSnapshotChanged());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _afterSnapshotChanged(),
+    );
   }
 
   void _startNewMatch() {
@@ -134,7 +139,8 @@ class _CombatV1PlayableMatchScreenState
           canPop: false,
           child: _CounterPromptSheet(
             snapshot: _snapshot,
-            onDecision: (action) => _handleCounterDecision(sheetContext, action),
+            onDecision: (action) =>
+                _handleCounterDecision(sheetContext, action),
           ),
         ),
       );
@@ -203,14 +209,17 @@ class _CombatV1PlayableMatchScreenState
 
   void _onSelectCard(String instanceId) {
     setState(() {
-      _selectedCardInstanceId =
-          _selectedCardInstanceId == instanceId ? null : instanceId;
+      _selectedCardInstanceId = _selectedCardInstanceId == instanceId
+          ? null
+          : instanceId;
     });
   }
 
   void _rematch() {
     setState(_startNewMatch);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _afterSnapshotChanged());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _afterSnapshotChanged(),
+    );
   }
 
   void _back() => Navigator.of(context).pop();
@@ -272,6 +281,12 @@ class _CombatV1PlayableMatchScreenState
                     children: [
                       _CpuStatusPanel(cpu: snapshot.cpu),
                       _SharedStatusPanel(snapshot: snapshot),
+                      // Playable 1C: latest action feedback banner等、
+                      // 内容量が変動するpanelが増えたため、この panel
+                      // 自体は内部で高さ上限を持つ（下記
+                      // `_ActorAndRecentPanel`参照）——Human status
+                      // panel/Primary actions barがscroll不要で常に画面内に
+                      // 収まる既存レイアウトを維持するため。
                       _ActorAndRecentPanel(
                         snapshot: snapshot,
                         humanPlayerIndex: _humanPlayerIndex,
@@ -399,13 +414,25 @@ class _StatusPanelShell extends StatelessWidget {
                   Wrap(
                     spacing: 12,
                     children: [
-                      Text('HP $hp / $maxHp', style: const TextStyle(fontSize: 12)),
+                      Text(
+                        'HP $hp / $maxHp',
+                        style: const TextStyle(fontSize: 12),
+                      ),
                       Tooltip(
                         message: 'PIN / Submissionからの脱出に使用',
-                        child: Text('KOC $koc', style: const TextStyle(fontSize: 12)),
+                        child: Text(
+                          'KOC $koc',
+                          style: const TextStyle(fontSize: 12),
+                        ),
                       ),
-                      Text('Hand $handCount', style: const TextStyle(fontSize: 12)),
-                      Text('PIN $pinCardsHeld', style: const TextStyle(fontSize: 12)),
+                      Text(
+                        'Hand $handCount',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      Text(
+                        'PIN $pinCardsHeld',
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ],
                   ),
                 ],
@@ -466,6 +493,12 @@ class _SharedStatusPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Playable 1C「HEAT UI Recommendation」——「HEAT 360 / 200」のような
+    // progress上限表現は「200が上限」に見えてしまう（HEATは消費されず、
+    // 200超もそのまま蓄積し続ける、docs/combat_rules_v1.md 12章）。current
+    // valueとFINISHER解禁閾値を別々に表示し、HEATが共有・蓄積型である
+    // ことをTooltipで補足する。
+    final unlocked = snapshot.sharedHeat >= snapshot.finisherHeatThreshold;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       // 61章「Small Screen」——狭幅でも折り返してoverflowしないようRowでは
@@ -474,14 +507,43 @@ class _SharedStatusPanel extends StatelessWidget {
       child: Wrap(
         key: const Key('combat_v1_playable_shared_status'),
         alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
         spacing: 12,
         runSpacing: 2,
         children: [
-          Text('Turn ${snapshot.turnNumber}', style: const TextStyle(fontSize: 12, color: Colors.white70)),
-          Text(combatV1PlayablePhaseLabel(snapshot.phase), style: const TextStyle(fontSize: 12, color: Colors.white70)),
           Text(
-            'HEAT ${snapshot.sharedHeat} / ${snapshot.finisherHeatThreshold}',
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _gold),
+            'Turn ${snapshot.turnNumber}',
+            style: const TextStyle(fontSize: 12, color: Colors.white70),
+          ),
+          Text(
+            combatV1PlayablePhaseLabel(snapshot.phase),
+            style: const TextStyle(fontSize: 12, color: Colors.white70),
+          ),
+          Tooltip(
+            message:
+                'HEATは両者共有・蓄積型（減りません）。'
+                '${snapshot.finisherHeatThreshold}に達するとFINISHERカードが解禁されます'
+                '（上限ではなく解禁ラインです）',
+            child: Wrap(
+              key: const Key('combat_v1_playable_heat_status'),
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 6,
+              children: [
+                Text(
+                  'Shared HEAT ${snapshot.sharedHeat}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: _gold,
+                  ),
+                ),
+                Text(
+                  'Finisher Unlock ${snapshot.finisherHeatThreshold}',
+                  style: const TextStyle(fontSize: 11, color: Colors.white70),
+                ),
+                if (unlocked) const _MiniBadge(label: 'UNLOCKED', color: _gold),
+              ],
+            ),
           ),
         ],
       ),
@@ -509,7 +571,10 @@ class _ActorAndRecentPanel extends StatelessWidget {
       currentActorPlayerIndex: snapshot.currentActorPlayerIndex,
       hasPendingAttack: snapshot.pendingAttack != null,
     );
-    final recents = snapshot.recentObservations.reversed.take(6).toList();
+    // Playable 1C「Recent Action Log Upgrade」——直近1件は大きめbanner、
+    // その前のもの（compact list）をあわせて表示する（「Keep Log
+    // Compact」——8件保持全件は必ずしも見せない、直近4件のみ）。
+    final recents = snapshot.recentFeedback.reversed.skip(1).take(4).toList();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
@@ -529,25 +594,131 @@ class _ActorAndRecentPanel extends StatelessWidget {
               Text(
                 actorLabel,
                 key: const Key('combat_v1_playable_actor_label'),
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _pink),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: _pink,
+                ),
               ),
             ],
           ),
-          if (recents.isNotEmpty)
+          // Playable 1C「Keep Log Compact」——feedback内容量が可変のため、
+          // ここだけ高さ上限＋内部clip-scrollにして、Human status
+          // panel/Primary actions barが常にscroll不要で画面内へ収まる
+          // 既存レイアウト（Expanded/固定bottom bar）を壊さないようにする
+          // （念のための上限であり、通常の1〜2行feedbackでは到達しない）。
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 132),
+            child: SingleChildScrollView(
+              physics: const NeverScrollableScrollPhysics(),
+              child: Column(
+                children: [
+                  if (snapshot.latestFeedback != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: _LatestFeedbackBanner(
+                        feedback: snapshot.latestFeedback!,
+                        humanPlayerIndex: humanPlayerIndex,
+                      ),
+                    ),
+                  if (recents.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Wrap(
+                        key: const Key('combat_v1_playable_recent_log'),
+                        alignment: WrapAlignment.center,
+                        spacing: 8,
+                        children: [
+                          for (final feedback in recents)
+                            Text(
+                              combatV1PlayableFeedbackCompactLabel(
+                                feedback,
+                                humanPlayerIndex: humanPlayerIndex,
+                              ),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.white38,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 直近1件のaction feedbackを表示する大きめbanner（Playable 1C「Action
+/// Result Feedback」「Feedback Display Duration」）。次のactionのfeedbackが
+/// 届くまで表示され続ける——CPUが400ms間隔で連続行動しても、直前の結果を
+/// 読み逃さないようにする（大幅なCPU delay増加ではなく、feedback
+/// persistenceで解決する方針）。
+class _LatestFeedbackBanner extends StatelessWidget {
+  const _LatestFeedbackBanner({
+    super.key,
+    required this.feedback,
+    required this.humanPlayerIndex,
+  });
+
+  final CombatV1PlayableActionFeedback feedback;
+  final int humanPlayerIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = combatV1PlayableFeedbackTitle(
+      feedback,
+      humanPlayerIndex: humanPlayerIndex,
+    );
+    final details = combatV1PlayableFeedbackDetailLines(
+      feedback,
+      humanPlayerIndex: humanPlayerIndex,
+    );
+    final isHuman = feedback.actorPlayerIndex == humanPlayerIndex;
+    return Container(
+      key: const Key('combat_v1_playable_latest_feedback_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: (isHuman ? _pink : _gold).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: (isHuman ? _pink : _gold).withValues(alpha: 0.6),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            title,
+            key: const Key('combat_v1_playable_latest_feedback_title'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: isHuman ? _pink : _gold,
+            ),
+          ),
+          if (details.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Wrap(
-                key: const Key('combat_v1_playable_recent_log'),
+                key: const Key('combat_v1_playable_latest_feedback_details'),
                 alignment: WrapAlignment.center,
-                spacing: 8,
+                spacing: 10,
+                runSpacing: 2,
                 children: [
-                  for (final observation in recents)
+                  for (final line in details)
                     Text(
-                      combatV1PlayableObservationLabel(
-                        observation,
-                        humanPlayerIndex: humanPlayerIndex,
+                      line,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
                       ),
-                      style: const TextStyle(fontSize: 11, color: Colors.white38),
                     ),
                 ],
               ),
@@ -574,7 +745,10 @@ class _ErrorBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: _healthError),
       ),
-      child: Text(message, style: const TextStyle(fontSize: 12, color: _healthError)),
+      child: Text(
+        message,
+        style: const TextStyle(fontSize: 12, color: _healthError),
+      ),
     );
   }
 }
@@ -605,10 +779,22 @@ class _MatchBody extends StatelessWidget {
               snapshot.isHumanInputRequired)
             const Padding(
               padding: EdgeInsets.only(bottom: 8),
-              child: Text(
-                '手札から1枚捨ててください',
-                key: Key('combat_v1_playable_discard_prompt'),
-                style: TextStyle(fontWeight: FontWeight.bold, color: _gold),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '手札から1枚捨ててください',
+                    key: Key('combat_v1_playable_discard_prompt'),
+                    style: TextStyle(fontWeight: FontWeight.bold, color: _gold),
+                  ),
+                  // Playable 1C「Discard Context Help」——初回/常時、短い
+                  // 説明のみ（フルルール説明はしない）。
+                  Text(
+                    'ターン開始時に手札を1枚捨てます',
+                    key: Key('combat_v1_playable_discard_hint'),
+                    style: TextStyle(fontSize: 11, color: Colors.white54),
+                  ),
+                ],
               ),
             ),
           if (_isDown)
@@ -618,6 +804,8 @@ class _MatchBody extends StatelessWidget {
               hand: snapshot.human.hand,
               selectedCardInstanceId: selectedCardInstanceId,
               onSelectCard: onSelectCard,
+              sharedHeat: snapshot.sharedHeat,
+              finisherHeatThreshold: snapshot.finisherHeatThreshold,
             ),
         ],
       ),
@@ -638,13 +826,68 @@ class _DownIndicator extends StatelessWidget {
             const Text(
               'DOWN',
               key: Key('combat_v1_playable_down_indicator'),
-              style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: _healthError),
+              style: TextStyle(
+                fontSize: 32,
+                fontWeight: FontWeight.w900,
+                color: _healthError,
+              ),
             ),
             const SizedBox(height: 4),
-            const Text('Stand UpまたはRestを選んでください', style: TextStyle(color: Colors.white70)),
+            const Text(
+              'Stand UpまたはRestを選んでください',
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 12),
+            // Playable 1C「Stand Up / Rest Context Help」——事前に違いが
+            // 分かるよう、button前にそれぞれ短い説明を置く。
+            const _ActionHint(
+              key: Key('combat_v1_playable_stand_up_hint'),
+              label: 'Stand Up',
+              description: '立ち上がって、このターンの行動を続ける',
+            ),
+            const SizedBox(height: 4),
+            const _ActionHint(
+              key: Key('combat_v1_playable_rest_hint'),
+              label: 'Rest',
+              description: 'HPを回復してターン終了',
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ActionHint extends StatelessWidget {
+  const _ActionHint({
+    super.key,
+    required this.label,
+    required this.description,
+  });
+
+  final String label;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    // `RichText`ではなく`Text.rich`を使う——内部的には同じ`RichText`を
+    // 構築するが、`find.text`/`find.textContaining`（既定`findRichText:
+    // false`）が`Text`系widgetとしてmatchできるようにするため。
+    return Text.rich(
+      TextSpan(
+        style: const TextStyle(fontSize: 11, color: Colors.white54),
+        children: [
+          TextSpan(
+            text: '$label — ',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.white70,
+            ),
+          ),
+          TextSpan(text: description),
+        ],
+      ),
+      textAlign: TextAlign.center,
     );
   }
 }
@@ -654,11 +897,18 @@ class _HandRow extends StatelessWidget {
     required this.hand,
     required this.selectedCardInstanceId,
     required this.onSelectCard,
+    this.sharedHeat,
+    this.finisherHeatThreshold,
   });
 
   final List<CombatV1PlayableHandCard> hand;
   final String? selectedCardInstanceId;
   final ValueChanged<String> onSelectCard;
+
+  /// Playable 1C「Finisher Feedback」——finisher cardのHEAT要件表示用。
+  /// COUNTER応答sheetなど、この文脈がない呼び出し元では`null`のままにする。
+  final int? sharedHeat;
+  final int? finisherHeatThreshold;
 
   @override
   Widget build(BuildContext context) {
@@ -668,23 +918,46 @@ class _HandRow extends StatelessWidget {
         child: Text('手札がありません', style: TextStyle(color: Colors.white38)),
       );
     }
-    return SizedBox(
-      height: 168,
-      child: ListView.separated(
-        key: const Key('combat_v1_playable_human_hand'),
-        scrollDirection: Axis.horizontal,
-        itemCount: hand.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final card = hand[index];
-          return _HandCardTile(
-            key: ValueKey('combat_v1_playable_hand_card_${card.instanceId}'),
-            card: card,
-            selected: card.instanceId == selectedCardInstanceId,
-            onTap: () => onSelectCard(card.instanceId),
-          );
-        },
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Playable 1C「Horizontal Hand Cue」——右側のusable cardを見落とし
+        // やすいため、小さなscroll cueを添える（大規模carousel UI不要）。
+        if (hand.length > 1)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 4),
+            child: Text(
+              '→ 横にスクロールできます',
+              key: Key('combat_v1_playable_hand_scroll_hint'),
+              style: TextStyle(fontSize: 10, color: Colors.white38),
+            ),
+          ),
+        SizedBox(
+          // Playable 1C: finisher cardの「Requires HEAT」hint行が追加された
+          // ため168pxから拡張（`_CounterPromptSheet`のcounter hand専用
+          // SizedBoxは対象外——counter cardはfinisherになり得ないため）。
+          height: 182,
+          child: ListView.separated(
+            key: const Key('combat_v1_playable_human_hand'),
+            scrollDirection: Axis.horizontal,
+            itemCount: hand.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final card = hand[index];
+              return _HandCardTile(
+                key: ValueKey(
+                  'combat_v1_playable_hand_card_${card.instanceId}',
+                ),
+                card: card,
+                selected: card.instanceId == selectedCardInstanceId,
+                onTap: () => onSelectCard(card.instanceId),
+                sharedHeat: sharedHeat,
+                finisherHeatThreshold: finisherHeatThreshold,
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -695,84 +968,148 @@ class _HandCardTile extends StatelessWidget {
     required this.card,
     required this.selected,
     required this.onTap,
+    this.sharedHeat,
+    this.finisherHeatThreshold,
   });
 
   final CombatV1PlayableHandCard card;
   final bool selected;
   final VoidCallback onTap;
+  final int? sharedHeat;
+  final int? finisherHeatThreshold;
+
+  /// Playable 1C「Finisher Feedback / Do Not Invent Finisher Reasons」——
+  /// 安全に判定できるのはHEAT閾値だけなので、それ以外のlegality理由は
+  /// 断定しない。HEAT不足だと判定できる場合のみ具体的な数値を出し、
+  /// それ以外は既存の汎用メッセージに留める。
+  String _disabledMessage() {
+    final threshold = finisherHeatThreshold;
+    final heat = sharedHeat;
+    if (card.category == CombatV1CardCategory.finisher &&
+        threshold != null &&
+        heat != null &&
+        heat < threshold) {
+      return 'Requires HEAT $threshold (current $heat)';
+    }
+    return '現在は使用できません';
+  }
 
   @override
   Widget build(BuildContext context) {
     final technique = card.technique;
     final counter = card.counter;
     final disabled = !card.isUsable;
-    return Opacity(
-      opacity: disabled ? 0.5 : 1.0,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          width: 134,
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: _cardSurface,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: selected ? _pink : Colors.white24,
-              width: selected ? 2 : 1,
+    final threshold = finisherHeatThreshold;
+    return Semantics(
+      // Playable 1C「Accessibility Semantics」——selected/enabledを明示する。
+      button: true,
+      selected: selected,
+      enabled: !disabled,
+      label: card.displayName,
+      child: Opacity(
+        opacity: disabled ? 0.5 : 1.0,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: 134,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _cardSurface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: selected ? _pink : Colors.white24,
+                width: selected ? 2 : 1,
+              ),
             ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                card.displayName,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                combatV1PlayableCategoryLabel(card.category),
-                style: const TextStyle(fontSize: 10, color: Colors.white38),
-              ),
-              const SizedBox(height: 4),
-              if (technique != null) ...[
-                Text(
-                  '${technique.attribute.displayLabel} DMG ${technique.damage} '
-                  'HEAT ${technique.heatGain}',
-                  style: const TextStyle(fontSize: 11),
-                ),
-                Text(
-                  'Cost ${combatV1PlayableEnergyCostLabel(technique.energyCost.amounts)}',
-                  style: const TextStyle(fontSize: 11, color: Colors.white70),
-                ),
-              ] else if (counter != null) ...[
-                Text(
-                  'Cost属性 ${counter.attribute.displayLabel}',
-                  style: const TextStyle(fontSize: 11),
-                ),
-              ],
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 4,
+            // Playable 1C: finisher HEAT要件hint等、任意行が増えて縦幅が
+            // 変動するようになったため、`SingleChildScrollView`で包んで
+            // 万一カード高を超えてもRenderFlex overflowにしない（cardの
+            // 見た目の高さ自体は外側`SizedBox`で固定のまま）。
+            child: SingleChildScrollView(
+              physics: const NeverScrollableScrollPhysics(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (card.category == CombatV1CardCategory.finisher)
-                    const _MiniBadge(label: 'FINISHER', color: _pink),
-                  if (card.category == CombatV1CardCategory.counter)
-                    const _MiniBadge(label: 'COUNTER', color: _gold),
+                  Text(
+                    card.displayName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    combatV1PlayableCategoryLabel(card.category),
+                    style: const TextStyle(fontSize: 10, color: Colors.white38),
+                  ),
+                  const SizedBox(height: 4),
+                  if (technique != null) ...[
+                    Text(
+                      '${technique.attribute.displayLabel} DMG ${technique.damage} '
+                      'HEAT ${technique.heatGain}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    Text(
+                      'Cost ${combatV1PlayableEnergyCostLabel(technique.energyCost.amounts)}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ] else if (counter != null) ...[
+                    Text(
+                      'Cost属性 ${counter.attribute.displayLabel}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ],
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 4,
+                    children: [
+                      if (card.category == CombatV1CardCategory.finisher)
+                        const _MiniBadge(label: 'FINISHER', color: _pink),
+                      if (card.category == CombatV1CardCategory.counter)
+                        const _MiniBadge(label: 'COUNTER', color: _gold),
+                    ],
+                  ),
+                  // finisher要件hintとdisabledメッセージは、どちらもHEAT
+                  // 要件について述べる内容が重複しうるため同時には出さない
+                  // （disabled時は`_disabledMessage()`側がHEAT要件を含む）。
+                  if (!disabled &&
+                      card.category == CombatV1CardCategory.finisher &&
+                      threshold != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        'Requires HEAT $threshold',
+                        key: const Key('combat_v1_playable_finisher_heat_hint'),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.white38,
+                        ),
+                      ),
+                    ),
+                  if (disabled)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _disabledMessage(),
+                        key: const Key(
+                          'combat_v1_playable_card_disabled_message',
+                        ),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.white38,
+                        ),
+                      ),
+                    ),
                 ],
               ),
-              if (disabled)
-                const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text(
-                    '現在は使用できません',
-                    style: TextStyle(fontSize: 10, color: Colors.white38),
-                  ),
-                ),
-            ],
+            ),
           ),
         ),
       ),
@@ -794,7 +1131,14 @@ class _MiniBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         border: Border.all(color: color),
       ),
-      child: Text(label, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
+      ),
     );
   }
 }
@@ -868,7 +1212,9 @@ class _PrimaryActionsBar extends StatelessWidget {
       buttons.add(
         _ActionButton(
           key: const Key('combat_v1_playable_action_discard'),
-          label: combatV1PlayableActionKindLabel(CombatV1LegalActionKind.discard),
+          label: combatV1PlayableActionKindLabel(
+            CombatV1LegalActionKind.discard,
+          ),
           onPressed: action == null ? null : () => onSubmit(action),
           primary: true,
         ),
@@ -879,7 +1225,9 @@ class _PrimaryActionsBar extends StatelessWidget {
         buttons.add(
           _ActionButton(
             key: const Key('combat_v1_playable_action_stand_up'),
-            label: combatV1PlayableActionKindLabel(CombatV1LegalActionKind.standUp),
+            label: combatV1PlayableActionKindLabel(
+              CombatV1LegalActionKind.standUp,
+            ),
             onPressed: action == null ? null : () => onSubmit(action),
             primary: true,
           ),
@@ -890,7 +1238,9 @@ class _PrimaryActionsBar extends StatelessWidget {
         buttons.add(
           _ActionButton(
             key: const Key('combat_v1_playable_action_rest'),
-            label: combatV1PlayableActionKindLabel(CombatV1LegalActionKind.rest),
+            label: combatV1PlayableActionKindLabel(
+              CombatV1LegalActionKind.rest,
+            ),
             onPressed: action == null ? null : () => onSubmit(action),
           ),
         );
@@ -905,7 +1255,9 @@ class _PrimaryActionsBar extends StatelessWidget {
         buttons.add(
           _ActionButton(
             key: const Key('combat_v1_playable_action_technique'),
-            label: combatV1PlayableActionKindLabel(CombatV1LegalActionKind.technique),
+            label: combatV1PlayableActionKindLabel(
+              CombatV1LegalActionKind.technique,
+            ),
             onPressed: action == null ? null : () => onSubmit(action),
             primary: true,
           ),
@@ -926,7 +1278,9 @@ class _PrimaryActionsBar extends StatelessWidget {
         buttons.add(
           _ActionButton(
             key: const Key('combat_v1_playable_action_end_turn'),
-            label: combatV1PlayableActionKindLabel(CombatV1LegalActionKind.endTurn),
+            label: combatV1PlayableActionKindLabel(
+              CombatV1LegalActionKind.endTurn,
+            ),
             onPressed: action == null ? null : () => onSubmit(action),
             // 38章「誤操作対策」——Techniqueより視覚優先度を下げる。
             lowEmphasis: true,
@@ -967,7 +1321,10 @@ class _PendingAttackSummary extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('相手: ${pending.displayName}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(
+            '相手: ${pending.displayName}',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 4),
           Text(
             '${pending.attribute.displayLabel} ・ DMG ${pending.damage} ・ '
@@ -1005,7 +1362,10 @@ class _CounterPromptSheetState extends State<_CounterPromptSheet> {
     // 41章「Counter Card UI」——Human hand全体ではなく、isUsable
     // Counterを中心に表示する。
     final usableCounterCards = widget.snapshot.human.hand
-        .where((card) => card.category == CombatV1CardCategory.counter && card.isUsable)
+        .where(
+          (card) =>
+              card.category == CombatV1CardCategory.counter && card.isUsable,
+        )
         .toList();
 
     final selectedAction = _selectedCounterInstanceId == null
@@ -1030,7 +1390,11 @@ class _CounterPromptSheetState extends State<_CounterPromptSheet> {
             const Text(
               '返し技を選択',
               key: Key('combat_v1_playable_counter_prompt_title'),
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _pink),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: _pink,
+              ),
             ),
             const SizedBox(height: 8),
             if (pending != null) _PendingAttackSummary(pending: pending),
@@ -1038,7 +1402,10 @@ class _CounterPromptSheetState extends State<_CounterPromptSheet> {
             if (usableCounterCards.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('使用できるCOUNTERカードがありません', style: TextStyle(color: Colors.white38)),
+                child: Text(
+                  '使用できるCOUNTERカードがありません',
+                  style: TextStyle(color: Colors.white38),
+                ),
               )
             else
               SizedBox(
@@ -1051,7 +1418,9 @@ class _CounterPromptSheetState extends State<_CounterPromptSheet> {
                   itemBuilder: (context, index) {
                     final card = usableCounterCards[index];
                     return _HandCardTile(
-                      key: ValueKey('combat_v1_playable_counter_card_${card.instanceId}'),
+                      key: ValueKey(
+                        'combat_v1_playable_counter_card_${card.instanceId}',
+                      ),
                       card: card,
                       selected: card.instanceId == _selectedCounterInstanceId,
                       onTap: () => setState(
@@ -1140,7 +1509,9 @@ class _ResultOverlay extends StatelessWidget {
     return switch (r.status) {
       CombatV1PlayableControllerStatus.matchOver => _matchOverContent(r),
       CombatV1PlayableControllerStatus.safetyLimit => _safetyLimitContent(r),
-      CombatV1PlayableControllerStatus.invariantViolation => _invariantContent(r),
+      CombatV1PlayableControllerStatus.invariantViolation => _invariantContent(
+        r,
+      ),
       CombatV1PlayableControllerStatus.active ||
       CombatV1PlayableControllerStatus.error => _errorContent(),
     };
@@ -1154,7 +1525,11 @@ class _ResultOverlay extends StatelessWidget {
         const Text(
           'Match stopped due to internal consistency error',
           key: Key('combat_v1_playable_result_title'),
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _healthError),
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: _healthError,
+          ),
         ),
         const SizedBox(height: 8),
         Text(
@@ -1175,7 +1550,11 @@ class _ResultOverlay extends StatelessWidget {
         const Text(
           'Match stopped',
           key: Key('combat_v1_playable_result_title'),
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _gold),
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: _gold,
+          ),
         ),
         const Text(
           'Safety limit reached',
@@ -1198,7 +1577,11 @@ class _ResultOverlay extends StatelessWidget {
         const Text(
           'Match stopped due to internal consistency error',
           key: Key('combat_v1_playable_result_title'),
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _healthError),
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: _healthError,
+          ),
         ),
         const SizedBox(height: 16),
         _buttons(),
@@ -1213,14 +1596,37 @@ class _ResultOverlay extends StatelessWidget {
         : winnerIndex == CombatV1PlayableMatchController.humanPlayerIndex
         ? 'YOU WIN'
         : 'CPU WIN';
+    // Final Merge Gate Major fix「Terminal PIN / Submission Feedback
+    // Visibility」——PIN/SUBMISSIONで決着した瞬間、同じsnapshotで
+    // status==matchOverとなりResult overlayが全画面を覆うため、
+    // `_ActorAndRecentPanel`側のbannerは（同じ土台Column上に残っては
+    // いるが）overlayの下に完全に隠れて見えなくなる。決着させた
+    // action自体のfeedback（PIN ATTEMPT→3 COUNT—MATCH OVER等）は
+    // Playable 1Cの主目的そのものなので、Result overlayの中でも
+    // 必ず見えるようにする——新しいPIN/SUBMISSION判定ロジックは
+    // 追加せず、既存`snapshot.latestFeedback`（唯一のsource of
+    // truth）をそのまま同じ`_LatestFeedbackBanner`で再表示するだけ。
+    final terminalFeedback = snapshot.latestFeedback;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (terminalFeedback != null) ...[
+          _LatestFeedbackBanner(
+            key: const Key('combat_v1_playable_result_terminal_feedback'),
+            feedback: terminalFeedback,
+            humanPlayerIndex: CombatV1PlayableMatchController.humanPlayerIndex,
+          ),
+          const SizedBox(height: 16),
+        ],
         Text(
           title,
           key: const Key('combat_v1_playable_result_title'),
-          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: _pink),
+          style: const TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w900,
+            color: _pink,
+          ),
         ),
         const SizedBox(height: 4),
         if (r.terminalCause != null)

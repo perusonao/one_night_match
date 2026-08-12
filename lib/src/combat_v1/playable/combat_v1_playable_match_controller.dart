@@ -16,6 +16,7 @@ import '../combat_v1_decision_policy.dart';
 import '../combat_v1_deck.dart';
 import '../combat_v1_deck_validation.dart';
 import '../combat_v1_engine.dart';
+import '../combat_v1_enums.dart';
 import '../combat_v1_legal_action.dart';
 import '../combat_v1_legal_action_enumerator.dart';
 import '../combat_v1_match_lifecycle.dart';
@@ -23,6 +24,7 @@ import '../combat_v1_match_state.dart';
 import '../combat_v1_production_catalog.dart';
 import '../combat_v1_production_match_setup.dart';
 import '../combat_v1_rules_config.dart';
+import 'combat_v1_playable_action_feedback.dart';
 import 'combat_v1_playable_match_config.dart';
 import 'combat_v1_playable_match_result.dart';
 import 'combat_v1_playable_match_snapshot.dart';
@@ -156,6 +158,10 @@ class CombatV1PlayableMatchController {
 
   static const int _maxRecentObservations = 8;
 
+  /// Playable 1C「Feedback Data Model」——[_recentObservations]と同じ
+  /// 保持件数（O(totalActions)保持にしない）。
+  static const int _maxRecentFeedback = 8;
+
   final CombatV1PlayableMatchConfig _config;
   final CombatV1CardCatalog _catalog;
   final CombatV1RulesConfig _rules;
@@ -179,6 +185,10 @@ class CombatV1PlayableMatchController {
   CombatV1MatchState? _stateBeforeLastAction;
 
   final List<CombatV1PlayableObservation> _recentObservations = [];
+
+  /// Playable 1C「Action Feedback Model」——[_recentObservations]と1:1で
+  /// 対応する、before/after diffから構築したhidden-safe feedback。
+  final List<CombatV1PlayableActionFeedback> _recentFeedback = [];
 
   /// 現在のhidden-safe snapshot（呼び出しのたびに`_state`から再構築する。
   /// cacheしない——staleなcacheを持ち越すリスクを構造的に排除する）。
@@ -206,6 +216,8 @@ class CombatV1PlayableMatchController {
     pendingAttack: _buildPendingAttackView(),
     recentObservations: List.unmodifiable(_recentObservations),
     diagnosticMessage: _diagnosticMessage,
+    latestFeedback: _recentFeedback.isEmpty ? null : _recentFeedback.last,
+    recentFeedback: List.unmodifiable(_recentFeedback),
   );
 
   /// `status`が`matchOver`/`safetyLimit`/`invariantViolation`のいずれかに
@@ -352,6 +364,13 @@ class CombatV1PlayableMatchController {
       turnNumber: turnBefore,
       action: action,
     );
+    _recordFeedback(
+      action: action,
+      stateBefore: stateBefore,
+      stateAfter: _state,
+      actionIndex: _actionCount - 1,
+      turnNumber: turnBefore,
+    );
 
     // Invariant checkpoint 2: 各action後。
     final violation = CombatV1MatchLifecycle.validateIntegratedInvariants(
@@ -437,6 +456,266 @@ class CombatV1PlayableMatchController {
     if (_recentObservations.length > _maxRecentObservations) {
       _recentObservations.removeAt(0);
     }
+  }
+
+  /// Playable 1C「Action Feedback Model」——[action]実行前後の
+  /// `CombatV1MatchState`差分から[CombatV1PlayableActionFeedback]を構築し、
+  /// bounded historyへ追加する。damage/PIN/SUBMISSION結果はいずれも
+  /// Technique metadataの宣言値を鵜呑みにせず、実際に観測された
+  /// before/after差分から導出する（design doc「Do Not Fabricate
+  /// Deltas」）。
+  void _recordFeedback({
+    required CombatV1LegalAction action,
+    required CombatV1MatchState stateBefore,
+    required CombatV1MatchState stateAfter,
+    required int actionIndex,
+    required int turnNumber,
+  }) {
+    final feedback = _buildFeedback(
+      action: action,
+      stateBefore: stateBefore,
+      stateAfter: stateAfter,
+      actionIndex: actionIndex,
+      turnNumber: turnNumber,
+    );
+    if (feedback == null) return;
+    _recentFeedback.add(feedback);
+    if (_recentFeedback.length > _maxRecentFeedback) {
+      _recentFeedback.removeAt(0);
+    }
+  }
+
+  static CombatV1PlayerState _playerAt(CombatV1MatchState state, int index) =>
+      index == 0 ? state.playerA : state.playerB;
+
+  String _techniqueName(String cardId) {
+    final technique = _catalog.techniques[cardId];
+    if (technique == null) {
+      throw CombatV1IllegalActionException(
+        'action feedback用のtechnique cardIdがcatalogに存在しません: $cardId',
+      );
+    }
+    return technique.name;
+  }
+
+  /// [instanceId]のCounterカードを[playerIndex]のdiscardPileから逆引きし、
+  /// 表示名を解決する（`playCounter`実行直後は必ず末尾付近に存在する
+  /// ——既にHuman/CPU双方へ公開されたaction結果のため、hidden information
+  /// 違反にならない）。見つからない場合は`null`（防御的、通常到達しない）。
+  String? _resolveCounterName(
+    CombatV1MatchState state,
+    int playerIndex,
+    String? instanceId,
+  ) {
+    if (instanceId == null) return null;
+    final discardPile = _playerAt(state, playerIndex).discardPile;
+    for (final entry in discardPile.reversed) {
+      if (entry.instanceId == instanceId) {
+        return _catalog.counters[entry.cardId]?.name;
+      }
+    }
+    return null;
+  }
+
+  CombatV1PlayableActionFeedback? _buildFeedback({
+    required CombatV1LegalAction action,
+    required CombatV1MatchState stateBefore,
+    required CombatV1MatchState stateAfter,
+    required int actionIndex,
+    required int turnNumber,
+  }) {
+    switch (action.kind) {
+      case CombatV1LegalActionKind.discard:
+        return CombatV1PlayableActionFeedback(
+          actionIndex: actionIndex,
+          turnNumber: turnNumber,
+          kind: CombatV1PlayableFeedbackKind.discard,
+          actorPlayerIndex: action.actorPlayerIndex,
+        );
+
+      case CombatV1LegalActionKind.endTurn:
+        return CombatV1PlayableActionFeedback(
+          actionIndex: actionIndex,
+          turnNumber: turnNumber,
+          kind: CombatV1PlayableFeedbackKind.endTurn,
+          actorPlayerIndex: action.actorPlayerIndex,
+        );
+
+      case CombatV1LegalActionKind.standUp:
+        final owner = action.actorPlayerIndex;
+        final before = _playerAt(stateBefore, owner);
+        final after = _playerAt(stateAfter, owner);
+        return CombatV1PlayableActionFeedback(
+          actionIndex: actionIndex,
+          turnNumber: turnNumber,
+          kind: CombatV1PlayableFeedbackKind.standUp,
+          actorPlayerIndex: owner,
+          postureOwnerPlayerIndex: owner,
+          postureBefore: before.posture,
+          postureAfter: after.posture,
+        );
+
+      case CombatV1LegalActionKind.rest:
+        final owner = action.actorPlayerIndex;
+        final before = _playerAt(stateBefore, owner);
+        final after = _playerAt(stateAfter, owner);
+        return CombatV1PlayableActionFeedback(
+          actionIndex: actionIndex,
+          turnNumber: turnNumber,
+          kind: CombatV1PlayableFeedbackKind.rest,
+          actorPlayerIndex: owner,
+          hpOwnerPlayerIndex: owner,
+          hpBefore: before.hp,
+          hpAfter: after.hp,
+        );
+
+      case CombatV1LegalActionKind.pin:
+        final attacker = action.actorPlayerIndex;
+        final defender = attacker == 0 ? 1 : 0;
+        final defenderBefore = _playerAt(stateBefore, defender);
+        final defenderAfter = _playerAt(stateAfter, defender);
+        final matchEndedByAttacker =
+            !stateBefore.isOver &&
+            stateAfter.isOver &&
+            stateAfter.winnerPlayerIndex == attacker;
+        return CombatV1PlayableActionFeedback(
+          actionIndex: actionIndex,
+          turnNumber: turnNumber,
+          kind: CombatV1PlayableFeedbackKind.pinResolved,
+          actorPlayerIndex: attacker,
+          opponentPlayerIndex: defender,
+          kocOwnerPlayerIndex: defender,
+          kocBefore: defenderBefore.koc,
+          kocAfter: defenderAfter.koc,
+          pinOutcome: matchEndedByAttacker
+              ? CombatV1PlayablePinFeedbackOutcome.matchOver
+              : CombatV1PlayablePinFeedbackOutcome.kickOut,
+        );
+
+      case CombatV1LegalActionKind.technique:
+        // 宣言のみ——`counterResponsePending`へ移行するだけで、
+        // damage/HP/posture/HEATはまだ確定しない（Core Engineが
+        // 効果を適用するのは`declineCounter`/`playCounter`実行時）。
+        final pendingAfter = stateAfter.pendingAttack;
+        return CombatV1PlayableActionFeedback(
+          actionIndex: actionIndex,
+          turnNumber: turnNumber,
+          kind: CombatV1PlayableFeedbackKind.techniqueDeclared,
+          actorPlayerIndex: action.actorPlayerIndex,
+          opponentPlayerIndex: pendingAfter?.defenderPlayerIndex,
+          actionDisplayName: pendingAfter == null
+              ? null
+              : _techniqueName(pendingAfter.attackCardId),
+        );
+
+      case CombatV1LegalActionKind.counter:
+        final defender = action.actorPlayerIndex;
+        final pendingBefore = stateBefore.pendingAttack;
+        final attacker =
+            pendingBefore?.attackerPlayerIndex ?? (defender == 0 ? 1 : 0);
+        return CombatV1PlayableActionFeedback(
+          actionIndex: actionIndex,
+          turnNumber: turnNumber,
+          kind: CombatV1PlayableFeedbackKind.counterPlayed,
+          actorPlayerIndex: defender,
+          opponentPlayerIndex: attacker,
+          actionDisplayName: _resolveCounterName(
+            stateAfter,
+            defender,
+            action.cardInstanceId,
+          ),
+          relatedActionDisplayName: pendingBefore == null
+              ? null
+              : _techniqueName(pendingBefore.attackCardId),
+        );
+
+      case CombatV1LegalActionKind.declineCounter:
+        return _buildTechniqueResolvedFeedback(
+          stateBefore: stateBefore,
+          stateAfter: stateAfter,
+          actionIndex: actionIndex,
+          turnNumber: turnNumber,
+        );
+    }
+  }
+
+  /// [CombatV1LegalActionKind.declineCounter]専用: 宣言済みTECHNIQUEが
+  /// COUNTERされず成立した際のfeedbackを構築する。同一action内で
+  /// DIRECT PIN/SUBMISSIONへ自動移行した場合（Core Engine
+  /// `_resolvePendingAttack`、docs/combat_rules_v1.md 8・10章）は
+  /// [pinOutcome]/[submissionOutcome]も併せて設定する。
+  ///
+  /// PIN/SUBMISSIONが実際に発生したかどうかは、TECHNIQUEの静的
+  /// metadata（`directPin`/`submissionHold`/`finisherType`——宣言済みの
+  /// カードなので公開情報）と、防御側KOCの実測差分・試合終了の有無から
+  /// 判定する。KOCは`_resolvePin`/`_resolveSubmission`以外では変化しない
+  /// （Core Engine全体の不変条件）ため、この判定はEngineの実際の遷移結果
+  /// を観測しているだけであり、legality/damage計算の再実装ではない。
+  CombatV1PlayableActionFeedback? _buildTechniqueResolvedFeedback({
+    required CombatV1MatchState stateBefore,
+    required CombatV1MatchState stateAfter,
+    required int actionIndex,
+    required int turnNumber,
+  }) {
+    final pending = stateBefore.pendingAttack;
+    if (pending == null) return null;
+
+    final attacker = pending.attackerPlayerIndex;
+    final defender = pending.defenderPlayerIndex;
+
+    final defenderBefore = _playerAt(stateBefore, defender);
+    final defenderAfter = _playerAt(stateAfter, defender);
+    final actualDamage = defenderBefore.hp - defenderAfter.hp;
+
+    final isFinisher = pending.category == CombatV1CardCategory.finisher;
+    final likelyDirectPin = isFinisher
+        ? pending.finisherType == CombatV1FinisherType.directPin
+        : pending.directPin;
+    final likelySubmissionHold = isFinisher
+        ? pending.finisherType == CombatV1FinisherType.submission
+        : pending.submissionHold;
+
+    final kocDelta = defenderAfter.koc - defenderBefore.koc;
+    final matchEndedByAttacker =
+        !stateBefore.isOver &&
+        stateAfter.isOver &&
+        stateAfter.winnerPlayerIndex == attacker;
+    final secondaryResolved = kocDelta != 0 || matchEndedByAttacker;
+
+    CombatV1PlayablePinFeedbackOutcome? pinOutcome;
+    CombatV1PlayableSubmissionFeedbackOutcome? submissionOutcome;
+    if (secondaryResolved && likelyDirectPin) {
+      pinOutcome = matchEndedByAttacker
+          ? CombatV1PlayablePinFeedbackOutcome.matchOver
+          : CombatV1PlayablePinFeedbackOutcome.kickOut;
+    } else if (secondaryResolved && likelySubmissionHold) {
+      submissionOutcome = matchEndedByAttacker
+          ? CombatV1PlayableSubmissionFeedbackOutcome.matchOver
+          : CombatV1PlayableSubmissionFeedbackOutcome.escaped;
+    }
+
+    return CombatV1PlayableActionFeedback(
+      actionIndex: actionIndex,
+      turnNumber: turnNumber,
+      kind: CombatV1PlayableFeedbackKind.techniqueResolved,
+      actorPlayerIndex: attacker,
+      opponentPlayerIndex: defender,
+      actionDisplayName: _techniqueName(pending.attackCardId),
+      damage: actualDamage > 0 ? actualDamage : 0,
+      hpOwnerPlayerIndex: defender,
+      hpBefore: defenderBefore.hp,
+      hpAfter: defenderAfter.hp,
+      postureOwnerPlayerIndex: defender,
+      postureBefore: defenderBefore.posture,
+      postureAfter: defenderAfter.posture,
+      heatBefore: stateBefore.sharedHeat,
+      heatAfter: stateAfter.sharedHeat,
+      kocOwnerPlayerIndex: secondaryResolved ? defender : null,
+      kocBefore: secondaryResolved ? defenderBefore.koc : null,
+      kocAfter: secondaryResolved ? defenderAfter.koc : null,
+      pinOutcome: pinOutcome,
+      submissionOutcome: submissionOutcome,
+    );
   }
 
   void _enterInvariantViolation(String message) {
