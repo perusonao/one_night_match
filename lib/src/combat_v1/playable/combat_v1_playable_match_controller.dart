@@ -811,6 +811,16 @@ class CombatV1PlayableMatchController {
       discardPileCount: player.discardPile.length,
       pinCardsHeld: player.pinCardsHeld,
       reshuffleCount: player.reshuffleCount,
+      // Playable 1C.1「Energy Semantics」——`energyPool`（保有量そのもの、
+      // 自ターン内で変化しない）と、そこから使用済み分を引いた現在の
+      // 使用可能量を別々に公開する。どちらも`CombatV1PlayerState`が既に
+      // 持つ値をそのまま読むだけで、新しいlegality/計算ロジックは
+      // 追加しない。
+      energyPool: player.energyPool,
+      availableEnergy: {
+        for (final attribute in CombatV1EnergyAttribute.values)
+          attribute: player.availableEnergyFor(attribute),
+      },
     );
   }
 
@@ -876,6 +886,7 @@ class CombatV1PlayableMatchController {
       family: pending.family,
       damage: pending.damage,
       resultOpponentState: pending.resultOpponentState,
+      energyCostTotal: pending.energyCost.total,
     );
   }
 }

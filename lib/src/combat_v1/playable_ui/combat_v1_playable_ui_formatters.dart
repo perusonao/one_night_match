@@ -8,6 +8,7 @@
 /// damage・terminal cause等いかなるEngineロジックも再計算・再実装しない。
 library;
 
+import '../combat_v1_energy.dart';
 import '../combat_v1_enums.dart';
 import '../combat_v1_legal_action.dart';
 import '../combat_v1_match_lifecycle.dart';
@@ -155,3 +156,50 @@ String combatV1PlayableEnergyCostLabel(
   ];
   return parts.isEmpty ? '-' : parts.join(' / ');
 }
+
+/// Playable 1C.1「Card Cost Comparison」——技のENERGY COSTと、現在Humanが
+/// 使用可能なENERGY（[CombatV1PlayableHumanStatus.availableEnergy]）を
+/// 属性ごとに並べた比較表示（例: `打2 / 3`＝cost2・使用可能3）。[cost]に
+/// 含まれる属性のみ表示する。UI側のlegality判定ではなく、単に2つの公開
+/// 数値を並べるだけの表示。
+String combatV1PlayableEnergyComparisonLabel(
+  CombatV1EnergyCost cost,
+  Map<CombatV1EnergyAttribute, int> availableEnergy,
+) {
+  final parts = <String>[
+    for (final entry in cost.amounts.entries)
+      if (entry.value > 0)
+        '${entry.key.displayLabel}${entry.value} / '
+            '${availableEnergy[entry.key] ?? 0}',
+  ];
+  return parts.isEmpty ? '-' : parts.join(' ・ ');
+}
+
+/// Playable 1C.1「Opponent Target Label」——技成立後に相手が移行する状態
+/// （`resultOpponentState`）を、対象（相手）を明示して表示する（例:
+/// `相手 → DOWN`）。単独の`DOWN`/`STAND`表示はしない（呼び出し側は
+/// `resultOpponentState == null`（状態変化なし）の場合、この関数を呼ばず
+/// 何も表示しない）。
+String combatV1PlayableOpponentResultStateLabel(
+  CombatV1WrestlerPosture resultState,
+) => '相手 → ${combatV1PlayablePostureLabel(resultState)}';
+
+/// Playable 1C.1「Required Posture Label」——技を使用するための相手の
+/// 必要状態（`requiredOpponentState`）を、対象（相手）を明示して表示する
+/// （例: `相手がSTANDの時のみ使用可`）。`null`（STAND/DOWNいずれでも
+/// 使用可能）の場合はこの関数を呼ばない。
+String combatV1PlayableRequiredOpponentStateLabel(
+  CombatV1WrestlerPosture requiredState,
+) => '相手が${combatV1PlayablePostureLabel(requiredState)}の時のみ使用可';
+
+/// Playable 1C.1「Opponent Target Label」——`counterResponsePending`中の
+/// pending攻撃（相手の技）が成立した場合に、自分（Human＝防御側）が
+/// 移行する状態を明示して表示する（例: `あなた → DOWN`）。技カード面の
+/// [combatV1PlayableOpponentResultStateLabel]とは向きが逆になる——
+/// pending攻撃の`resultOpponentState`は常に「攻撃した側から見た相手」を
+/// 指すため、Human視点では常に自分自身を指す。
+String combatV1PlayablePendingResultStateLabel(
+  CombatV1WrestlerPosture? resultState,
+) => resultState == null
+    ? '状態変化なし'
+    : 'あなた → ${combatV1PlayablePostureLabel(resultState)}';

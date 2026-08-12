@@ -10,8 +10,10 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../combat_v1_energy.dart';
 import '../combat_v1_enums.dart';
 import '../combat_v1_legal_action.dart';
+import '../combat_v1_technique.dart';
 import '../playable/combat_v1_playable_action_feedback.dart';
 import '../playable/combat_v1_playable_match_config.dart';
 import '../playable/combat_v1_playable_match_controller.dart'
@@ -224,6 +226,66 @@ class _CombatV1PlayableMatchScreenState
 
   void _back() => Navigator.of(context).pop();
 
+  /// Playable 1C.1「Compact Rule Help」——大規模tutorialは作らず、Energy・
+  /// COUNTER・PIN・KOC・Shared HEATの意味だけを短くまとめたdialogを
+  /// 常時アクセス可能にする（30章「No Full Tutorial」・31章「First-Screen
+  /// Clarity」）。
+  void _showRulesHelp() {
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('用語ヘルプ'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _RulesHelpEntry(
+                term: 'Technique Energy',
+                body:
+                    '技・COUNTERを使うために消費する属性別リソースです。'
+                    '自分のターン開始時に全回復します（保有量そのものは'
+                    '変化しません）。',
+              ),
+              _RulesHelpEntry(
+                term: 'Shared HEAT',
+                body:
+                    '両者共有・蓄積型のリソースです（減りません）。既定'
+                    '200に達するとFINISHERカードが解禁されます。',
+              ),
+              _RulesHelpEntry(
+                term: 'COUNTER',
+                body:
+                    '相手の技に対して使用する返し技です。自分のTechnique '
+                    '使用中は選べません（相手の技を受ける番のみ選べます）。',
+              ),
+              _RulesHelpEntry(
+                term: 'PIN Cards',
+                body:
+                    'PINを仕掛ける際に使用する保有カード枚数です（開始時'
+                    '2枚）。KICK OUTの結果によって相手との間で移動する'
+                    'ことがあります。',
+              ),
+              _RulesHelpEntry(
+                term: 'KOC',
+                body:
+                    'PINのKICK OUTやSUBMISSIONからの脱出に使うリソースです'
+                    '（開始時10、防御側のみ消費）。尽きると3カウント／'
+                    'GIVE UPで試合が決着します。',
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showDetails() {
     final config = _config;
     if (config == null) return;
@@ -261,6 +323,12 @@ class _CombatV1PlayableMatchScreenState
           '${combatV1PlayableWrestlerDisplayName(widget.cpuWrestlerId)}',
         ),
         actions: [
+          IconButton(
+            key: const Key('combat_v1_playable_rules_help_button'),
+            icon: const Icon(Icons.help_outline),
+            tooltip: '用語ヘルプ',
+            onPressed: _showRulesHelp,
+          ),
           IconButton(
             key: const Key('combat_v1_playable_match_details_button'),
             icon: const Icon(Icons.info_outline),
@@ -307,6 +375,7 @@ class _CombatV1PlayableMatchScreenState
                         ),
                       ),
                       _HumanStatusPanel(human: snapshot.human),
+                      _EnergyPanel(human: snapshot.human),
                       IgnorePointer(
                         ignoring: _cpuBusy,
                         child: _PrimaryActionsBar(
@@ -419,7 +488,12 @@ class _StatusPanelShell extends StatelessWidget {
                         style: const TextStyle(fontSize: 12),
                       ),
                       Tooltip(
-                        message: 'PIN / Submissionからの脱出に使用',
+                        // Playable 1C.1「KOC + PIN Relation」——PINのKICK
+                        // OUTとSubmissionからの脱出、両方に使うリソース
+                        // であることを明示する。
+                        message:
+                            'PINのKICK OUTやSubmissionからの脱出に使用す'
+                            'るリソースです（開始時10、防御側のみ消費）',
                         child: Text(
                           'KOC $koc',
                           style: const TextStyle(fontSize: 12),
@@ -429,9 +503,19 @@ class _StatusPanelShell extends StatelessWidget {
                         'Hand $handCount',
                         style: const TextStyle(fontSize: 12),
                       ),
-                      Text(
-                        'PIN $pinCardsHeld',
-                        style: const TextStyle(fontSize: 12),
+                      Tooltip(
+                        // Playable 1C.1「PIN Card vs Count Clarity」——
+                        // ambiguousな「PIN N」ではなく「PIN Cards」と明示
+                        // する（Match resultのcount feedbackとは別概念）。
+                        message:
+                            'PINを仕掛ける際に使用する保有カード枚数です'
+                            '（開始時2枚）。KICK OUTの結果次第で相手との'
+                            '間を移動します',
+                        child: Text(
+                          'PIN Cards $pinCardsHeld',
+                          key: const Key('combat_v1_playable_pin_cards_text'),
+                          style: const TextStyle(fontSize: 12),
+                        ),
                       ),
                     ],
                   ),
@@ -483,6 +567,75 @@ class _HumanStatusPanel extends StatelessWidget {
       posture: human.posture,
       handCount: human.handCount,
       pinCardsHeld: human.pinCardsHeld,
+    );
+  }
+}
+
+/// Playable 1C.1「Match Screen Energy Panel」（section 9、MUST）——
+/// HumanのTechnique Energy構成（属性別、現在の使用可能量／保有量）を
+/// 試合中いつでも確認できるようにする。Setup画面だけの表示では不十分
+/// （section 9）。CPU側のENERGYは公開しない（hidden information、
+/// `CombatV1PlayableOpponentStatus`自体がこの値を持たない）。
+class _EnergyPanel extends StatelessWidget {
+  const _EnergyPanel({required this.human});
+  final CombatV1PlayableHumanStatus human;
+
+  @override
+  Widget build(BuildContext context) {
+    // 保有量0の属性（そのレスラーがそもそも持たない属性）は表示しない。
+    final attributes = [
+      for (final attribute in CombatV1EnergyAttribute.values)
+        if (human.energyPool.amountFor(attribute) > 0) attribute,
+    ];
+    if (attributes.isEmpty) return const SizedBox.shrink();
+
+    return Tooltip(
+      // 8章「Do Not Call It "Current Energy" If Not Consumed」——技/
+      // COUNTERで消費されるが、自ターン開始時に全回復するリソースである
+      // ことを明示する。HEATとは別リソースであることも明示する（12章）。
+      message:
+          '技・COUNTERを使うために消費するENERGYです（Shared HEATとは'
+          '別のリソースです）。「使用可能／保有」の形式で表示し、自分の'
+          'ターン開始時に使用可能量が保有量まで全回復します',
+      child: Container(
+        key: const Key('combat_v1_playable_energy_panel'),
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: _cardSurface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Text(
+              'Technique Energy',
+              style: TextStyle(fontSize: 11, color: Colors.white54),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 2,
+                children: [
+                  for (final attribute in attributes)
+                    Text(
+                      '${attribute.displayLabel} '
+                      '${human.availableEnergy[attribute] ?? 0}/'
+                      '${human.energyPool.amountFor(attribute)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -806,6 +959,11 @@ class _MatchBody extends StatelessWidget {
               onSelectCard: onSelectCard,
               sharedHeat: snapshot.sharedHeat,
               finisherHeatThreshold: snapshot.finisherHeatThreshold,
+              // Playable 1C.1「Card Cost Comparison」——通常Action中の
+              // 手札には、返す先のpending攻撃が無い（`pendingAttack ==
+              // null`）ため、COUNTERの動的必要量は表示しない
+              // （`pendingEnergyCostTotal`は既定null）。
+              availableEnergy: snapshot.human.availableEnergy,
             ),
         ],
       ),
@@ -892,6 +1050,29 @@ class _ActionHint extends StatelessWidget {
   }
 }
 
+/// 用語ヘルプdialog（`_showRulesHelp`）1件分の表示（用語 + 短い説明）。
+class _RulesHelpEntry extends StatelessWidget {
+  const _RulesHelpEntry({required this.term, required this.body});
+
+  final String term;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(term, style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(body, style: const TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
 class _HandRow extends StatelessWidget {
   const _HandRow({
     required this.hand,
@@ -899,6 +1080,7 @@ class _HandRow extends StatelessWidget {
     required this.onSelectCard,
     this.sharedHeat,
     this.finisherHeatThreshold,
+    this.availableEnergy,
   });
 
   final List<CombatV1PlayableHandCard> hand;
@@ -909,6 +1091,10 @@ class _HandRow extends StatelessWidget {
   /// COUNTER応答sheetなど、この文脈がない呼び出し元では`null`のままにする。
   final int? sharedHeat;
   final int? finisherHeatThreshold;
+
+  /// Playable 1C.1「Card Cost Comparison」——Technique cardのCostと並べる、
+  /// 現在Humanが使用可能なENERGY（属性別）。
+  final Map<CombatV1EnergyAttribute, int>? availableEnergy;
 
   @override
   Widget build(BuildContext context) {
@@ -933,10 +1119,10 @@ class _HandRow extends StatelessWidget {
             ),
           ),
         SizedBox(
-          // Playable 1C: finisher cardの「Requires HEAT」hint行が追加された
-          // ため168pxから拡張（`_CounterPromptSheet`のcounter hand専用
-          // SizedBoxは対象外——counter cardはfinisherになり得ないため）。
-          height: 182,
+          // Playable 1C.1: Energy比較・required/result posture行が追加
+          // されたため232pxへ拡張（`_CounterPromptSheet`のcounter hand
+          // 専用SizedBoxは対象外——counter cardはposture行を持たないため）。
+          height: 232,
           child: ListView.separated(
             key: const Key('combat_v1_playable_human_hand'),
             scrollDirection: Axis.horizontal,
@@ -953,6 +1139,7 @@ class _HandRow extends StatelessWidget {
                 onTap: () => onSelectCard(card.instanceId),
                 sharedHeat: sharedHeat,
                 finisherHeatThreshold: finisherHeatThreshold,
+                availableEnergy: availableEnergy,
               );
             },
           ),
@@ -970,6 +1157,8 @@ class _HandCardTile extends StatelessWidget {
     required this.onTap,
     this.sharedHeat,
     this.finisherHeatThreshold,
+    this.availableEnergy,
+    this.pendingEnergyCostTotal,
   });
 
   final CombatV1PlayableHandCard card;
@@ -978,11 +1167,46 @@ class _HandCardTile extends StatelessWidget {
   final int? sharedHeat;
   final int? finisherHeatThreshold;
 
+  /// Playable 1C.1「Card Cost Comparison」——現在Humanが使用可能な
+  /// ENERGY（属性別）。Technique cardのCostと並べて表示する。
+  final Map<CombatV1EnergyAttribute, int>? availableEnergy;
+
+  /// Playable 1C.1「COUNTER Dynamic Cost」——`counterResponsePending`中の
+  /// pending攻撃のENERGY COST合計（`CombatV1EnergyCost.total`）。Counter
+  /// cardのCostはこの値を、Counter自身の単一属性で支払う（docs 7章）。
+  final int? pendingEnergyCostTotal;
+
+  /// Playable 1C.1「Energy Insufficient — Safe Diagnosis」——`resolveEnergyPayment`
+  /// （Core Engineの支払い解決ロジックそのもの、`combat_v1_energy.dart`）を
+  /// 呼び出し側の公開snapshot値（`availableEnergy`）に対して再適用し、
+  /// 「今まさにこのCostを支払えるか」だけを判定する。isUsable自体の判定は
+  /// 一切変更しない（LegalActionが唯一のSSOTのまま）——ここではisUsable
+  /// ==falseになった"理由"がENERGYだと安全に断定できるかどうかの説明目的
+  /// のみに使う。
+  bool _energyWouldFail(CombatV1Technique technique) {
+    final available = availableEnergy;
+    if (available == null) return false;
+    final payment = resolveEnergyPayment(
+      pool: CombatV1EnergyPool(available),
+      spent: const {},
+      cost: technique.energyCost,
+      // Technique支払いは常にワイルド補完を許可する
+      // （docs/combat_rules_v1.md 5.1章、Phase 1のTECHNIQUE支払いは常にtrue）。
+      allowWildSubstitution: true,
+    );
+    return !payment.isSuccess;
+  }
+
   /// Playable 1C「Finisher Feedback / Do Not Invent Finisher Reasons」——
-  /// 安全に判定できるのはHEAT閾値だけなので、それ以外のlegality理由は
-  /// 断定しない。HEAT不足だと判定できる場合のみ具体的な数値を出し、
-  /// それ以外は既存の汎用メッセージに留める。
+  /// 安全に判定できる理由（HEAT閾値・ENERGY支払い可否）だけを具体的に示し、
+  /// それ以外のlegality理由は断定しない（既存の汎用メッセージに留める）。
   String _disabledMessage() {
+    if (card.category == CombatV1CardCategory.counter) {
+      // Playable 1C.1「Counter Semantics」——通常Action中にCOUNTER
+      // cardが常にdisabledなのは「COUNTERは相手の技への応答専用」と
+      // いう用途上の制約であって、ENERGY不足等ではない。用途を明示する。
+      return '相手の技を受ける時に使用';
+    }
     final threshold = finisherHeatThreshold;
     final heat = sharedHeat;
     if (card.category == CombatV1CardCategory.finisher &&
@@ -990,6 +1214,14 @@ class _HandCardTile extends StatelessWidget {
         heat != null &&
         heat < threshold) {
       return 'Requires HEAT $threshold (current $heat)';
+    }
+    final technique = card.technique;
+    if (technique != null && _energyWouldFail(technique)) {
+      final shortfall = combatV1PlayableEnergyComparisonLabel(
+        technique.energyCost,
+        availableEnergy!,
+      );
+      return 'Energy不足: $shortfall';
     }
     return '現在は使用できません';
   }
@@ -1053,18 +1285,70 @@ class _HandCardTile extends StatelessWidget {
                       'HEAT ${technique.heatGain}',
                       style: const TextStyle(fontSize: 11),
                     ),
+                    // Playable 1C.1「Card Cost Comparison」——`Cost X`だけ
+                    // ではなく、現在Humanが使用可能なENERGYと並べて表示
+                    // する（`availableEnergy`が無い呼び出し元ではCostのみ
+                    // の従来表示にfallbackする）。
                     Text(
-                      'Cost ${combatV1PlayableEnergyCostLabel(technique.energyCost.amounts)}',
+                      availableEnergy != null
+                          ? 'Energy ${combatV1PlayableEnergyComparisonLabel(technique.energyCost, availableEnergy!)}'
+                          : 'Cost ${combatV1PlayableEnergyCostLabel(technique.energyCost.amounts)}',
+                      key: const Key('combat_v1_playable_card_energy_line'),
                       style: const TextStyle(
                         fontSize: 11,
                         color: Colors.white70,
                       ),
                     ),
+                    // Playable 1C.1「Opponent Target Label」（section 19・
+                    // 20・32）——requiredOpponentState/resultOpponentStateは
+                    // いずれも常に「相手」を指す（技モデルに自分自身の
+                    // postureを変える field は存在しない、section
+                    // 21「Self-Down Possibility」調査結果）。対象を明示
+                    // せず単独で`DOWN`/`STAND`とだけ表示することはしない。
+                    if (technique.requiredOpponentState != null)
+                      Text(
+                        combatV1PlayableRequiredOpponentStateLabel(
+                          technique.requiredOpponentState!,
+                        ),
+                        key: const Key(
+                          'combat_v1_playable_card_required_posture',
+                        ),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.white54,
+                        ),
+                      ),
+                    if (technique.resultOpponentState != null)
+                      Text(
+                        combatV1PlayableOpponentResultStateLabel(
+                          technique.resultOpponentState!,
+                        ),
+                        key: const Key(
+                          'combat_v1_playable_card_result_posture',
+                        ),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.white70,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                   ] else if (counter != null) ...[
+                    // Playable 1C.1「COUNTER Dynamic Cost」——pending攻撃の
+                    // 文脈がある場合のみ具体的な必要量を示す（section
+                    // 7章「返し必要コストは返される側のTECHNIQUEのENERGY
+                    // COST総量と同値」）。通常Actionの手札表示では文脈が
+                    // 無いため、必要量が固定でないことだけを説明する。
                     Text(
-                      'Cost属性 ${counter.attribute.displayLabel}',
+                      pendingEnergyCostTotal != null
+                          ? 'Cost ${counter.attribute.displayLabel}$pendingEnergyCostTotal'
+                          : 'Cost属性 ${counter.attribute.displayLabel}',
                       style: const TextStyle(fontSize: 11),
                     ),
+                    if (pendingEnergyCostTotal == null)
+                      const Text(
+                        '必要量は返す技によって変わります',
+                        style: TextStyle(fontSize: 10, color: Colors.white38),
+                      ),
                   ],
                   const SizedBox(height: 4),
                   Wrap(
@@ -1266,10 +1550,21 @@ class _PrimaryActionsBar extends StatelessWidget {
       if (kinds.contains(CombatV1LegalActionKind.pin)) {
         final action = findAction(CombatV1LegalActionKind.pin);
         buttons.add(
-          _ActionButton(
-            key: const Key('combat_v1_playable_action_pin'),
-            label: combatV1PlayableActionKindLabel(CombatV1LegalActionKind.pin),
-            onPressed: action == null ? null : () => onSubmit(action),
+          // Playable 1C.1「PIN Action Condition Help」（section 25）——
+          // このbuttonはLegalActionが実在する時にのみ表示される
+          // （＝現在まさにPIN宣言条件を満たしている）。完全な条件の羅列
+          // ではなく、短い説明をtooltipとして添える。
+          Tooltip(
+            message:
+                'PINカードを1枚使ってDOWN中の相手にPINを仕掛けます'
+                '（このターン中に技を成功させている場合のみ選択できます）',
+            child: _ActionButton(
+              key: const Key('combat_v1_playable_action_pin'),
+              label: combatV1PlayableActionKindLabel(
+                CombatV1LegalActionKind.pin,
+              ),
+              onPressed: action == null ? null : () => onSubmit(action),
+            ),
           ),
         );
       }
@@ -1327,9 +1622,23 @@ class _PendingAttackSummary extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
+            // Playable 1C.1「Opponent Target Label」——この技はCPU（相手）
+            // が使用したものなので、resultOpponentStateの対象は防御側＝
+            // Human自身になる（`combatV1PlayablePendingResultStateLabel`
+            // 参照）。カード面（自分の技）とは向きが逆であることに注意。
             '${pending.attribute.displayLabel} ・ DMG ${pending.damage} ・ '
-            '${pending.resultOpponentState == null ? "状態変化なし" : combatV1PlayablePostureLabel(pending.resultOpponentState!)}',
+            '${combatV1PlayablePendingResultStateLabel(pending.resultOpponentState)}',
             style: const TextStyle(fontSize: 12, color: Colors.white70),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            // Playable 1C.1「COUNTER Semantics」——COUNTERの必要ENERGYは
+            // 固定costではなく「返される技のENERGY COST総量」であることを
+            // 明示する（docs/combat_rules_v1.md 7章）。
+            'COUNTERに必要なENERGY: 合計${pending.energyCostTotal}'
+            '（COUNTERカード自身の属性1種で支払います）',
+            key: const Key('combat_v1_playable_pending_counter_cost_hint'),
+            style: const TextStyle(fontSize: 11, color: Colors.white54),
           ),
         ],
       ),
@@ -1429,6 +1738,10 @@ class _CounterPromptSheetState extends State<_CounterPromptSheet> {
                             ? null
                             : card.instanceId,
                       ),
+                      // Playable 1C.1「COUNTER Dynamic Cost」——この文脈
+                      // ではpending攻撃が確定しているため、具体的な必要
+                      // ENERGY合計を示せる。
+                      pendingEnergyCostTotal: pending?.energyCostTotal,
                     );
                   },
                 ),

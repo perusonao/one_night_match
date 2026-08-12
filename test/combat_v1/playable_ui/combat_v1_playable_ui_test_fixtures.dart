@@ -76,6 +76,18 @@ CombatV1PlayableHandCard testCounterCard({
   counter: testCounter,
 );
 
+/// docs/combat_rules_v1.md 5章のアカリEnergy配分例（打5／関1／投2／飛2／
+/// ラフ0／＊1）をそのままtest既定値に使う——テスト側で新しい配分を発明
+/// しない。
+const CombatV1EnergyPool testEnergyPool = CombatV1EnergyPool({
+  CombatV1EnergyAttribute.strike: 5,
+  CombatV1EnergyAttribute.joint: 1,
+  CombatV1EnergyAttribute.throwing: 2,
+  CombatV1EnergyAttribute.aerial: 2,
+  CombatV1EnergyAttribute.rough: 0,
+  CombatV1EnergyAttribute.wild: 1,
+});
+
 CombatV1PlayableHumanStatus testHumanStatus({
   String wrestlerId = 'akari',
   String wrestlerName = 'テストあかり',
@@ -88,6 +100,8 @@ CombatV1PlayableHumanStatus testHumanStatus({
   int discardPileCount = 2,
   int pinCardsHeld = 2,
   int reshuffleCount = 0,
+  CombatV1EnergyPool energyPool = testEnergyPool,
+  Map<CombatV1EnergyAttribute, int>? availableEnergy,
 }) {
   final resolvedHand = hand ?? [testTechniqueCard()];
   return CombatV1PlayableHumanStatus(
@@ -103,6 +117,16 @@ CombatV1PlayableHumanStatus testHumanStatus({
     discardPileCount: discardPileCount,
     pinCardsHeld: pinCardsHeld,
     reshuffleCount: reshuffleCount,
+    energyPool: energyPool,
+    // 既定では未使用（pool全量が利用可能）——自ターン開始直後の状態と
+    // 同じにする。呼び出し側が個別に消費済み量を渡したい場合のみ
+    // `availableEnergy`を明示する。
+    availableEnergy:
+        availableEnergy ??
+        {
+          for (final attribute in CombatV1EnergyAttribute.values)
+            attribute: energyPool.amountFor(attribute),
+        },
   );
 }
 
@@ -138,6 +162,7 @@ CombatV1PlayablePendingAttackView testPendingAttack({
   String attackCardInstanceId = 'cpu-attack-1',
   CombatV1Technique technique = testNormalTechnique,
   CombatV1WrestlerPosture? resultOpponentState,
+  int? energyCostTotal,
 }) => CombatV1PlayablePendingAttackView(
   attackerPlayerIndex: attackerPlayerIndex,
   defenderPlayerIndex: defenderPlayerIndex,
@@ -149,6 +174,7 @@ CombatV1PlayablePendingAttackView testPendingAttack({
   family: technique.family,
   damage: technique.damage,
   resultOpponentState: resultOpponentState,
+  energyCostTotal: energyCostTotal ?? technique.energyCost.total,
 );
 
 CombatV1PlayableObservation testObservation({
