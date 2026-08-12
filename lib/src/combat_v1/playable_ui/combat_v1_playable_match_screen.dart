@@ -21,12 +21,14 @@ import '../playable/combat_v1_playable_match_controller.dart'
 import '../playable/combat_v1_playable_match_result.dart';
 import '../playable/combat_v1_playable_match_snapshot.dart';
 import 'combat_v1_playable_feedback_formatters.dart';
+import 'combat_v1_playable_match_direction.dart';
 import 'combat_v1_playable_match_guidance.dart';
 import 'combat_v1_playable_match_session.dart';
 import 'combat_v1_playable_ui_formatters.dart';
 
 const _pink = Color(0xffff477e);
 const _gold = Color(0xffffc857);
+const _teal = Color(0xff5fd9c6);
 const _cardSurface = Color(0xff211527);
 const _healthError = Color(0xffff5c5c);
 
@@ -705,7 +707,16 @@ class _SharedStatusPanel extends StatelessWidget {
   }
 }
 
-class _ActorAndRecentPanel extends StatelessWidget {
+/// Review Findings Fix（Major、Playable 2A-2独立レビュー）——旧実装は
+/// `ConstrainedBox(maxHeight: 132)` + `SingleChildScrollView(physics:
+/// NeverScrollableScrollPhysics())`で、Match Guidance／Match
+/// Direction／latest feedback banner／recent action logの内容が
+/// 132pxを超えてもRenderFlex overflowは起きない一方、末尾の情報へ
+/// ユーザーが一切到達できなかった（scrollが無効化されていたため）。
+/// `_ActorAndRecentPanel`をStatefulWidget化し、実際にscroll可能な
+/// `ScrollController`を保持することで、この領域を「安全なだけ」ではなく
+/// 「実際に読める」ものにする（design doc「70.10章」）。
+class _ActorAndRecentPanel extends StatefulWidget {
   const _ActorAndRecentPanel({
     required this.snapshot,
     required this.humanPlayerIndex,
@@ -717,7 +728,27 @@ class _ActorAndRecentPanel extends StatelessWidget {
   final bool cpuBusy;
 
   @override
+  State<_ActorAndRecentPanel> createState() => _ActorAndRecentPanelState();
+}
+
+class _ActorAndRecentPanelState extends State<_ActorAndRecentPanel> {
+  // このcontrollerは`_ActorAndRecentPanel`のStateが生きている間
+  // （Match Screen自体がdisposeされるまで）保持される——毎buildで
+  // 新規生成しないため、Scrollbarの`thumbVisibility: true`が要求する
+  // 「ScrollPositionにattachされたScrollController」を安定して満たす。
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final snapshot = widget.snapshot;
+    final humanPlayerIndex = widget.humanPlayerIndex;
+    final cpuBusy = widget.cpuBusy;
     final actorLabel = combatV1PlayableActorLabel(
       status: snapshot.status,
       phase: snapshot.phase,
@@ -765,47 +796,80 @@ class _ActorAndRecentPanel extends StatelessWidget {
           ),
           if (guidance != null) _MatchGuidancePanel(guidance: guidance),
           // Playable 1C「Keep Log Compact」——feedback内容量が可変のため、
-          // ここだけ高さ上限＋内部clip-scrollにして、Human status
-          // panel/Primary actions barが常にscroll不要で画面内へ収まる
-          // 既存レイアウト（Expanded/固定bottom bar）を壊さないようにする
-          // （念のための上限であり、通常の1〜2行feedbackでは到達しない）。
+          // ここだけ高さ上限つきにして、Human status panel/Primary
+          // actions barが常に画面内へ収まる既存レイアウト（Expanded/
+          // 固定bottom bar）を壊さないようにする。
+          //
+          // Playable 2A-2「Win Path / Match Direction」もこの内側へ置く
+          // （17章「Mobile UX」——guidanceがTechnique areaを過度に
+          // 押し下げないようにするため、常時表示の固定領域をこれ以上
+          // 増やさない。Match Guidance/latest feedback/recent logと同じ
+          // 「内容量が可変な情報」として同じ安全弁を共有する）。
+          //
+          // Review Findings Fix（Major）——高さ上限を超えた分は、以前は
+          // `NeverScrollableScrollPhysics`によりRenderFlex overflowこそ
+          // 起きないものの、ユーザーが一切scrollしてたどり着けなかった
+          // （情報が存在はするが到達不能）。`Scrollbar` +
+          // 実際にscroll可能な`SingleChildScrollView`へ変更し、
+          // 「到達可能」であることを構造的に保証する（design doc
+          // 「70.10章」）。この領域は画面上、Technique area
+          // （`Expanded` + 独立した`SingleChildScrollView`）とは兄弟
+          // 関係にあり親子関係にないため、双方のscroll gestureは競合
+          // しない。
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 132),
-            child: SingleChildScrollView(
-              physics: const NeverScrollableScrollPhysics(),
-              child: Column(
-                children: [
-                  if (snapshot.latestFeedback != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: _LatestFeedbackBanner(
-                        feedback: snapshot.latestFeedback!,
-                        humanPlayerIndex: humanPlayerIndex,
-                      ),
+            child: Scrollbar(
+              controller: _scrollController,
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                key: const Key('combat_v1_playable_actor_recent_scroll'),
+                controller: _scrollController,
+                child: Column(
+                  children: [
+                    _MatchDirectionPanel(
+                      snapshot: snapshot,
+                      humanPlayerIndex: humanPlayerIndex,
                     ),
-                  if (recents.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Wrap(
-                        key: const Key('combat_v1_playable_recent_log'),
-                        alignment: WrapAlignment.center,
-                        spacing: 8,
-                        children: [
-                          for (final feedback in recents)
-                            Text(
-                              combatV1PlayableFeedbackCompactLabel(
-                                feedback,
-                                humanPlayerIndex: humanPlayerIndex,
-                              ),
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Colors.white38,
-                              ),
-                            ),
-                        ],
+                    if (snapshot.latestFeedback != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: _LatestFeedbackBanner(
+                          feedback: snapshot.latestFeedback!,
+                          humanPlayerIndex: humanPlayerIndex,
+                        ),
                       ),
-                    ),
-                ],
+                    if (recents.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6, bottom: 6),
+                        child: Wrap(
+                          key: const Key('combat_v1_playable_recent_log'),
+                          alignment: WrapAlignment.center,
+                          spacing: 8,
+                          children: [
+                            for (final (index, feedback) in recents.indexed)
+                              Text(
+                                combatV1PlayableFeedbackCompactLabel(
+                                  feedback,
+                                  humanPlayerIndex: humanPlayerIndex,
+                                ),
+                                // Review Findings Fix（Major）——scroll
+                                // reachability testが、内容量が多い場合
+                                // でも末尾のlog entryへ実際にscroll経由で
+                                // 到達できることを、indexで安定した
+                                // widget keyから直接検証できるようにする。
+                                key: Key(
+                                  'combat_v1_playable_recent_log_item_$index',
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white38,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -843,6 +907,67 @@ class _MatchGuidancePanel extends StatelessWidget {
               child: Text(
                 guidance.secondary!,
                 key: const Key('combat_v1_playable_match_guidance_secondary'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 11, color: Colors.white38),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Playable 2A-2「Win Path / Match Direction」——「primary 1行 + 必要時
+/// のみsecondary 1行」（design doc「70章 UI / Mobile」）。試合が`active`
+/// である限りHuman/CPUどちらの手番でも表示する（Match Guidanceと違い
+/// CPU処理中でも隠さない、`combat_v1_playable_match_direction.dart`
+/// 参照）。Combat rule判定は一切行わない——
+/// `combatV1PlayableDeriveMatchDirection`が既に確定した文字列をそのまま
+/// 表示するだけ。Match Guidance（white70/38）とは配色を変え
+/// （`_teal`）、2つのpanelを一目で区別できるようにする——ただしprimary
+/// action（下部bottom bar）より視覚的に強くならない、控えめなfont
+/// sizeのまま（17章「Mobile UX」）。
+///
+/// `_ActorAndRecentPanel`内の、latest feedback banner/recent logと同じ
+/// 高さ上限つきscroll領域（`ConstrainedBox(maxHeight: 132)`）の中へ
+/// 置く——常時表示の固定領域をこれ以上増やさず、guidanceがTechnique
+/// areaを過度に押し下げないようにするため（17章「Mobile UX」）。
+class _MatchDirectionPanel extends StatelessWidget {
+  const _MatchDirectionPanel({
+    required this.snapshot,
+    required this.humanPlayerIndex,
+  });
+
+  final CombatV1PlayableMatchSnapshot snapshot;
+  final int humanPlayerIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final direction = combatV1PlayableDeriveMatchDirection(
+      snapshot,
+      humanPlayerIndex: humanPlayerIndex,
+    );
+    if (direction == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Column(
+        children: [
+          Text(
+            direction.primary,
+            key: const Key('combat_v1_playable_match_direction_primary'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _teal,
+            ),
+          ),
+          if (direction.secondary != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                direction.secondary!,
+                key: const Key('combat_v1_playable_match_direction_secondary'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 11, color: Colors.white38),
               ),

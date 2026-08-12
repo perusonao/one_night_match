@@ -489,4 +489,239 @@ void main() {
       });
     }
   });
+
+  group('Match Direction（Playable 2A-2 追加）', () {
+    for (final width in [320.0, 360.0, 390.0]) {
+      final size = Size(width, 780);
+
+      testWidgets(
+        'Action phase（Match Guidance PIN可能 + Match Direction '
+        '「PINで相手のKOCを削りましょう」併発、latest feedback banner付き）: '
+        '${width.toInt()}px幅でoverflowしない',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final feedback = testActionFeedback(
+              actorPlayerIndex: 0,
+              actionDisplayName: 'テストストライク',
+              damage: 20,
+              hpOwnerPlayerIndex: 1,
+              hpBefore: 100,
+              hpAfter: 80,
+              postureOwnerPlayerIndex: 1,
+              postureBefore: CombatV1WrestlerPosture.stand,
+              postureAfter: CombatV1WrestlerPosture.down,
+              heatBefore: 40,
+              heatAfter: 50,
+            );
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              cpu: testCpuStatus(
+                hp: 100,
+                koc: 9,
+                posture: CombatV1WrestlerPosture.down,
+              ),
+              human: testHumanStatus(
+                hand: [
+                  testTechniqueCard(instanceId: 'h1'),
+                  testCounterCard(instanceId: 'h2'),
+                ],
+              ),
+              legalActions: const [
+                CombatV1TechniqueAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'h1',
+                ),
+                CombatV1PinAction(actorPlayerIndex: 0),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+              latestFeedback: feedback,
+              recentFeedback: [feedback],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+          }, size: size);
+        },
+      );
+
+      testWidgets(
+        '相手KOC0（decisiveKoc、primary+secondaryとも表示）: '
+        '${width.toInt()}px幅でoverflowしない',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              cpu: testCpuStatus(
+                hp: 20,
+                koc: 0,
+                posture: CombatV1WrestlerPosture.stand,
+              ),
+              human: testHumanStatus(
+                hand: [testTechniqueCard(instanceId: 'h1')],
+              ),
+              legalActions: const [
+                CombatV1TechniqueAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'h1',
+                ),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+          }, size: size);
+        },
+      );
+    }
+  });
+
+  group('Match Direction Reachability（Review Findings Fix、Major）', () {
+    // Review Findings Fix（Major、Playable 2A-2独立レビュー）——旧実装は
+    // `NeverScrollableScrollPhysics`のため、Match Direction／latest
+    // feedback／recent action logの合計content量が高さ上限（132px）を
+    // 超えるとRenderFlex overflowこそ起きないものの、末尾の情報へ
+    // ユーザーが一切到達できなかった。ここでは「overflowしない」だけ
+    // でなく、「実際にscrollして末尾のrecent logへ到達できる」ことを、
+    // widget rectangleのintersectionで検証する。
+    const scrollKey = Key('combat_v1_playable_actor_recent_scroll');
+
+    CombatV1PlayableMatchSnapshot buildOverflowingSnapshot() {
+      // Direction primary+secondaryとも表示される代表状態（相手KOC0＝
+      // decisiveKoc）。
+      final cpu = testCpuStatus(hp: 20, koc: 0, posture: CombatV1WrestlerPosture.stand);
+      // 複数行になる（damage/HP/posture/HEAT全て変化する）latest
+      // feedback。
+      final latest = testActionFeedback(
+        actionIndex: 4,
+        actorPlayerIndex: 0,
+        actionDisplayName: 'テストフィニッシャー',
+        damage: 60,
+        hpOwnerPlayerIndex: 1,
+        hpBefore: 80,
+        hpAfter: 20,
+        postureOwnerPlayerIndex: 1,
+        postureBefore: CombatV1WrestlerPosture.stand,
+        postureAfter: CombatV1WrestlerPosture.down,
+        heatBefore: 150,
+        heatAfter: 200,
+      );
+      // recentFeedback: 5件（`recents = reversed.skip(1).take(4)`により、
+      // 直近4件がrecent logのWrapへ表示される代表的な最大件数）。
+      final older = [
+        for (var i = 0; i < 5; i++)
+          testActionFeedback(
+            actionIndex: i,
+            actorPlayerIndex: i.isEven ? 0 : 1,
+            actionDisplayName: 'テスト技目録その$i番',
+            damage: 10 + i,
+          ),
+      ];
+      return testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        cpu: cpu,
+        human: testHumanStatus(hand: [testTechniqueCard(instanceId: 'h1')]),
+        legalActions: const [
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
+          CombatV1EndTurnAction(actorPlayerIndex: 0),
+        ],
+        latestFeedback: latest,
+        recentFeedback: [...older, latest],
+      );
+    }
+
+    testWidgets(
+      '320px幅: content量が高さ上限を超えても、scrollで末尾のrecent logへ到達できる',
+      (tester) async {
+        await _withNarrowViewport(tester, () async {
+          final snapshot = buildOverflowingSnapshot();
+          await tester.pumpWidget(
+            _wrap(
+              CombatV1PlayableMatchScreen(
+                humanWrestlerId: 'akari',
+                cpuWrestlerId: 'reina',
+                cpuDelay: Duration.zero,
+                sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+              ),
+            ),
+          );
+          await tester.pump();
+          expect(tester.takeException(), isNull);
+
+          // Direction primary/secondaryが実際に描画されていることを
+          // 前提として確認する（到達可否テストの土台）。
+          expect(
+            find.byKey(const Key('combat_v1_playable_match_direction_primary')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const Key('combat_v1_playable_match_direction_secondary')),
+            findsOneWidget,
+          );
+
+          // 末尾のrecent log entry（skip(1).take(4)の最後＝index 3）。
+          const lastLogItemKey = Key('combat_v1_playable_recent_log_item_3');
+          expect(find.byKey(lastLogItemKey), findsOneWidget);
+
+          final viewportRectBefore = tester.getRect(find.byKey(scrollKey));
+          final itemRectBefore = tester.getRect(find.byKey(lastLogItemKey));
+
+          // Before scroll: 末尾のlog entryはviewportの下端より下（未到達）
+          // であることを確認する——このassertion自体が「そもそも
+          // scrollが必要な状況を再現できているか」の検証を兼ねる
+          // （scroll不要な状況でtestが誤ってgreenになることを防ぐ）。
+          final reachedBeforeScroll =
+              itemRectBefore.bottom <= viewportRectBefore.bottom + 0.5;
+          expect(
+            reachedBeforeScroll,
+            isFalse,
+            reason:
+                'テスト前提が崩れている: scroll前から末尾のrecent logが'
+                'viewport内に収まっている（content量を増やすか代表構成を'
+                '見直す必要がある）。viewport=$viewportRectBefore, '
+                'item=$itemRectBefore',
+          );
+
+          // User scroll — 内部領域を実際にドラッグしてscrollする。
+          await tester.drag(find.byKey(scrollKey), const Offset(0, -400));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+
+          // After scroll: 末尾のlog entryがviewport内（到達可能）に
+          // なっていることを確認する。
+          final viewportRectAfter = tester.getRect(find.byKey(scrollKey));
+          final itemRectAfter = tester.getRect(find.byKey(lastLogItemKey));
+          final intersects = itemRectAfter.overlaps(viewportRectAfter);
+          expect(
+            intersects,
+            isTrue,
+            reason:
+                'scroll後も末尾のrecent logへ到達できていない。'
+                'viewport=$viewportRectAfter, item=$itemRectAfter',
+          );
+        }, size: const Size(320, 780));
+      },
+    );
+  });
 }
