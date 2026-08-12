@@ -888,6 +888,13 @@ class CombatV1PlayableMatchController {
       damage: pending.damage,
       resultOpponentState: pending.resultOpponentState,
       energyCostTotal: pending.energyCost.total,
+      // Playable 2A-3「Counter Response — Incoming Attack Summary」——
+      // 宣言時点でCombatV1PendingAttackへ複製済みの静的metadataを
+      // そのまま公開する（新しいCombat rule判定は行わない）。
+      heatGain: pending.heatGain,
+      directPin: pending.directPin,
+      submissionHold: pending.submissionHold,
+      finisherType: pending.finisherType,
     );
   }
 }

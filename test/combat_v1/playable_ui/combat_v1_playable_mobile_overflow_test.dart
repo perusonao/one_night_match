@@ -5,14 +5,43 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_energy.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_technique.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_action_feedback.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart';
 import 'package:one_night_match/src/combat_v1/playable_ui/combat_v1_playable_match_screen.dart';
 import 'package:one_night_match/src/combat_v1/playable_ui/combat_v1_playable_setup_screen.dart';
 
 import 'combat_v1_playable_ui_test_fixtures.dart';
+
+// jack_kurocho_driver相当（ROUGH属性 かつ Direct PIN FINISHER）——複数の
+// 重要traitが同時に成立する実在の組み合わせ（Playable 2A-3 mobile
+// regression「B. Technique with multiple important traits」用）。
+const CombatV1Technique _multiTraitTechnique = CombatV1Technique(
+  id: 'test_mobile_multi_trait',
+  name: 'テスト複合トレイト技',
+  category: CombatV1CardCategory.finisher,
+  attribute: CombatV1EnergyAttribute.rough,
+  energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.rough: 3}),
+  damage: 30,
+  heatGain: 50,
+  family: CombatV1TechniqueFamily.driver,
+  finisherType: CombatV1FinisherType.directPin,
+);
+
+const CombatV1Technique _submissionFinisherTechnique = CombatV1Technique(
+  id: 'test_mobile_submission_finisher',
+  name: 'テストサブミッションフィニッシャー',
+  category: CombatV1CardCategory.finisher,
+  attribute: CombatV1EnergyAttribute.joint,
+  energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.joint: 3}),
+  damage: 30,
+  heatGain: 40,
+  family: CombatV1TechniqueFamily.legLock,
+  finisherType: CombatV1FinisherType.submission,
+);
 
 Widget _wrap(Widget child) => MaterialApp(
   theme: ThemeData(useMaterial3: true, brightness: Brightness.dark),
@@ -723,5 +752,207 @@ void main() {
         }, size: const Size(320, 780));
       },
     );
+  });
+
+  // Playable 2A-3「Technique / Counter Decision Readability」——Technique
+  // decision trait badge・Counter incoming attack summaryの拡張により
+  // 情報量が増えたため、代表ケースB〜Eで320/360/390px幅のoverflowと、
+  // primary controlのhit-testabilityを確認する（24章）。
+  group('Technique / Counter Decision Traits（Playable 2A-3 追加）', () {
+    for (final width in [320.0, 360.0, 390.0]) {
+      final size = Size(width, 780);
+
+      testWidgets(
+        'B. 複数の重要traitを持つTechnique card（ROUGH + FINISHER · PIN）: '
+        '${width.toInt()}px幅でoverflowせず、primary controlへ到達できる',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              sharedHeat: 200,
+              finisherHeatThreshold: 200,
+              human: testHumanStatus(
+                hand: [
+                  testTechniqueCard(
+                    instanceId: 'h1',
+                    technique: _multiTraitTechnique,
+                  ),
+                ],
+              ),
+              legalActions: const [
+                CombatV1TechniqueAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'h1',
+                ),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+
+            expect(find.text('FINISHER · PIN'), findsOneWidget);
+            expect(find.text('ROUGH'), findsOneWidget);
+
+            // Primary control（End Turn button）がviewport内にあり、
+            // hit-testableであることを確認する。
+            final endTurnFinder = find.byKey(
+              const Key('combat_v1_playable_action_end_turn'),
+            );
+            expect(endTurnFinder, findsOneWidget);
+            final screenRect = Offset.zero & size;
+            final buttonRect = tester.getRect(endTurnFinder);
+            expect(screenRect.contains(buttonRect.center), isTrue);
+          }, size: size);
+        },
+      );
+
+      testWidgets(
+        'C. FINISHER card（trait badge付き）: ${width.toInt()}px幅でoverflowしない',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              sharedHeat: 200,
+              finisherHeatThreshold: 200,
+              human: testHumanStatus(
+                hand: [
+                  testTechniqueCard(instanceId: 'h1'),
+                  testTechniqueCard(
+                    instanceId: 'h2',
+                    technique: _submissionFinisherTechnique,
+                  ),
+                ],
+              ),
+              legalActions: const [
+                CombatV1TechniqueAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'h1',
+                ),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+            expect(find.text('FINISHER · SUBMISSION'), findsOneWidget);
+          }, size: size);
+        },
+      );
+
+      testWidgets(
+        'D. Counter response（HEAT・trait badge・prevents hint込みの長い'
+        'incoming attack summary）: ${width.toInt()}px幅でoverflowせず、'
+        'decline buttonへ到達できる',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.counterResponsePending,
+              isHumanInputRequired: true,
+              human: testHumanStatus(
+                hand: [
+                  testCounterCard(instanceId: 'c1'),
+                  testTechniqueCard(instanceId: 'h1'),
+                ],
+              ),
+              pendingAttack: testPendingAttack(
+                technique: _multiTraitTechnique,
+              ),
+              legalActions: const [
+                CombatV1CounterAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'c1',
+                ),
+                CombatV1DeclineCounterAction(actorPlayerIndex: 0),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull);
+
+            final declineFinder = find.byKey(
+              const Key('combat_v1_playable_counter_decline_button'),
+            );
+            expect(declineFinder, findsOneWidget);
+            final screenRect = Offset.zero & size;
+            expect(
+              screenRect.contains(tester.getRect(declineFinder).center),
+              isTrue,
+            );
+          }, size: size);
+        },
+      );
+
+      testWidgets(
+        'E. Counter response（Submission FINISHER incoming、特殊決着技）: '
+        '${width.toInt()}px幅でoverflowしない',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.counterResponsePending,
+              isHumanInputRequired: true,
+              human: testHumanStatus(
+                hand: [
+                  testCounterCard(instanceId: 'c1'),
+                  testTechniqueCard(instanceId: 'h1'),
+                ],
+              ),
+              pendingAttack: testPendingAttack(
+                technique: _submissionFinisherTechnique,
+              ),
+              legalActions: const [
+                CombatV1CounterAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'c1',
+                ),
+                CombatV1DeclineCounterAction(actorPlayerIndex: 0),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull);
+            expect(find.text('FINISHER · SUBMISSION'), findsOneWidget);
+          }, size: size);
+        },
+      );
+    }
   });
 }

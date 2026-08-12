@@ -110,7 +110,16 @@ void main() {
       final discardButtonFinder = find.byKey(discardKey);
       expect(_isButtonEnabled(tester, discardKey), isFalse);
 
-      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_h1')));
+      // Playable 2A-3: Technique decision trait badge行の追加でhand card
+      // 高さが232px→268pxへ拡張されたため、既定のtest viewport（800×600）
+      // ではdiscard prompt文言込みでcardの一部がExpanded/scrollview領域の
+      // 下端を越えうる。`ensureVisible`で実際にscrollしてから
+      // tapする（実機でユーザーがscrollしてから操作するのと同じ）。
+      final handCardFinder = find.byKey(
+        const Key('combat_v1_playable_hand_card_h1'),
+      );
+      await tester.ensureVisible(handCardFinder);
+      await tester.tap(handCardFinder);
       await tester.pump();
       expect(_isButtonEnabled(tester, discardKey), isTrue);
 

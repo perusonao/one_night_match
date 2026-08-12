@@ -118,9 +118,13 @@ CombatV1PlayableMatchGuidance _discardGuidance(
   );
 }
 
-/// COUNTER応答待ち（design doc「68章 Counter response」）。Counter
-/// outcome詳細・pending攻撃のHEAT・Direct PIN/Submission/Finisher
-/// type・unusable Counter理由は今回のscope外（Playable 2A-4予定）。
+/// COUNTER応答待ち（design doc「68章 Counter response」）。pending
+/// 攻撃のHEAT・Direct PIN/Submission/Finisher typeは、Playable
+/// 2A-3でCounter Prompt Sheet側（`_PendingAttackSummary`）へ追加した
+/// ——このguidance panel（primary/secondary 1行ずつ）自体は簡潔さを
+/// 維持し、具体的なtrait詳細はsheet側に譲る。unusable Counter理由の
+/// 完全な列挙は引き続きscope外（Playable 2A-3「16章 Counter Card
+/// Information」Non-Must）。
 ///
 /// Review Findings Fix（Major）: `legalActions`（SSOT）にCounter
 /// actionが実在しない場合（＝`CombatV1DeclineCounterAction`のみが

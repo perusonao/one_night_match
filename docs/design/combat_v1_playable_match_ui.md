@@ -2032,3 +2032,274 @@ button操作を指示する文言を含まない）を確認済み。
 Combat rule変更: NO / Core変更: NO / LegalAction semantics変更: NO /
 CPU AI変更: NO / data変更: NO / dependencies変更: NO / hidden
 information exposure変更: NO（71.6章）。
+
+# Playable 2A-3 — Technique / Counter Decision Readability（実装追記）
+
+## 72. Purpose
+
+Playable 2A-1（「今できること」）・2A-2（「何を目指すか」）に続き、
+2A-3の目的は「Technique を選ぶ時点、および Counter する時点で、その
+カード／攻撃が試合の勝ち筋にどう関係するか理解できる」状態にすること
+（UX / Information Architectureフェーズ、Combat ruleの追加・変更は
+行わない）。
+
+具体的には:
+
+- Technique cardを見た時点で「単なるダメージ技か」「DOWNを作る技か」
+  「PINへ直接つながるか」「Submissionを狙う技か」「FINISHERなら何で
+  決着を狙うか」を理解できるようにする。
+- Counter応答時に「Counterしなかった場合に何が起こる可能性があるか」
+  （incoming attackのDMG・HEAT・posture結果・特殊trait）を理解できる
+  ようにする。
+
+## 73. Existing Model Audit（実装前調査結果）
+
+事前調査で、以下の情報が既にCore/data層（`CombatV1Technique`/
+`CombatV1PendingAttack`/`CombatV1Counter`）のSSOTとして存在すること
+を確認した:
+
+| 情報 | SSOT | Playable snapshot/UIへの露出（2A-2時点） |
+|---|---|---|
+| Direct PIN | `CombatV1Technique.directPin` | Hand card経由で技術的にはアクセス可能だが、UIに未反映 |
+| Submission Hold | `CombatV1Technique.submissionHold` | 同上 |
+| Finisher resolution type | `CombatV1Technique.finisherType` | 同上（FINISHER badgeはcategoryのみで判定、typeを見ていなかった） |
+| Technique family | `CombatV1Technique.family` | Hand cardには存在するがUI未表示 |
+| ROUGH（attribute） | `CombatV1Technique.attribute == rough` | attribute表示（打/関/投/飛/ラフ/＊）はあるが、ROUGH固有の意味（PIN不可・次ターン制限）は未説明 |
+| Counter family/group matching | `techniqueFamilyMatchesCounter`（`combat_v1_counter_rules.dart`、pure function） | legality判定にのみ使用、UI説明なし |
+| pending attackのHEAT gain | `CombatV1PendingAttack.heatGain` | **snapshotに未露出**（`CombatV1PlayablePendingAttackView`に field 無し） |
+| pending attackのdirectPin/submissionHold/finisherType | `CombatV1PendingAttack`の同名field | **snapshotに未露出** |
+
+つまり「Core/dataには存在するがPlayable snapshot/UIへ出ていない情報」
+は、`CombatV1PlayablePendingAttackView`のHEAT/directPin/submissionHold/
+finisherTypeの4 fieldのみだった（Technique側は既にHand card経由で
+公開済みだったため、snapshot自体の拡張は不要）。この4 fieldのみを
+最小限追加し、それ以外は既存の公開済みデータを新しいUI widgetへ
+反映するだけで実装した（16章「Combat ruleを再実装しない」方針）。
+
+Core/data → snapshot → UIの流れ:
+
+```
+CombatV1Technique / CombatV1PendingAttack（Core SSOT、directPin/
+submissionHold/finisherType/family/attributeを保持）
+    ↓
+CombatV1PlayableHandCard.technique（既存、無変更）／
+CombatV1PlayablePendingAttackView（4 field追加）
+    ↓
+combat_v1_playable_technique_traits.dart（pure derivation——
+FINISHERのeffective directPin/submissionHold優先順位・badge文言・
+family/group表示名・Counter prevents summaryを算出するだけで、
+legality/damage判定は一切行わない）
+    ↓
+_TechniqueTraitBadges / _PendingAttackSummary / _HandCardTile（widget）
+```
+
+## 74. Technique Card — Decision Traits
+
+Technique cardへ、勝敗判断上重要なtraitを短いbadgeとして追加した
+（Tier 1情報、5〜6章）。
+
+- **DIRECT PIN**: `combatV1PlayableTechniqueHasEffectiveDirectPin`が
+  trueの非FINISHER技。Tooltip: 「成立時、自動でPINへ移行します
+  （通常のPIN選択とは別の経路です）」——通常PINのLegalAction判定と
+  混同しない文言に留める（9章 DO NOT INVENT LEGALITY）。
+- **SUBMISSION**: `combatV1PlayableTechniqueHasEffectiveSubmissionHold`が
+  trueの非FINISHER技。Tooltip: 「成立後、相手HPが{閾値}以下だと
+  Submission判定に自動移行します（Escapeされる場合があります）」
+  ——「今Submissionできる」「これでギブアップ」等の過剰断定を避ける
+  （8章 SUBMISSION WORDING）。
+- **ROUGH**: `technique.attribute == rough`。Tooltip: 「このターン
+  使用するとPINできなくなります。成立させてターンを終えると、相手の
+  次ターンTECHNIQUEを最大1枚に制限します」（15章・15.1章の2つの
+  判定基準を両方明示）。
+- **FINISHER / FINISHER · PIN / FINISHER · SUBMISSION**:
+  `category == finisher`の場合、`finisherType`に応じた合成badge
+  （`combatV1PlayableFinisherResolutionBadgeLabel`）。FINISHERの
+  場合、単独のDIRECT PIN/SUBMISSION badgeとは重複表示しない
+  （`_resolvePendingAttack`のeffectiveDirectPin/effectiveSubmissionHold
+  と同じ優先順位、`_effectiveDirectPin`/`_effectiveSubmissionHold`
+  helperで再現）。
+
+Badgeは`isUsable`（現在使用可能か）とは完全に独立して表示される——
+HEAT未到達で現在使用不可なFINISHERでも、trait badge自体は「成立
+した場合の性質」を示すものとして表示され続ける（22章「trait表示と
+usable/unusableの混同防止」、widget testで明示的に確認済み）。
+
+## 75. Information Priority（Tier）
+
+Technique cardへ全metadataを常時詰め込まず、優先順位を明確化した:
+
+- **Tier 1（勝敗ルート）**: DIRECT PIN・SUBMISSION・FINISHER
+  resolution・ROUGH——常時badgeとしてcategory labelの直後（DMG/HEAT
+  等より前）に表示。
+- **Tier 2（即時結果）**: DMG・HEAT・posture結果——既存表示のまま。
+- **Tier 3（legality/resource）**: Energy比較・required posture・
+  usability——既存表示のまま。
+- **Tier 4（advanced information）**: Technique family・Counter
+  taxonomy——Technique hand cardには常時表示しない（mobile card過密化
+  回避、6章）。Familyは代わりにCounter Prompt Sheet側（76章）で、
+  「このCounterが現在のpending攻撃をどう返せるか」という実用的な
+  文脈でのみ表示する。
+
+## 76. Counter Response — Incoming Attack Summary
+
+`_PendingAttackSummary`（Counter Prompt Sheet内）へ以下を追加した:
+
+- **HEAT gain**: 既存のattribute/DMG/posture結果行へ追記
+  （`pending.heatGain`）。
+- **Direct PIN / SUBMISSION / FINISHER resolution / ROUGH badge**:
+  Technique cardと同じ`_TraitBadge`コンポーネントを再利用
+  （`combatV1PlayablePendingAttackHasEffectiveDirectPin`/
+  `HasEffectiveSubmissionHold`/`IsRough`、74章と同じ優先順位・文言）。
+- **Counter Success Meaning**（`combatV1PlayableCounterPreventsSummary`）:
+  「Counterが成立すると、この技のDMG・HEAT・状態変化を防げます」
+  （trait無しの場合）に加え、DIRECT PINなら「自動PINへの移行」、
+  SUBMISSION Holdなら「Submissionへの移行条件を満たすこと」も防げる
+  ことを追記する。文言は`combat_v1_engine.dart` `playCounter`の実装
+  コメント「攻撃効果は無効、DMG/HEAT/posture変更なし」（7.1章）と
+  一致することを確認済み——Counterが成立すれば技自体が不成立になる
+  ため、技成立を前提とする自動遷移（DIRECT PIN／SUBMISSION自動移行）
+  も一切発生しない、という既存Core semanticsをそのまま言い換えた
+  だけであり、新しいCombat ruleではない。
+
+usable Counter cardには「対応: {family/group label}」を追加した
+（`combatV1PlayableCounterFamilyMatchLabel`、Core純粋関数
+`techniqueFamilyMatchesCounter`をそのまま使用——このCounterが
+family一致で返せるか、group一致で返せるかを表示するだけで、新しい
+legality判定は追加していない）。
+
+## 77. LegalAction Boundary（維持）
+
+Counter unavailable時（`legalActions`にCounter actionが存在しない）
+の既存挙動——「使用できるCOUNTERカードがありません。技を受けます」
+——は無変更のまま維持した。新しいtrait badge表示によって「Counter
+可能に見える」誤認を防ぐため、trait badgeはあくまでincoming attack
+（既に宣言済みのpublic情報）の性質を説明するだけであり、Counter
+actionの可否判定には一切関与しない。widget testで、Counter
+unavailable時でもtrait badge（incoming attack情報）が引き続き読め、
+かつCounter選択肢が案内されないことを明示的に確認した（77章、
+`combat_v1_playable_2a3_readability_test.dart`）。
+
+## 78. Hidden Information Boundary（維持）
+
+新規参照fieldは以下のみ——いずれも「宣言済みTechnique/COUNTERの
+静的metadata」であり、印刷されたカードテキストに相当する既に公開
+された情報（16章「宣言済みの攻撃カードは既に両者へ公開された情報」）:
+
+- `CombatV1PendingAttack.heatGain`/`directPin`/`submissionHold`/
+  `finisherType`（新規snapshot field 4件）。
+- `CombatV1Counter.counterableFamilies`/`counterableGroups`
+  （既存、印刷されたカードテキスト）。
+- `techniqueFamilyMatchesCounter`（Core純粋関数、表示専用の再利用）。
+
+CPU hand contents／CPU Counter cards／CPU Energy／CPU future action／
+CPU Finisher possession／deck order／next draw／AI internal
+evaluationはいずれも一切参照していない
+（`CombatV1PlayableOpponentStatus`は無変更）。
+
+## 79. Mobile Strategy
+
+Technique hand cardの固定height（`_HandRow`のSizedBox）を232px→268px
+へ拡張し、trait badge行の追加分を吸収した。Counter hand専用
+SizedBox（168px、`_CounterPromptSheet`）は対象外——counter card自体は
+trait badge行を持たないため（family match行は1行のみ追加、既存の
+`SingleChildScrollView(physics: NeverScrollableScrollPhysics())`の
+余白内に収まる）。
+
+320/360/390px幅での代表ケース（複数の重要traitを持つTechnique
+card・trait badge付きFINISHER card・HEAT/trait/prevents hint込みの
+Counter応答・特殊決着技のCounter応答）でoverflowが無いこと、および
+primary control（End Turn button・decline button）がviewport内に
+あってhit-testableであることを、`combat_v1_playable_mobile_overflow_test.dart`
+の新設groupで確認した（24章）。
+
+既存test（`combat_v1_playable_match_screen_test.dart`のDiscard
+シナリオ）は、hand card heightの拡張により既定test viewport
+（800×600）でtap対象が一時的にExpanded/scrollview領域の下端を
+越えたため、`tester.ensureVisible`を追加して対応した——実機で
+ユーザーがscrollしてから操作するのと同じ挙動であり、assertion自体は
+無変更。
+
+## 80. Deferred（27章と対応、今回やらない）
+
+- full Technique encyclopedia / full family taxonomyチュートリアル。
+- 全unusable Counter理由の完全な列挙。
+- CPU hand prediction・推奨AI・best move highlighting・win
+  probability・deck probability。
+- wrestler-specific strategy・新tutorial engine・card redesign。
+
+これらは必要であれば後続Phaseの対象とする。
+
+## 81. Tests（Playable 2A-3）
+
+- **Pure derivation**
+  （`test/combat_v1/playable_ui/combat_v1_playable_technique_traits_test.dart`、
+  新設、28 case）: FINISHER優先順位ルール（technique自身の
+  directPin/submissionHoldとfinisherTypeが矛盾する構成での優先順位
+  含む）・ROUGH判定・FINISHER resolution badge label・pending
+  attack側の同じ優先順位・SUBMISSION/DIRECT PIN/ROUGH wordingの安全性
+  （過剰断定フレーズが含まれないことを明示的に検証）・Counter family
+  match label（family一致／group一致／不一致）・Counter prevents
+  summary（trait有無での文言分岐）・family/group表示label。
+- **Widget**
+  （`test/combat_v1/playable_ui/combat_v1_playable_2a3_readability_test.dart`、
+  新設、13 case）: Technique cardのDIRECT PIN/SUBMISSION/ROUGH/
+  FINISHER合成badge表示・trait badgeがisUsableと独立して表示される
+  こと・通常技はbadge非表示・Counter available時のDMG/HEAT/prevents
+  hint/decline可視性・Direct PIN incoming/Submission incoming/
+  Finisher incomingそれぞれのbadge表示・Counter unavailable時の
+  regression safety（Counter選択非案内・incoming情報可読性・decline
+  進行明確性）・usable Counter cardのfamily match表示。
+- **Mobile regression**
+  （`combat_v1_playable_mobile_overflow_test.dart`拡張、新設12
+  case）: 320/360/390px幅で、複数重要trait併発Technique card・
+  trait badge付きFINISHER card・長いCounter incoming summary・
+  特殊決着技Counter応答のoverflow無し、およびprimary control
+  reachability。
+- 既存Playable 1A〜2A-2 test（1825件）は、`CombatV1PlayablePendingAttackView`
+  新規必須field 4件へ`testPendingAttack`ヘルパー経由で既定値
+  （technique由来）を補完する形でfixtureのみ更新——assertion自体は
+  1件（Discardシナリオのtap、79章）を除き無変更。
+
+## 82. Validation
+
+- `flutter analyze`: No issues found。
+- `flutter test test/combat_v1/playable test/combat_v1/playable_ui`:
+  既存208件 + 新設53件 = **261件**全件green。
+- `flutter test`（リポジトリ全体）: **1878件**全件green（Playable
+  2A-2 baseline 1825件 + 本Phase新設53件）。
+- `flutter build web --release --base-href /one_night_match/
+  --no-web-resources-cdn`: 成功。
+
+## 83. Changed Files（Playable 2A-3）
+
+- `lib/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart`:
+  `CombatV1PlayablePendingAttackView`へ`heatGain`/`directPin`/
+  `submissionHold`/`finisherType`の4 field追加（73章）。
+- `lib/src/combat_v1/playable/combat_v1_playable_match_controller.dart`:
+  `_buildPendingAttackView`で上記4 fieldを`CombatV1PendingAttack`
+  からそのまま複製。
+- `lib/src/combat_v1/playable_ui/combat_v1_playable_technique_traits.dart`
+  （新設）: pure trait derivation/formatter（74〜76章）。
+- `lib/src/combat_v1/playable_ui/combat_v1_playable_match_screen.dart`:
+  `_TechniqueTraitBadges`/`_TraitBadge`widget新設、`_HandCardTile`へ
+  trait badge・Counter family match表示を追加、`_PendingAttackSummary`
+  へHEAT/trait badge/prevents summaryを追加、hand row height
+  232px→268pxへ拡張（74・76・79章）。
+- `lib/src/combat_v1/playable_ui/combat_v1_playable_match_guidance.dart`:
+  古い「Playable 2A-4予定」注記を、実際に2A-3で実装した旨へ更新
+  （doc comment修正のみ、判定ロジック無変更）。
+- `test/combat_v1/playable_ui/combat_v1_playable_ui_test_fixtures.dart`:
+  `testPendingAttack`が新規4 fieldをtechniqueから補完するよう更新。
+- `test/combat_v1/playable_ui/combat_v1_playable_technique_traits_test.dart`
+  （新設）・`combat_v1_playable_2a3_readability_test.dart`（新設）・
+  `combat_v1_playable_mobile_overflow_test.dart`（拡張）: 81章参照。
+- `test/combat_v1/playable_ui/combat_v1_playable_match_screen_test.dart`:
+  Discardシナリオへ`ensureVisible`追加（79章）。
+- `docs/design/combat_v1_playable_match_ui.md`: 本章（72〜84章）追加。
+
+## 84. Scope Verification
+
+Combat rule変更: NO / Core resolution変更: NO / LegalAction
+semantics変更: NO / CPU AI変更: NO / wrestler data変更: NO /
+technique data変更: NO / dependency追加: NO / hidden information
+exposure変更: NO（78章）。
