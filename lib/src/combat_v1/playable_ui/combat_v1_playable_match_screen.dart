@@ -21,6 +21,7 @@ import '../playable/combat_v1_playable_match_controller.dart'
 import '../playable/combat_v1_playable_match_result.dart';
 import '../playable/combat_v1_playable_match_snapshot.dart';
 import 'combat_v1_playable_feedback_formatters.dart';
+import 'combat_v1_playable_match_guidance.dart';
 import 'combat_v1_playable_match_session.dart';
 import 'combat_v1_playable_ui_formatters.dart';
 
@@ -724,6 +725,13 @@ class _ActorAndRecentPanel extends StatelessWidget {
       currentActorPlayerIndex: snapshot.currentActorPlayerIndex,
       hasPendingAttack: snapshot.pendingAttack != null,
     );
+    // Playable 2A-1「Match Guidance」——actor labelのすぐ下へ統合する
+    // （既存actor/phase表示と別panelへ重複表示しない、design doc
+    // 「68章 Architecture」）。CPU処理中・試合終了時は`null`。
+    final guidance = combatV1PlayableDeriveMatchGuidance(
+      snapshot,
+      humanPlayerIndex: humanPlayerIndex,
+    );
     // Playable 1C「Recent Action Log Upgrade」——直近1件は大きめbanner、
     // その前のもの（compact list）をあわせて表示する（「Keep Log
     // Compact」——8件保持全件は必ずしも見せない、直近4件のみ）。
@@ -755,6 +763,7 @@ class _ActorAndRecentPanel extends StatelessWidget {
               ),
             ],
           ),
+          if (guidance != null) _MatchGuidancePanel(guidance: guidance),
           // Playable 1C「Keep Log Compact」——feedback内容量が可変のため、
           // ここだけ高さ上限＋内部clip-scrollにして、Human status
           // panel/Primary actions barが常にscroll不要で画面内へ収まる
@@ -800,6 +809,44 @@ class _ActorAndRecentPanel extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Playable 2A-1「Match Guidance」——「1行primary + 必要時のみ1行
+/// secondary」（design doc「68章 UI / Mobile」）。tutorial panel／modalは
+/// 追加せず、既存actor labelの直下へ小さく統合する。Combat rule判定は
+/// 一切行わない——`combatV1PlayableDeriveMatchGuidance`が既に確定した
+/// 文字列をそのまま表示するだけ。
+class _MatchGuidancePanel extends StatelessWidget {
+  const _MatchGuidancePanel({required this.guidance});
+
+  final CombatV1PlayableMatchGuidance guidance;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        children: [
+          Text(
+            guidance.primary,
+            key: const Key('combat_v1_playable_match_guidance_primary'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Colors.white70),
+          ),
+          if (guidance.secondary != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                guidance.secondary!,
+                key: const Key('combat_v1_playable_match_guidance_secondary'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 11, color: Colors.white38),
+              ),
+            ),
         ],
       ),
     );

@@ -1381,3 +1381,166 @@ formatter追加・widgetのラベル/Tooltip/Dialog追加。
   Energy panel/card comparison行を含めてgreenのまま——`_HandRow`の
   card高さを182px→232pxへ拡張し、新規行が`SingleChildScrollView`の
   範囲内に収まるようにした。
+
+# Playable 2A-1 — Match Guidance（実装追記）
+
+## 68. Match Guidance
+
+### 68.1 Objective
+
+独立Player Experience Auditで、Combat V1は
+rules-complete／operable（LegalActionに従って正しく操作でき、DMG／
+HEAT／KOC等のfeedbackも正しい）ではあるものの、「なぜその行動を選ぶ
+のか」「次に何を狙うべき状態なのか」（HP／KOC／DOWN／PIN／Submission
+の関係、勝利への近さ）がプレイ画面から理解しにくい
+（decision-readableでない）と評価された。Playable 2A-1は、新ルールを
+一切追加せず、既存ルールの因果関係だけをUIから理解可能にする最初の
+スライス。
+
+### 68.2 Scope / Non-Scope
+
+今回実装したのは以下の2種類のみ。
+
+- **Current Action Guidance**（primary）: 現在のphase／pending
+  state／postureから、「今プレイヤーが何をする段階なのか」を短い文で
+  示す（Discard／Counter response／DOWN decision／Action phaseの4分岐）。
+- **Context Hint**（secondary、最大1行）: 現在の盤面から、「その状態には
+  どういう意味があるのか」を短く補足する（PIN opportunity／Shared
+  HEAT Finisher unlock／Opponent DOWN significance／continued
+  Technique、優先順位付きで最大1件）。
+
+今回のnon-scope（後続2A slice、または恒久的にscope外）:
+
+- 攻略AI・recommendation（「このカードを使え」「Counterした方が得」等）
+  は一切生成しない。
+- Counter outcome詳細・pending攻撃のHEAT・Direct PIN／Submission／
+  Finisher type・unusable Counter理由の本格対応（Playable 2A-4予定）。
+- PIN count prediction・勝率表示・新resource／新meter／新action／
+  新phase。
+- Combat rules（HP 0／KOC／PIN／Submission／Direct PIN／Counter
+  legality・resolution／Shared HEAT／Energy／Draw・Discard／DOWN・
+  STAND／Finisher unlock）・Core combat engine・CPU AI・deck
+  composition・wrestler／technique dataは一切変更しない。
+
+### 68.3 Architecture
+
+```
+CombatV1PlayableMatchSnapshot
+        ↓
+combatV1PlayableDeriveMatchGuidance（pure関数、priority判定を集約）
+        ↓
+CombatV1PlayableMatchGuidance（primary/secondary/kind、UI-oriented model）
+        ↓
+_MatchGuidancePanel（Widget、テキストをそのまま表示するだけ）
+```
+
+新設
+`lib/src/combat_v1/playable_ui/combat_v1_playable_match_guidance.dart`
+（既存`combat_v1_playable_ui_formatters.dart`と同じ「pure UI
+formatting helpers」層——Flutter widget treeを構築しない、副作用
+なし）。Widget側（`_MatchGuidancePanel`、`combat_v1_playable_match_screen.dart`
+内）はderiveされた文字列をそのまま表示するのみで、legality・優先順位
+判定を一切再実装しない。
+
+- **LegalAction SSOT**: 「PIN可能」「Technique／PIN／End Turnを選択
+  できます」等の断定は、必ず`snapshot.legalActions`にそのkindの
+  actionが実在する場合のみ行う。独自の合法性判定は一切追加しない。
+- **Magic number複製の回避**: Shared HEAT Finisher unlock閾値は
+  `snapshot.finisherHeatThreshold`をそのまま参照する（UI側に`200`を
+  複製しない）。REST回復量（`CombatV1RulesConfig.restHpRecovery`）は
+  snapshotに公開されていないため、DOWN decision guidanceの文言は
+  具体的な数値を持たない（既存`_ActionHint`のRest説明と同じ方針）。
+- **Hidden information safety**: 参照するのは
+  `CombatV1PlayableMatchSnapshot`の公開fieldのみ
+  （`cpu.posture`・`sharedHeat`・`finisherHeatThreshold`・
+  `legalActions`・Human自身の`recentObservations`）。CPU hand
+  contents／hidden Counter／hidden Energy／CPUが次に使える具体的
+  Techniqueは、そもそも`CombatV1PlayableOpponentStatus`が保持して
+  いないため参照しようがない。「相手はCounterを持っていません」の
+  ような推測表示も行わない。
+
+### 68.4 Guidance Priority
+
+優先順位判定は`combatV1PlayableDeriveMatchGuidance`1箇所へ集約する
+（Widget側へ条件分岐を散乱させない）。
+
+1. Human入力待ちでない場合（CPU処理中）／試合終了時は`null`（既存
+   actor label「CPU行動中」／Result overlayが代替、重複表示しない）。
+2. Discard phase → 強制discardの案内（+ DOWNなら「次の行動前に
+   Stand Up／Restが必要」、そうでなければ「残したカードは攻撃や
+   Counterに使用できます」）。
+3. Counter response（`counterResponsePending`） → legalActionsに
+   Counter actionが実在する場合のみ「Counterするか、技を受けるか
+   選択してください」（+「無効化できます」を補足）。実在しない場合
+   （`CombatV1DeclineCounterAction`のみがlegal）は「使用できる
+   Counterがありません。技を受けます」——存在しない選択肢を
+   提示しない（Review Findings Fix、68.6章）。
+4. DOWN decision（`action`かつHuman DOWN） → Stand Up／Restの意味。
+5. Action phase（`action`かつHuman STAND） → primaryはlegalActionsに
+   実在するkindのみ列挙。secondaryはcontext hintを以下の順で1件のみ
+   選ぶ: (a) PIN opportunity → (b) Shared HEAT threshold到達 →
+   (c) Opponent DOWN significance（PINが非legalの場合のみ） →
+   (d) continued Technique／Energy（このターン中に既にTechniqueを
+   使用済み、かつ現在も合法な場合のみ——「1ターン1Technique」の誤解を
+   防ぐ。毎ターン表示しないよう、未使用ターンでは出さない）。(b)の
+   文言はHEAT条件についてのみ述べ、Finisherを実際に使用できるとは
+   断定しない（Review Findings Fix、68.6章）。
+
+### 68.5 Tests（Playable 2A-1）
+
+- **Pure derivation logic**
+  （`test/combat_v1/playable_ui/combat_v1_playable_match_guidance_test.dart`、
+  新設、22 case）: Human入力待ちでない場合のnull化・Discard（強制／
+  DOWN併発で「今すぐ」と誤解させない）・DOWN decision（Rest回復量の
+  数値を複製しない）・Counter response（使用可能Counterの有無で
+  secondary出し分け）・Action phase primaryがlegalActionsのみを
+  反映（PIN／Technique非legal時に案内しない）・context hint優先順位
+  （PIN可能＞Finisher解禁＞相手DOWN、同時成立時の絞り込み含む）・
+  continued Technique（同ターン内使用済みのみ・別ターンの使用は
+  根拠にしない・未使用ターンでは出さない）・hidden information
+  regression guard。
+- **Widget**
+  （`test/combat_v1/playable_ui/combat_v1_playable_match_guidance_widget_test.dart`、
+  新設、3 case）: Discard phaseでのprimary/secondary表示、PIN
+  opportunity context表示、CPU処理中はguidance widget自体を表示せず
+  既存actor label（「CPU行動中」）のみが表示されること。
+- **Mobile overflow**
+  （既存`combat_v1_playable_mobile_overflow_test.dart`へ追加、新設
+  group「Match Guidance（Playable 2A-1 追加）」12 case）:
+  guidance文言が最も長くなる代表構成（Discard×DOWN併発／DOWN
+  decision／Action phase×PIN opportunity+latest feedback banner
+  併発／Counter response）を、320／360／390pxの3幅で検証。
+- 既存Playable 1A〜1C.1 test（1744件）はいずれも無変更のままgreen。
+  ただし1件、既存
+  `combat_v1_playable_feedback_widget_test.dart`の
+  `find.textContaining('HPを回復')`（`findsOneWidget`）が、DOWN
+  decision guidanceのsecondary文言と字面が衝突したため、guidance側の
+  文言を「Rest — HP回復・ターン終了」（既存`_ActionHint`の
+  「HPを回復してターン終了」と一字一句一致させない）へ調整した——
+  既存test自体は無変更。
+- 合計1780件がgreen（既存1744件 + 新設36件）。
+
+## 69. Review Findings Fix（Codex独立レビュー、Major 1件・Minor 1件）
+
+review target: `ce7dfbcbb2844e4d017f59b54a4793d723e3e8e9`。
+
+- **Major — Counter不能時にも存在しないCounter選択を案内**:
+  `_counterResponseGuidance`が、`legalActions`に
+  `CombatV1CounterAction`が1件も無い（＝`CombatV1DeclineCounterAction`
+  のみがlegal）場合でも、primaryが「Counterするか、技を受けるか
+  選択してください」のまま変わらず、実際には存在しないCounterという
+  選択肢を提示していた。Fix: `hasUsableCounter`（既存判定、SSOTは
+  `snapshot.legalActions`のまま変更なし）でprimary自体を分岐させ、
+  Counter不能時は「使用できるCounterがありません。技を受けます」の
+  みを返す（secondaryも付けない）。
+- **Minor — Shared HEAT文言がFinisher全体の使用条件を満たしたように
+  読める**: 「FINISHER解禁 — Shared HEATなので双方が使用条件を
+  満たせます」は、Finisher card所持・Energy・posture等の他条件や
+  CPU側のhidden handまで満たしているかのように誤読されうる。Fix:
+  「FINISHER HEAT到達 — Shared HEATなので双方がHEAT条件を満たして
+  います」へ変更し、HEAT条件についてのみ述べる（Finisherが実際に
+  legalかどうかは断定しない）。
+
+いずれもCombat rule・LegalAction semantics・Guidance derivationの
+pure architecture（Snapshot → derivation → view model → Widget）は
+無変更。修正はderivation関数内の文言分岐のみ。
