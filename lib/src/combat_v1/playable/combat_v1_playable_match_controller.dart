@@ -204,6 +204,7 @@ class CombatV1PlayableMatchController {
     isMatchOver: _state.isOver,
     sharedHeat: _state.sharedHeat,
     finisherHeatThreshold: _rules.finisherHeatThreshold,
+    submissionHpThreshold: _rules.submissionHpThreshold,
     actionCount: _actionCount,
     maxActions: _config.maxActions,
     legalActions:

@@ -238,6 +238,7 @@ class CombatV1PlayableMatchSnapshot {
     required this.isMatchOver,
     required this.sharedHeat,
     required this.finisherHeatThreshold,
+    required this.submissionHpThreshold,
     required this.actionCount,
     required this.maxActions,
     required this.legalActions,
@@ -268,6 +269,17 @@ class CombatV1PlayableMatchSnapshot {
 
   final int sharedHeat;
   final int finisherHeatThreshold;
+
+  /// 通常SUBMISSIONへ自動移行できる相手HPの上限
+  /// （[CombatV1RulesConfig.submissionHpThreshold]をそのまま公開、
+  /// docs/combat_rules_v1.md 10.1章「相手HP50以下で宣言可能」）。
+  ///
+  /// [finisherHeatThreshold]と同じ理由（Playable 2A-2「Win Path / Match
+  /// Direction」、`combat_v1_playable_match_direction.dart`）でsnapshotへ
+  /// 追加した——既に`CombatV1RulesConfig`上でpublicなrule定数を、UI側で
+  /// magic number（50）として複製しないための公開。Core rule・値そのものは
+  /// 一切変更していない。
+  final int submissionHpThreshold;
 
   final int actionCount;
   final int maxActions;

@@ -21,12 +21,14 @@ import '../playable/combat_v1_playable_match_controller.dart'
 import '../playable/combat_v1_playable_match_result.dart';
 import '../playable/combat_v1_playable_match_snapshot.dart';
 import 'combat_v1_playable_feedback_formatters.dart';
+import 'combat_v1_playable_match_direction.dart';
 import 'combat_v1_playable_match_guidance.dart';
 import 'combat_v1_playable_match_session.dart';
 import 'combat_v1_playable_ui_formatters.dart';
 
 const _pink = Color(0xffff477e);
 const _gold = Color(0xffffc857);
+const _teal = Color(0xff5fd9c6);
 const _cardSurface = Color(0xff211527);
 const _healthError = Color(0xffff5c5c);
 
@@ -769,12 +771,22 @@ class _ActorAndRecentPanel extends StatelessWidget {
           // panel/Primary actions barが常にscroll不要で画面内へ収まる
           // 既存レイアウト（Expanded/固定bottom bar）を壊さないようにする
           // （念のための上限であり、通常の1〜2行feedbackでは到達しない）。
+          //
+          // Playable 2A-2「Win Path / Match Direction」もこの内側へ置く
+          // （17章「Mobile UX」——guidanceがTechnique areaを過度に
+          // 押し下げないようにするため、常時表示の固定領域をこれ以上
+          // 増やさない。Match Guidance/latest feedback/recent logと同じ
+          // 「内容量が可変な情報」として同じ安全弁を共有する）。
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 132),
             child: SingleChildScrollView(
               physics: const NeverScrollableScrollPhysics(),
               child: Column(
                 children: [
+                  _MatchDirectionPanel(
+                    snapshot: snapshot,
+                    humanPlayerIndex: humanPlayerIndex,
+                  ),
                   if (snapshot.latestFeedback != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
@@ -843,6 +855,67 @@ class _MatchGuidancePanel extends StatelessWidget {
               child: Text(
                 guidance.secondary!,
                 key: const Key('combat_v1_playable_match_guidance_secondary'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 11, color: Colors.white38),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Playable 2A-2「Win Path / Match Direction」——「primary 1行 + 必要時
+/// のみsecondary 1行」（design doc「70章 UI / Mobile」）。試合が`active`
+/// である限りHuman/CPUどちらの手番でも表示する（Match Guidanceと違い
+/// CPU処理中でも隠さない、`combat_v1_playable_match_direction.dart`
+/// 参照）。Combat rule判定は一切行わない——
+/// `combatV1PlayableDeriveMatchDirection`が既に確定した文字列をそのまま
+/// 表示するだけ。Match Guidance（white70/38）とは配色を変え
+/// （`_teal`）、2つのpanelを一目で区別できるようにする——ただしprimary
+/// action（下部bottom bar）より視覚的に強くならない、控えめなfont
+/// sizeのまま（17章「Mobile UX」）。
+///
+/// `_ActorAndRecentPanel`内の、latest feedback banner/recent logと同じ
+/// 高さ上限つきscroll領域（`ConstrainedBox(maxHeight: 132)`）の中へ
+/// 置く——常時表示の固定領域をこれ以上増やさず、guidanceがTechnique
+/// areaを過度に押し下げないようにするため（17章「Mobile UX」）。
+class _MatchDirectionPanel extends StatelessWidget {
+  const _MatchDirectionPanel({
+    required this.snapshot,
+    required this.humanPlayerIndex,
+  });
+
+  final CombatV1PlayableMatchSnapshot snapshot;
+  final int humanPlayerIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final direction = combatV1PlayableDeriveMatchDirection(
+      snapshot,
+      humanPlayerIndex: humanPlayerIndex,
+    );
+    if (direction == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Column(
+        children: [
+          Text(
+            direction.primary,
+            key: const Key('combat_v1_playable_match_direction_primary'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _teal,
+            ),
+          ),
+          if (direction.secondary != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                direction.secondary!,
+                key: const Key('combat_v1_playable_match_direction_secondary'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 11, color: Colors.white38),
               ),

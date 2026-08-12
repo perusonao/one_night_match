@@ -1544,3 +1544,268 @@ review target: `ce7dfbcbb2844e4d017f59b54a4793d723e3e8e9`。
 いずれもCombat rule・LegalAction semantics・Guidance derivationの
 pure architecture（Snapshot → derivation → view model → Widget）は
 無変更。修正はderivation関数内の文言分岐のみ。
+
+# Playable 2A-2 — Win Path / Match Direction（実装追記）
+
+## 70. Match Direction
+
+### 70.1 Objective
+
+独立Player Experience Auditの2つのCritical findingは、
+
+- HPを0にすることと勝利の関係が理解できない（HP0だけでは通常敗北に
+  ならない）
+- Submissionを狙う方法が理解できない（Submissionは独立ボタンではなく、
+  対応Technique成立時に自動解決される）
+
+であり、High findingとして「KOCとPIN progressionが結びつかない」
+「優勢／劣勢を構成するresourceの優先順位がない」「DOWNの戦術的意味が
+分断されている」「Finisher unlockと実際の決着routeが結びついていない」
+が挙げられていた。
+
+Playable 2A-1（68章）は「今何を選べるか」（Current Action Guidance）を
+改善したが、「なぜそれをするのか」「どこまで勝利に近づいているのか」
+（Win Path / Match Direction）は依然として画面から読み取れなかった。
+Playable 2A-2は、新ルールを一切追加せず、既存ルールの因果関係（Snapshot
+から公開済みの情報）だけを使って、この「勝利までの道筋」を短い文章で
+示す2つ目のスライス。
+
+役割分担（6章のUI Goal・14章「なぜそれをするのか／どこまで勝利に近づいて
+いるのか」に対応）:
+
+- Playable 2A-1（Match Guidance）: 「今できること」——phase／pending
+  state／postureから「今この瞬間に何を選べるか」。Human入力待ちで
+  ない場合（CPU処理中）は表示しない。
+- Playable 2A-2（Match Direction）: 「なぜそれをするのか／どこまで
+  勝利に近づいているのか」——HP／KOC／Posture／Shared HEATという
+  「試合全体の状態」から「勝利までの道筋のどこにいるか」。試合が
+  `active`である限りHuman/CPUどちらの手番でも表示する（Guidanceとの
+  意図的な挙動差、70.3章）。
+
+### 70.2 Core Rule確認（Win Path図のハードコード回避）
+
+5章のWin Path図（Technique → HP/DOWN → 決着機会 → PIN/Submission →
+KOC消費 → 勝利）をそのままUI文言へ焼き直すのではなく、実装前に以下を
+Core実装から確認した:
+
+- **PINのカウント／決着**（`combat_v1_pin_rules.dart`
+  `determinePinCountResult`）: 防御側KOCが支払える最も有利なカウント
+  （1＝KOC3／2＝KOC2／2.9＝KOC1）を返し、**いずれのcostも支払えない
+  場合（KOC 0）にのみ`null`を返す**——これが3カウント（PIN決着）となる
+  唯一の入力。「KOCが少ないほど不利」ではなく「必要なKOCを支払えない
+  ことが決着条件」という62.1章の既存整理と同じ結論を、Direction側でも
+  再確認した。
+- **SUBMISSIONの突入条件**（`combat_v1_submission_rules.dart`
+  `submissionEligible`）: 相手HPが`CombatV1RulesConfig.
+  submissionHpThreshold`（既定50）**以下**（0を含む）で宣言可能。
+  ESCAPE/GIVE UPは`determineSubmissionOutcome`——防御側KOCが
+  `submissionEscapeKocCost`（既定1）を支払えなければGIVE UP。
+- **SUBMISSION FINISHERのHP0特例**（`combat_v1_finisher_rules.dart`
+  `determineFinisherSubmissionOutcome`）: 相手HPが0の場合、KOC保有量に
+  関わらず即GIVE UP——ただしこれは「SUBMISSION FINISHERが**既に**
+  成立した後」の特例であり、「HP0だけで試合が決着する」という意味では
+  ない（HP0自体が通常決着条件になることはない、14章「HP0の扱い」）。
+  Direction側はこの特例を個別にモデル化せず、「HP0だけでは決着しない
+  （PIN／Submissionの成立が必要）」という、より広く安全に成り立つ
+  一般則のみを文言化した（70.4章 hpZeroClarify）。
+- **DIRECT PIN**（`docs/combat_rules_v1.md`8章）: DIRECT PINを持つ技は
+  FINISHER限定ではなく技全般に付与でき、TECHNIQUE成功と同一Command内で
+  PIN不要のまま自動的にPINへ移行する——通常PIN（`checkPinLegality`、
+  相手DOWN必須）とは別経路。`CombatV1LegalAction`にDIRECT PIN用の
+  variantは存在しない（外部から選択可能な「手」ではない）ため、
+  Directionの文言は「（通常）PINには相手のDOWNが必要」という限定を
+  含む形にとどめ、「決着にはDOWNが必須」のような、DIRECT PINと矛盾する
+  絶対表現は使わない（70.4章）。
+
+### 70.3 Architecture
+
+```
+CombatV1PlayableMatchSnapshot
+        ↓
+combatV1PlayableDeriveMatchDirection（pure関数、priority判定を集約）
+        ↓
+CombatV1PlayableMatchDirection（primary/secondary/kind、UI-oriented model）
+        ↓
+_MatchDirectionPanel（Widget、テキストをそのまま表示するだけ）
+```
+
+新設`lib/src/combat_v1/playable_ui/combat_v1_playable_match_direction.dart`
+（既存`combat_v1_playable_match_guidance.dart`と同じ「pure UI
+formatting helpers」層）。`combat_v1_playable_match_guidance.dart`
+自体は無変更——14章の方針どおり、責務が異なるため既存fileを肥大化
+させず新規fileへ分離した。
+
+- **LegalAction SSOT**: 「PINで相手のKOCを削りましょう」という
+  pinOpportunity routeは、`snapshot.legalActions`にPIN actionが実在
+  する場合のみ選ばれる。独自の合法性判定は一切追加しない。
+- **Magic number複製の回避**: Finisher解禁閾値は既存
+  `snapshot.finisherHeatThreshold`をそのまま参照する。Submission
+  突入HP閾値は、今回`CombatV1PlayableMatchSnapshot`へ新規field
+  `submissionHpThreshold`として追加した
+  （`CombatV1RulesConfig.submissionHpThreshold`を`finisherHeatThreshold`
+  と全く同じ方法で公開するだけ——Core rule・値そのものは無変更。71章）。
+  PINのKOC cost表（1/2/2.9＝KOC3/2/1）は公開しない——「KOC 0＝次の
+  PIN/Submissionが必ず決着」という、KOCの構造的下限（負のKOCが存在
+  しない）だけを根拠にした判定にとどめ、rules configのcost値を複製
+  しない（70.4章decisiveKoc）。
+- **Hidden information safety**: 参照するのは`CombatV1PlayableMatchSnapshot`
+  の公開fieldのみ（`cpu.hp`・`cpu.koc`・`cpu.posture`・
+  `human.posture`・`sharedHeat`・`finisherHeatThreshold`・
+  `submissionHpThreshold`・`legalActions`）。`CombatV1PlayableOpponentStatus`
+  は構造的にCPU手札の内容・hidden Energy・hidden Counterを保持しない
+  ため、参照しようがない。
+
+### 70.4 Direction Priority
+
+優先順位判定は`combatV1PlayableDeriveMatchDirection`1箇所へ集約する。
+「勝利までの道筋のどこにいるか」を最も強く示す信号から順に、最大1件
+のみを返す（Guidanceの「1 primary + 最大1 secondary」と同じ設計）。
+
+1. `status != active` → `null`（Result overlayが既に決着を説明する
+   ため重複表示しない、Guidanceの優先順位1と同じ考え方）。
+2. **decisiveKoc**（相手KOC ≤ 0） → 次のPIN／Submissionが必ず決着
+   になる、最も強い信号（70.2章参照）。
+3. **pinOpportunity**（`legalActions`にPINが実在＝Human手番かつ
+   action phase） → 「PINで相手のKOCを削りましょう」——2A-1の
+   「PIN可能」（現在選べる操作）と重複させず、「PINが何につながるか」
+   （KOC消費 → 決着）を述べる。
+4. **submissionRoute**（相手HPが`submissionHpThreshold`以下・0より
+   大） → Submissionが視野に入っていることを示す。KOCによる
+   ESCAPE可能性があることも明示し、「HPが下がれば即決着」という
+   誤解を避ける。
+5. **hpZeroClarify**（相手HP＝0） → 7章の「HP0＝即敗北」誤解防止。
+   「HP0ですが、これだけでは決着しません」を明示する。
+6. **opponentDownRoute**（相手がDOWN、かつ3.のPINがまだlegalでない
+   場合） → 「DOWNからPINへ繋げれば、決着に近づきます」。2A-1の
+   「相手はDOWN中 — PINや一部Techniqueにつながる重要な状態です」
+   （状態そのものの説明）とは文言を分け、Directionでは「勝利への
+   道筋」の観点でのみ述べる（11章の重複回避要件）。
+7. **humanDownRisk**（Human自身がDOWN） → 「DOWNは、相手がPINを
+   狙うための条件の一つです」。PINの他の条件（そのターン中の技成功・
+   ROUGH不使用）までは断定しない。
+8. **finisherRoute**（Shared HEATが解禁閾値以上） → 「FINISHERが
+   解禁 — 決着ルートの選択肢が広がります」。2A-1の「FINISHER
+   HEAT到達」という文言・断定範囲とは変えている（12章「必要以上に
+   重複説明しない」要件、70.5章）。
+9. **neutral**（上記いずれにも該当しない試合序盤など） → Win Path
+   全体像を1文で示す（「Techniqueで攻めてDOWNを作り、決着を
+   目指しましょう」）。
+
+CPUの手番中（`isHumanInputRequired == false`）は`legalActions`が空
+（9章、CPU手札漏洩防止）のため2.のpinOpportunityへは到達できない
+——この場合でも相手がDOWNなら6.のopponentDownRouteへ安全に
+fallbackする（「PINが合法」と誤って断定しない）。
+
+### 70.5 情報階層（13章に対応する実装判断）
+
+- **HP = damage / submission context**: HP自体の推移はaction feedback
+  （36〜39章、無変更）が担当する。DirectionはHPを「Submission route
+  の入口」「HP0＝即敗北ではない」という文脈でのみ扱う。
+- **KOC = finish resistance**: 「KOC = life」という単純化はしない
+  （8章の禁止事項）。Direction側もKOCの多寡を連続的な優劣として
+  語らず、「0＝次のPIN/Submissionが必ず決着」という構造的に安全な
+  境界のみを特別扱いする——KOCが1でも10でも、0でない限り同じ
+  neutral/他のroute扱いとなる（KOC 1〜9の間で異なる文言を出し
+  分けない）。
+- **Posture（DOWN）= 直接的な戦術機会**: 相手DOWN（opponentDownRoute）
+  ／Human自身のDOWN（humanDownRisk）の両方をカバーし、11章の
+  「DOWNを単なる状態異常ではなくPIN opportunity等につながる重要な
+  状態として理解できるようにする」を、2A-1と重複しない文言で満たす。
+- **HEAT = Finisher unlock**: 12章「HEATが高い＝自分だけ有利ではない」
+  を踏まえ、finisherRouteは最も低い優先順位（8番目）に置き、2A-1と
+  同じ「HEAT到達」という言い回しは使わない。
+
+### 70.6 Submission HP Threshold の公開（Snapshot拡張）
+
+`CombatV1PlayableMatchSnapshot`へ`submissionHpThreshold`
+（`int`、`CombatV1RulesConfig.submissionHpThreshold`をそのまま公開）
+を追加した——既存`finisherHeatThreshold`と全く同じ設計（16章の
+"public rule constant"の公開パターン）。`CombatV1PlayableMatchController.snapshot`
+getterで`_rules.submissionHpThreshold`をそのまま渡すだけであり、
+Core rule・`CombatV1RulesConfig`の値・計算ロジックは一切変更していない
+——10章「Coreの実際のHP threshold等を調査し、magic numberをUIへ
+複製しない」を、2A-1のfinisherHeatThresholdと同じ手段で満たした。
+
+### 70.7 UI / Mobile
+
+`_MatchDirectionPanel`（`combat_v1_playable_match_screen.dart`）は
+`_ActorAndRecentPanel`内、Match Guidance・latest feedback banner・
+recent action logと同じ高さ上限つきscroll領域
+（`ConstrainedBox(maxHeight: 132)` +
+`SingleChildScrollView(NeverScrollableScrollPhysics)`）の中へ置いた。
+
+当初、Shared status panelの直下に独立panelとして常時固定領域へ追加
+したところ、320px幅の既存mobile overflow test（Playable 2A-1で追加
+した「Action phase（PIN opportunity context + latest feedback banner
+併発）」ケース）で新規に`RenderFlex overflowed`が発生した——固定
+（非scroll）領域の合計高さが増え、`Expanded`（Technique area）へ
+渡る残り高さが不足したため。17章「guidanceがTechnique areaを過度に
+押し下げない」の直接的な回帰であり、Match Guidanceと同じ「内容量が
+可変な情報は高さ上限つきscroll領域内に置く」という既存の安全弁
+（40章）へDirectionも合流させることで解消した——Guidance自体の位置・
+挙動は無変更のまま。
+
+役割は明確に分離しつつ、視覚的にも一目で区別できるよう、Direction
+のprimaryは`_teal`（新規accent color）、Guidanceは既存white70/38の
+ままとした——ただしfont sizeはGuidanceと同じ12/11spに揃え、primary
+action（下部bottom bar）より視覚的に強くならないようにしている
+（17章）。
+
+320／360／390pxの3幅で、Match Guidance（PIN可能）とMatch Direction
+（PINで相手のKOCを削りましょう）が同時に最長表示される代表構成、
+および相手KOC0（decisiveKoc、primary+secondaryとも表示）の代表構成を
+追加検証した（70.8章）。
+
+### 70.8 Tests（Playable 2A-2）
+
+- **Pure derivation logic**
+  （`test/combat_v1/playable_ui/combat_v1_playable_match_direction_test.dart`、
+  新設、22 case）: match start/neutral・opponent HP
+  high/low/zero・opponent KOC high/low/zero・opponent STAND/DOWN・PIN
+  legal/illegal・HEAT below/at閾値・Human DOWN・Counter response
+  phase・CPU turn（Guidanceと異なりnullにしない）・match over
+  （null）・priority ordering（KOC0＞PIN legal＞HP低下＞相手DOWNの
+  優先順位、同時成立時の絞り込み含む）・hidden information regression
+  guard。
+- **Widget**
+  （`test/combat_v1/playable_ui/combat_v1_playable_match_direction_widget_test.dart`、
+  新設、5 case）: 通常action phase・相手が脆弱な状態（HP低下→
+  submission route）・KOC/決着opportunity（相手KOC0→decisiveKoc）・
+  CPU turn（Guidanceと異なり表示し続けることを確認）・試合終了時は
+  表示しない。
+- **Mobile overflow**
+  （既存`combat_v1_playable_mobile_overflow_test.dart`へ追加、新設
+  group「Match Direction（Playable 2A-2 追加）」、320／360／390pxの
+  3幅×2 caseで計6 case）: Match Guidance PIN可能 + Match Direction
+  pinOpportunity + latest feedback banner併発、および相手KOC0
+  （decisiveKoc、secondaryまで表示）の代表構成を検証。既存「Match
+  Guidance（Playable 2A-1 追加）」groupも本Phaseの構造変更
+  （70.7章）後に再検証し、全ケースgreenのままであることを確認した
+  （このgroup追加時点で一度`RenderFlex overflowed`回帰を検出し、
+  70.7章の対応で解消している）。
+- `test/combat_v1/playable/`・`test/combat_v1/playable_ui/`配下
+  （既存164件 + 新設33件 = 197件）が全件green
+  （`flutter test test/combat_v1/playable test/combat_v1/playable_ui`）。
+  既存test（`combat_v1_playable_ui_test_fixtures.dart`の`testSnapshot`
+  へ`submissionHpThreshold`を既定値50付きで追加した以外）は無変更の
+  ままpassする。
+- リポジトリ全体`flutter test`は1814件が全件green
+  （`flutter analyze`はNo issues found）。
+
+### 70.9 Scope / Non-Scope（2A-2）
+
+**Scope**: 70章の`combat_v1_playable_match_direction.dart`（新設
+pure derivation）・`_MatchDirectionPanel`（新設widget）・
+`CombatV1PlayableMatchSnapshot.submissionHpThreshold`（既存
+`finisherHeatThreshold`と同型の新規field）・対応するpure/widget/mobile
+test・本ドキュメント更新。
+
+**Non-Scope（今回変更しない、2章の全項目を再確認済み）**: Combat V1
+ルール変更・HP defeat rule追加・KO rule追加・KOC計算変更・PIN count
+計算変更・Submission条件変更・Finisher条件変更・Shared HEAT rule
+変更・Energy rule変更・Draw/Discard rule変更・Counter rule変更・PIN
+Cards rule変更・LegalAction semantics変更・Core Engine変更・CPU AI
+変更・wrestler/technique data変更・新resource／新meter追加・勝率
+表示・AIによる推奨カード・hidden information利用（CPU hand/Energy/
+Counter推測を含む）。Technique card自体へのSubmission badge追加
+（Playable 2A-3予定）にも着手していない。

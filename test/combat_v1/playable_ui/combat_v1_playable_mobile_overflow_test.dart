@@ -489,4 +489,110 @@ void main() {
       });
     }
   });
+
+  group('Match Direction（Playable 2A-2 追加）', () {
+    for (final width in [320.0, 360.0, 390.0]) {
+      final size = Size(width, 780);
+
+      testWidgets(
+        'Action phase（Match Guidance PIN可能 + Match Direction '
+        '「PINで相手のKOCを削りましょう」併発、latest feedback banner付き）: '
+        '${width.toInt()}px幅でoverflowしない',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final feedback = testActionFeedback(
+              actorPlayerIndex: 0,
+              actionDisplayName: 'テストストライク',
+              damage: 20,
+              hpOwnerPlayerIndex: 1,
+              hpBefore: 100,
+              hpAfter: 80,
+              postureOwnerPlayerIndex: 1,
+              postureBefore: CombatV1WrestlerPosture.stand,
+              postureAfter: CombatV1WrestlerPosture.down,
+              heatBefore: 40,
+              heatAfter: 50,
+            );
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              cpu: testCpuStatus(
+                hp: 100,
+                koc: 9,
+                posture: CombatV1WrestlerPosture.down,
+              ),
+              human: testHumanStatus(
+                hand: [
+                  testTechniqueCard(instanceId: 'h1'),
+                  testCounterCard(instanceId: 'h2'),
+                ],
+              ),
+              legalActions: const [
+                CombatV1TechniqueAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'h1',
+                ),
+                CombatV1PinAction(actorPlayerIndex: 0),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+              latestFeedback: feedback,
+              recentFeedback: [feedback],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+          }, size: size);
+        },
+      );
+
+      testWidgets(
+        '相手KOC0（decisiveKoc、primary+secondaryとも表示）: '
+        '${width.toInt()}px幅でoverflowしない',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              cpu: testCpuStatus(
+                hp: 20,
+                koc: 0,
+                posture: CombatV1WrestlerPosture.stand,
+              ),
+              human: testHumanStatus(
+                hand: [testTechniqueCard(instanceId: 'h1')],
+              ),
+              legalActions: const [
+                CombatV1TechniqueAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'h1',
+                ),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+          }, size: size);
+        },
+      );
+    }
+  });
 }
