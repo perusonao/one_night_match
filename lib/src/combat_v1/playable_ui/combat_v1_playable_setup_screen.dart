@@ -10,6 +10,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../combat_v1_production_match_setup.dart';
 import 'combat_v1_playable_match_screen.dart';
 import 'combat_v1_playable_ui_formatters.dart';
 
@@ -171,36 +172,54 @@ class _WrestlerChoiceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = combatV1PlayableWrestlerDisplayName(wrestlerId);
-    return InkWell(
-      key: Key('combat_v1_playable_wrestler_choice_${wrestlerId}_'
-          '${selected ? "selected" : "unselected"}'),
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        width: 132,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-        decoration: BoxDecoration(
-          color: _cardSurface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected ? _pink : Colors.white24,
-            width: selected ? 2 : 1,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (selected)
-              const Icon(Icons.check_circle, color: _pink, size: 18)
-            else
-              const Icon(Icons.radio_button_unchecked, color: Colors.white38, size: 18),
-            const SizedBox(height: 6),
-            Text(
-              name,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+    // Playable 1C「Wrestler Description」——production data（ENERGY
+    // Pool）から安全に取得できる範囲で、名前だけでは分からない違いを
+    // 1行で示す。新しいbalance説明を捏造しない（既存の公開静的data
+    // そのままの表示に留める）。
+    final energyPool = combatV1ProductionWrestlerRegistry[wrestlerId]!.wrestler.energyPool;
+    final energyLabel = combatV1PlayableEnergyCostLabel(energyPool.amounts);
+    return Semantics(
+      // Playable 1C「Accessibility Semantics」——selectedを明示する。
+      button: true,
+      selected: selected,
+      label: name,
+      child: InkWell(
+        key: Key('combat_v1_playable_wrestler_choice_${wrestlerId}_'
+            '${selected ? "selected" : "unselected"}'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          width: 132,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          decoration: BoxDecoration(
+            color: _cardSurface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? _pink : Colors.white24,
+              width: selected ? 2 : 1,
             ),
-          ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (selected)
+                const Icon(Icons.check_circle, color: _pink, size: 18)
+              else
+                const Icon(Icons.radio_button_unchecked, color: Colors.white38, size: 18),
+              const SizedBox(height: 6),
+              Text(
+                name,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'ENERGY $energyLabel',
+                key: Key('combat_v1_playable_wrestler_energy_$wrestlerId'),
+                style: const TextStyle(fontSize: 10, color: Colors.white54),
+              ),
+            ],
+          ),
         ),
       ),
     );

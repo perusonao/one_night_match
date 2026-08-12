@@ -703,3 +703,305 @@ page error 0件、layout overflow無し）。Match Detailsダイアログ
 `useLocalCanvasKit`を有効化し、Google Fontsのfetchをproxy経由へ
 route替えした。production build成果物・アプリコードには一切影響しない、
 テスト実行環境限定の回避策。）
+
+# Playable 1C — Action Feedback / PIN Readability / Context Help（実装追記）
+
+## 33. Objective
+
+Playable 1A/1B merge後の独立playtestで最も大きかった指摘は、ルールバランス
+ではなく「何が起きたか分からない」（Technique結果・CPU行動・PIN結果が
+追えない、KOC/HEAT/FINISHERの意味が伝わらない、Rest/Stand Upの違いが
+事前に分からない）だった。Playable 1Cは、この“action feedback / UX
+readability”のみを対象にした小規模polishフェーズであり、ゲームルール・
+バランス・Core Engineは一切変更しない。
+
+## 34. Scope
+
+- Human/CPU Technique action後のresult feedback（actor・技名・damage・
+  target HP変化・posture変化・HEAT変化）
+- PIN/SUBMISSION結果のtext feedback（KICK OUT / MATCH OVER、ESCAPED /
+  GIVE UP）
+- Counter成立/decline後の結果feedback
+- Recent action logの高粒度化（技名・damage結果・posture変化）と、
+  「直近1件を大きめbanner・その前数件をcompact list」への整理
+- KOC/HEAT/Rest/Stand Up/Discardの短いcontext help
+- FINISHER使用不能時のHEAT閾値hint
+- wrestler energy pool（production data由来）の1行表示、hand横スクロール
+  cue
+- Setup wrestler選択・Human hand cardへのaccessibility semantics
+  （`selected`/`enabled`）
+- 上記に対応するpure/widget/semantics/integration test、mobile
+  （390×844・320×720）widget test
+
+## 35. Non-Scope
+
+- damage formula・KOC rule・PIN rule・Counter rule・HEAT threshold・
+  FINISHER条件・wrestler/card balance・deck・random/seed戦略・action
+  orderの変更（Core Engine/Production Dataは無変更）
+- PIN 1→2→3 countのstep animation（LATER）
+- tutorial state machine・multi-step onboarding・spotlight overlay
+  （LATER、31章と同じ方針を継承）
+- Balance Dashboard 1B・Phase 12B-2B/2C（着手しない）
+- CPU delayの大幅な変更（既定400msを維持。最大でも600ms程度までの調整の
+  みを許容する方針だったが、今回は400msのまま——17章の推奨レンジ内）
+- Playable 1A Known Minor（REST direct test coverage・winner metadata
+  gate・Human hand list immutability）への着手
+
+## 36. Action Feedback Model
+
+`lib/src/combat_v1/playable/combat_v1_playable_action_feedback.dart`に
+新規追加した、pure presentation-only value object
+`CombatV1PlayableActionFeedback`（と`CombatV1PlayableFeedbackKind`/
+`CombatV1PlayablePinFeedbackOutcome`/
+`CombatV1PlayableSubmissionFeedbackOutcome`）。
+
+- `actorPlayerIndex`/`opponentPlayerIndex`・`actionDisplayName`（技/
+  COUNTER名）・`damage`・`hpOwnerPlayerIndex`/`hpBefore`/`hpAfter`・
+  `postureOwnerPlayerIndex`/`postureBefore`/`postureAfter`・
+  `heatBefore`/`heatAfter`・`kocOwnerPlayerIndex`/`kocBefore`/
+  `kocAfter`・`pinOutcome`/`submissionOutcome`を持つ。該当しない値は
+  すべて`null`のまま（推測でデフォルト値を埋めない）。
+- 文言・banner構成は持たない——`playable_ui/
+  combat_v1_playable_feedback_formatters.dart`のpure formatter
+  （`combatV1PlayableFeedbackTitle`/`combatV1PlayableFeedbackDetailLines`/
+  `combatV1PlayableFeedbackCompactLabel`）が、この値だけからUI文字列を
+  導出する。
+
+### 36.1 どこで構築するか
+
+11章「Where to Build Feedback」の優先順位Aに従い、
+`CombatV1PlayableMatchController._applyAction`（Playable 1A production
+file）を拡張した。各actionの実行直後、既に保持している
+`stateBefore`/`_state`（実行後）という2つの`CombatV1MatchState`を比較
+（before/after diff）し、`CombatV1PlayableActionFeedback`を1件構築して
+`_recentFeedback`（`_recentObservations`と同じ8件保持のbounded
+history）へ追加する。Widget/UI層は、この構築済みのpure valueを読むだけで、
+damage・PIN/SUBMISSION判定を一切再計算しない。
+
+controllerは既にraw `CombatV1MatchState`と`CombatV1CardCatalog`を内部に
+持っている（`_buildHandCard`/`_buildPendingAttackView`と同じ信頼境界）
+ため、この拡張はhidden information境界を新たに広げるものではない
+——feedbackが参照する情報は次のいずれかに限られる:
+
+1. 実際に観測されたbefore/after差分（HP・posture・共有HEAT・KOC）。
+2. 既に宣言・使用済み（＝両者へ公開済み）のTECHNIQUE/COUNTERカードの
+   静的Catalogデータ（`cardId`から解決した`name`等）。
+
+CPU未使用の手札・CPU counter候補・draw order・非公開deck内容はいずれも
+参照しない（46章「No Hidden Info Regression」）。
+
+### 36.2 kind別の構築方法
+
+- `discard`/`endTurn`: 数値deltaを一切持たない（no changeケース）。
+- `standUp`: actor自身のposture before/after。
+- `rest`: actor自身のHP before/after（実際の回復量はここから逆算できる。
+  `restHpRecovery`のようなrules literalはUI/feedbackへ持ち込まない）。
+- `pin`（通常PIN宣言）: 防御側KOC before/after、および
+  `!stateBefore.isOver && stateAfter.isOver && winner==attacker`から
+  `pinOutcome`（`kickOut`/`matchOver`）を導出する。1/2/2.9のような
+  具体的なcount値は一切表示しない（39章参照）。
+- `technique`（宣言のみ）: `counterResponsePending`へ遷移するだけで
+  damage等は未確定のため、`actionDisplayName`（宣言直後の
+  `pendingAttack`から解決した技名）のみを持つ軽量feedback
+  （`techniqueDeclared`）。
+- `counter`: 防御側が使用したCOUNTERの表示名（`playCounter`実行後、
+  防御側discardPileの末尾から逆引き——既に公開されたaction結果の解決
+  であり、hidden information違反にならない）と、無効化された攻撃側
+  TECHNIQUEの表示名（`relatedActionDisplayName`）を持つ。damage等の
+  deltaは持たない（攻撃は完全に無効化されるため）。
+- `declineCounter`（TECHNIQUE成立解決）: `techniqueResolved`。
+  攻撃側/防御側のHP・posture・共有HEATのbefore/afterを保持し、実際に
+  適用されたdamageは`defenderBefore.hp - defenderAfter.hp`から導出する
+  （Technique metadataの宣言damageをそのまま使わない、37章）。同一
+  actionでDIRECT PIN/SUBMISSIONへ自動移行した場合
+  （`docs/combat_rules_v1.md`8・10章）は、[`pinOutcome`]/
+  [`submissionOutcome`]も追加で設定する——判定は、宣言済みTECHNIQUEの
+  静的metadata（`directPin`/`submissionHold`/`finisherType`、公開情報）
+  と、防御側KOCの実測差分・試合終了の有無（PIN/SUBMISSION以外では
+  KOCが変化しないというEngine全体の不変条件）から行う。legality判定・
+  カウント計算の再実装ではなく、Engineが実際に到達したstate遷移を
+  観測しているだけである。
+
+## 37. Do Not Fabricate Deltas（39章と対応）
+
+damage・HP変化・posture変化・HEAT変化・KOC変化はすべて、before/after
+`CombatV1MatchState`の実測差分から導出する。Technique/Counter
+Catalogの宣言値（`damage`・`heatGain`等）は、technique名・属性等の
+表示にのみ使う——「実際に入ったdamage」として扱わない。
+
+## 38. PIN / SUBMISSION Feedback
+
+- 通常PIN宣言・DIRECT PIN自動移行のいずれも、feedback上は同じ
+  `CombatV1PlayablePinFeedbackOutcome`（`kickOut`/`matchOver`）で表現し、
+  banner上は「PIN ATTEMPT」＋結果（`KICK OUT!`／`3 COUNT — MATCH
+  OVER`）を表示する。
+- SUBMISSION（submissionHold技・FINISHER submissionType）は
+  `CombatV1PlayableSubmissionFeedbackOutcome`（`escaped`/`matchOver`）で
+  表現し、「SUBMISSION」＋結果（`ESCAPED`／`GIVE UP — MATCH OVER`）を
+  表示する。
+- Result overlay（matchOver）とのつながり: PIN/SUBMISSIONでの決着は、
+  直前の`latestFeedback`（`PIN ATTEMPT`→`3 COUNT — MATCH OVER`等）と、
+  続くResult overlay（`YOU WIN`/`CPU WIN`＋`combatV1PlayableTerminalCauseLabel`）
+  が同じ決着を指すため、体験として自然に繋がる（53章のwinner display
+  guardは無変更のまま維持）。
+
+## 39. PIN Count Safety
+
+PIN countがstructured data（1/2/2.9のいずれで終わったか）として安全に
+取得できる経路は存在しない——`determinePinCountResult`
+（`combat_v1_pin_rules.dart`）は防御側KOCとrulesから決定論的に計算
+できるが、Playable 1Cではこの値をUI feedbackへ持ち込まないことを意図的
+に選んだ（同じ計算をUI/session層で行うこと自体は技術的に可能だが、
+「1」「2」「2.9」の具体的な数値をユーザーへ見せる要件が無く、将来の
+ルール定数変更で数値表示だけが古くなるリスクを避けるため）。
+表示するのは、before/after/`winnerPlayerIndex`から確実に判定できる
+「KICK OUT（試合continue）」と「3 COUNT — MATCH OVER（試合決着）」の
+2値のみ。防御側KOCのbefore/after実測値（38章の`kocBefore`/`kocAfter`）
+は表示する——これは推測ではなく実測なので安全。
+
+## 40. Recent Action Log / Latest Feedback Banner（UI実装）
+
+`combat_v1_playable_match_screen.dart`の`_ActorAndRecentPanel`を拡張:
+
+- 直近1件（`snapshot.latestFeedback`）を、actor labelの直下に大きめの
+  `_LatestFeedbackBanner`（title＋detail lines）として表示する。次の
+  actionのfeedbackが届くまで表示され続ける（40章「Feedback Display
+  Duration」の推奨方針——CPU delay自体は変更せず、feedback
+  persistenceで可読性を確保する）。
+- その前の直近4件（`snapshot.recentFeedback`）を、compact
+  1行ラベル（`combatV1PlayableFeedbackCompactLabel`）のWrapとして
+  表示する（8件保持全件を必ずしも見せない、画面を長文ログで埋めない
+  方針）。
+- この可変高panel全体を`ConstrainedBox(maxHeight: 132)` +
+  `SingleChildScrollView(physics: NeverScrollableScrollPhysics())`で
+  内部clipし、Human status panel/Primary actions barが常に
+  scroll不要で画面内へ収まる既存レイアウト（`Expanded`＋固定bottom
+  bar）を壊さないようにした——feedback内容量が可変になったことに伴う、
+  今回追加した安全策。
+
+既存の`recentObservations`/`combatV1PlayableObservationLabel`
+（Playable 1B、kindのみのlabel）はそのまま維持している——Playable 1A
+publicAPIとして引き続き有効であり、削除の必要はない。
+
+## 41. CPU Readability
+
+CPU actionもHumanと同一のfeedback構築経路（36章）を通るため、
+technique名・damage・target HP変化・posture変化・HEAT変化が同じ粒度で
+表示される（`actorPlayerIndex`が`CombatV1PlayableMatchController.
+cpuPlayerIndex`になるだけで、構築ロジックは共通）。30章で「CPU側は
+常に非公開のため」kindベースのlabelに留めていた制限は、Playable 1Cで
+意図的に緩和した——ただし対象は常に「既に宣言・使用済みの（＝公開
+された）CPUカード」のみで、CPU未使用手札・counter候補は一切参照しない
+（46章）。
+
+## 42. Context Help（KOC / HEAT / Rest / Stand Up / Discard / Finisher）
+
+- **KOC**: 既存のHP/KOC status panelのTooltip（「PIN /
+  Submissionからの脱出に使用」）をそのまま維持。
+- **HEAT**: `_SharedStatusPanel`を「HEAT 360 / 200」という進捗風表示
+  から、`Shared HEAT {value}` + `Finisher Unlock {threshold}`の
+  別表示へ変更し、閾値到達後は`UNLOCKED`badgeを添える。Tooltipで
+  「HEATは両者共有・蓄積型（減りません）」「閾値は上限ではなく解禁
+  ライン」を明示する。360のような閾値超過値も、progress barではなく
+  数値表示のため自然に見える。
+- **FINISHER**: hand card（`_HandCardTile`）のfinisher cardへ
+  `Requires HEAT {threshold}`を常設表示する。使用不能な場合は、
+  HEAT不足だと安全に判定できる時のみ`Requires HEAT {threshold}
+  (current {sharedHeat})`、それ以外は既存の汎用メッセージ
+  （「現在は使用できません」）に留める——HEAT以外のlegality reasonを
+  UI側で断定しない（25章のFINISHER Feedback指針どおり）。
+- **Rest / Stand Up**: Human DOWN時（`_DownIndicator`）に、それぞれ
+  「立ち上がって、このターンの行動を続ける」「HPを回復してターン
+  終了」という短い説明を追加。回復量はrules literalとしてUI側に
+  持ち込まない（安全に数値取得できないため）。
+- **Discard**: discard prompt直下に「ターン開始時に手札を1枚捨てます」
+  を追加。
+
+いずれもフルtutorial化しない（tutorial state machine・multi-step
+onboarding・spotlight overlayは今回も未実装のまま、35章）。
+
+## 43. Wrestler Description / Hand Scroll Cue
+
+- Setup画面の`_WrestlerChoiceCard`へ、
+  `combatV1ProductionWrestlerRegistry`のwrestler静的データ
+  （`energyPool`）から`ENERGY {attr}{amount} / ...`
+  （既存formatter`combatV1PlayableEnergyCostLabel`を再利用）を1行
+  追加した。新しいbalance説明・archetype名は作らず、既存production
+  dataの数値をそのまま表示するに留めている。
+- Human hand（`_HandRow`）がカード2枚以上の場合、「→
+  横にスクロールできます」の小さなcueを追加した。
+
+## 44. Accessibility Semantics
+
+- Setup wrestler choice card: `Semantics(button: true, selected:
+  <選択状態>, label: <wrestler名>)`。
+- Human hand card（`_HandCardTile`、Counter promptの選択sheetでも共用）:
+  `Semantics(button: true, selected: <選択状態>, enabled: <isUsable>,
+  label: <card表示名>)`。
+
+複雑なfirst-time persistence・tutorial saveは今回のscopeに含めない
+（29章と同じ方針）。
+
+## 45. Hidden Info Regression Guard
+
+36章の通り、feedbackが参照するのは「既に公開されたaction結果」
+（実行済みTECHNIQUE/COUNTERの静的Catalogデータ）と「実測state差分」
+のみ。CPU未使用hand card・CPU counter候補・draw order・非公開deck
+内容はfeedback構築のいずれの分岐でも参照しない——これはPlayable 1A
+snapshot（16章）が元々持っていた保証をそのまま維持している。
+
+## 46. Winner Guard / Architecture Boundary（維持）
+
+53章「Winner Display Guard」（`status != matchOver`ではwinner表示
+禁止）は無変更。Raw `CombatV1MatchState`をWidgetへ渡す経路も追加して
+いない——feedbackは常にcontroller内部でpure valueへ変換してから
+snapshotへ載せる（7・48章のsession/controller boundaryをそのまま
+維持）。
+
+## 47. Mobile Considerations
+
+- feedback banner・finisher hint等、内容量が可変になったpanelが増えた
+  ため、320×720に加えて390×844でもWidget testを追加した
+  （`combat_v1_playable_mobile_overflow_test.dart`「390×844（Playable
+  1C 追加）」group）。
+- `_HandCardTile`内部（finisher HEAT要件hint等の追加行）は
+  `SingleChildScrollView(physics: NeverScrollableScrollPhysics())`で
+  包み、カードの見た目の高さ（`SizedBox(height: 182)`、Playable 1Bの
+  168pxから拡張）を超える内容が万一発生してもRenderFlex overflowに
+  ならないようにした。
+- `_ActorAndRecentPanel`のfeedback表示block自体も40章の通り
+  `ConstrainedBox(maxHeight: 132)`で上限を設け、Human status
+  panel/Primary actions barが常にscroll不要で画面内に収まる既存レイ
+  アウトを維持している。
+
+## 48. Deferred（今回は実装しない）
+
+- PIN 1→2→3のstep animation（LATER、45章「No Full PIN Animation」）。
+- tutorial state machine・multi-step onboarding・skip
+  tutorial・spotlight overlay framework（LATER、30章「No Tutorial
+  System」）。
+- sound（今回無し）。
+- card art / wrestler art（今回無し）。
+
+## 49. Tests（Playable 1C）
+
+- **Pure**（`test/combat_v1/playable/combat_v1_playable_scenario_test.dart`
+  「Playable 1C: Action Feedback」group、実controller経由）: Human/CPU
+  technique resolved feedback（技名・damage・HP変化・posture遷移・
+  HEAT変化）、discard/endTurnのno-changeフィードバック（全delta
+  null）、PIN kickout feedback、PIN match-over feedback。
+- **Widget**
+  （`test/combat_v1/playable_ui/combat_v1_playable_feedback_widget_test.dart`）:
+  Human/CPU technique feedback banner、feedback persistence、PIN
+  kickout/match-overメッセージ、KOC/HEAT context help、HEAT
+  閾値超過表示、FINISHER HEAT要件hint、Rest/Stand Up/Discard
+  説明、hand scroll cue、Setup/Match両方のaccessibility semantics
+  （selected/enabled）。
+- **Mobile**
+  （`combat_v1_playable_mobile_overflow_test.dart`）: 320×720に加え、
+  390×844でSetup/Match（feedback banner+finisher hint込み）/Counter/
+  Resultのoverflow無しを確認。
+- 既存Playable 1A/1B test（80件）はいずれも無変更のまま
+  green——HEAT表示format変更に伴い`combat_v1_playable_match_screen_test.dart`
+  の該当assertionのみ更新した（`HEAT 40 / 200` →
+  `Shared HEAT 40`/`Finisher Unlock 200`）。

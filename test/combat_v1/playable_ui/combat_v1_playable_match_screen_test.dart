@@ -76,7 +76,8 @@ void main() {
       expect(find.text('あかり'), findsOneWidget);
       expect(find.text('れいな'), findsOneWidget);
       expect(find.textContaining('HP 130 / 150'), findsOneWidget);
-      expect(find.textContaining('HEAT 40 / 200'), findsOneWidget);
+      expect(find.textContaining('Shared HEAT 40'), findsOneWidget);
+      expect(find.textContaining('Finisher Unlock 200'), findsOneWidget);
       expect(find.byKey(const Key('combat_v1_playable_human_hand')), findsOneWidget);
       expect(find.text('あなたのターン'), findsOneWidget);
       expect(find.byKey(const Key('combat_v1_playable_action_end_turn')), findsOneWidget);

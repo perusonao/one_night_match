@@ -12,6 +12,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_match_lifecycle.dart';
+import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_action_feedback.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_config.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_controller.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart';
@@ -472,5 +474,316 @@ void main() {
       expect(result.isAccepted, isTrue);
       expect(controller.snapshot.revision, actionSnap.revision + 1);
     });
+  });
+
+  group('Playable 1C: Action Feedback（real controller、before/after diff）', () {
+    test(
+      'Human technique resolved feedback: 技名・damage・HP変化・posture遷移・'
+      'HEAT変化が実際のbefore/after差分から導出される',
+      () {
+        CombatV1PlayableActionFeedback? found;
+
+        outer:
+        for (final wrestlerId in _wrestlerIds) {
+          for (var seed = 0; seed < 30; seed++) {
+            final controller = CombatV1PlayableMatchController(
+              _config(humanWrestlerId: wrestlerId, engineSeed: seed),
+            );
+            var iterations = 0;
+            while (controller.status ==
+                    CombatV1PlayableControllerStatus.active &&
+                iterations < 80) {
+              final snap = controller.snapshot;
+              if (!snap.isHumanInputRequired) {
+                final advance = controller.advanceCpuUntilHumanInput();
+                final latest = controller.snapshot.latestFeedback;
+                if (latest != null &&
+                    latest.kind ==
+                        CombatV1PlayableFeedbackKind.techniqueResolved &&
+                    latest.actorPlayerIndex ==
+                        CombatV1PlayableMatchController.humanPlayerIndex &&
+                    latest.postureBefore != latest.postureAfter) {
+                  found = latest;
+                  break;
+                }
+                if (advance.actionsExecuted == 0) break;
+                continue;
+              }
+              iterations += 1;
+
+              final usableCard = snap.human.hand.where((c) => c.isUsable);
+              final downCard = usableCard.firstWhere(
+                (c) =>
+                    c.technique != null &&
+                    c.technique!.resultOpponentState ==
+                        CombatV1WrestlerPosture.down &&
+                    !c.technique!.directPin,
+                orElse: () => usableCard.isNotEmpty
+                    ? usableCard.first
+                    : snap.human.hand.first,
+              );
+              final downAction = snap.legalActions
+                  .whereType<CombatV1TechniqueAction>()
+                  .where((a) => a.cardInstanceId == downCard.instanceId)
+                  .toList();
+              final action = downAction.isNotEmpty
+                  ? downAction.first
+                  : chooseFirstLegalHumanAction(snap);
+              final result = controller.submitHumanAction(
+                expectedRevision: snap.revision,
+                action: action,
+              );
+              if (!result.isAccepted) break;
+            }
+            if (found != null) break outer;
+          }
+        }
+
+        expect(
+          found,
+          isNotNull,
+          reason: '探索範囲内でHuman technique成立（posture変化あり）が見つかりませんでした',
+        );
+        final feedback = found!;
+        expect(feedback.actionDisplayName, isNotNull);
+        expect(feedback.actionDisplayName, isNotEmpty);
+        expect(feedback.damage, isNotNull);
+        expect(feedback.damage, greaterThanOrEqualTo(0));
+        expect(
+          feedback.hpOwnerPlayerIndex,
+          CombatV1PlayableMatchController.cpuPlayerIndex,
+        );
+        expect(feedback.hpBefore, isNotNull);
+        expect(feedback.hpAfter, isNotNull);
+        expect(feedback.hpAfter!, lessThanOrEqualTo(feedback.hpBefore!));
+        expect(feedback.postureBefore, CombatV1WrestlerPosture.stand);
+        expect(feedback.postureAfter, CombatV1WrestlerPosture.down);
+        expect(feedback.heatBefore, isNotNull);
+        expect(feedback.heatAfter, isNotNull);
+        expect(feedback.heatAfter!, greaterThanOrEqualTo(feedback.heatBefore!));
+      },
+    );
+
+    test(
+      'CPU technique resolved feedback: actor==CPU、技名・damage・HEAT変化が'
+      'Human decline時に導出される',
+      () {
+        final controller = _findScenario(_isCpuAttackHumanDefend);
+        expect(
+          controller,
+          isNotNull,
+          reason: '探索範囲内でCPU attacker→Human defenderの局面が見つかりませんでした',
+        );
+        final snap = controller!.snapshot;
+        final decline = snap.legalActions
+            .whereType<CombatV1DeclineCounterAction>()
+            .first;
+
+        final result = controller.submitHumanAction(
+          expectedRevision: snap.revision,
+          action: decline,
+        );
+        expect(result.isAccepted, isTrue);
+
+        final feedback = controller.snapshot.latestFeedback;
+        expect(feedback, isNotNull);
+        expect(feedback!.kind, CombatV1PlayableFeedbackKind.techniqueResolved);
+        expect(
+          feedback.actorPlayerIndex,
+          CombatV1PlayableMatchController.cpuPlayerIndex,
+        );
+        expect(feedback.actionDisplayName, isNotNull);
+        expect(feedback.actionDisplayName, isNotEmpty);
+        expect(
+          feedback.hpOwnerPlayerIndex,
+          CombatV1PlayableMatchController.humanPlayerIndex,
+        );
+        expect(feedback.hpBefore, isNotNull);
+        expect(feedback.hpAfter, isNotNull);
+        expect(feedback.hpAfter!, lessThanOrEqualTo(feedback.hpBefore!));
+        expect(feedback.heatBefore, isNotNull);
+        expect(feedback.heatAfter, isNotNull);
+        expect(feedback.heatAfter!, greaterThanOrEqualTo(feedback.heatBefore!));
+      },
+    );
+
+    test('discard/endTurnのfeedbackはhp/posture/heat/kocのdeltaが全てnull（no change）', () {
+      final controller = CombatV1PlayableMatchController(_config());
+      final discardSnap = controller.snapshot;
+      final discardResult = controller.submitHumanAction(
+        expectedRevision: discardSnap.revision,
+        action: discardSnap.legalActions
+            .whereType<CombatV1DiscardAction>()
+            .first,
+      );
+      expect(discardResult.isAccepted, isTrue);
+
+      final discardFeedback = controller.snapshot.latestFeedback;
+      expect(discardFeedback, isNotNull);
+      expect(discardFeedback!.kind, CombatV1PlayableFeedbackKind.discard);
+      expect(discardFeedback.hpBefore, isNull);
+      expect(discardFeedback.hpAfter, isNull);
+      expect(discardFeedback.postureBefore, isNull);
+      expect(discardFeedback.postureAfter, isNull);
+      expect(discardFeedback.heatBefore, isNull);
+      expect(discardFeedback.heatAfter, isNull);
+      expect(discardFeedback.kocBefore, isNull);
+      expect(discardFeedback.kocAfter, isNull);
+      expect(discardFeedback.pinOutcome, isNull);
+      expect(discardFeedback.submissionOutcome, isNull);
+
+      final actionSnap = controller.snapshot;
+      final endTurnResult = controller.submitHumanAction(
+        expectedRevision: actionSnap.revision,
+        action: actionSnap.legalActions
+            .whereType<CombatV1EndTurnAction>()
+            .first,
+      );
+      expect(endTurnResult.isAccepted, isTrue);
+      final endTurnFeedback = controller.snapshot.latestFeedback;
+      expect(endTurnFeedback, isNotNull);
+      expect(endTurnFeedback!.kind, CombatV1PlayableFeedbackKind.endTurn);
+      expect(endTurnFeedback.hpBefore, isNull);
+      expect(endTurnFeedback.heatBefore, isNull);
+      expect(endTurnFeedback.kocBefore, isNull);
+    });
+
+    test('PIN kickout feedback: KOC delta・pinOutcome==kickOutが導出される', () {
+      CombatV1PlayableActionFeedback? found;
+
+      outer:
+      for (final wrestlerId in _wrestlerIds) {
+        for (var seed = 0; seed < 20; seed++) {
+          final controller = CombatV1PlayableMatchController(
+            _config(humanWrestlerId: wrestlerId, engineSeed: seed),
+          );
+          var iterations = 0;
+          while (controller.status ==
+                  CombatV1PlayableControllerStatus.active &&
+              iterations < 60) {
+            final snap = controller.snapshot;
+            if (!snap.isHumanInputRequired) {
+              final advance = controller.advanceCpuUntilHumanInput();
+              if (advance.actionsExecuted == 0) break;
+              continue;
+            }
+            iterations += 1;
+
+            final pinActions = snap.legalActions
+                .whereType<CombatV1PinAction>()
+                .toList();
+            if (pinActions.isNotEmpty) {
+              final pinResult = controller.submitHumanAction(
+                expectedRevision: snap.revision,
+                action: pinActions.first,
+              );
+              if (pinResult.isAccepted) {
+                found = controller.snapshot.latestFeedback;
+              }
+              break;
+            }
+
+            final usableCard = snap.human.hand.where((c) => c.isUsable);
+            final downCard = usableCard.firstWhere(
+              (c) =>
+                  c.technique != null &&
+                  c.technique!.resultOpponentState ==
+                      CombatV1WrestlerPosture.down &&
+                  !c.technique!.directPin,
+              orElse: () => usableCard.isNotEmpty
+                  ? usableCard.first
+                  : snap.human.hand.first,
+            );
+            final downAction = snap.legalActions
+                .whereType<CombatV1TechniqueAction>()
+                .where((a) => a.cardInstanceId == downCard.instanceId)
+                .toList();
+            final action = downAction.isNotEmpty
+                ? downAction.first
+                : chooseFirstLegalHumanAction(snap);
+            final result = controller.submitHumanAction(
+              expectedRevision: snap.revision,
+              action: action,
+            );
+            if (!result.isAccepted) break;
+          }
+          if (found != null) break outer;
+        }
+      }
+
+      expect(found, isNotNull, reason: '探索範囲内でPINが合法になる局面が見つかりませんでした');
+      final feedback = found!;
+      expect(feedback.kind, CombatV1PlayableFeedbackKind.pinResolved);
+      expect(
+        feedback.actorPlayerIndex,
+        CombatV1PlayableMatchController.humanPlayerIndex,
+      );
+      expect(
+        feedback.kocOwnerPlayerIndex,
+        CombatV1PlayableMatchController.cpuPlayerIndex,
+      );
+      expect(feedback.kocBefore, isNotNull);
+      expect(feedback.kocAfter, isNotNull);
+      expect(feedback.pinOutcome, isNotNull);
+      // 初期KOC（10）はまだ十分高いため、序盤の最初のPINは通常kickOutになる。
+      expect(feedback.pinOutcome, CombatV1PlayablePinFeedbackOutcome.kickOut);
+      expect(feedback.kocAfter!, lessThan(feedback.kocBefore!));
+    });
+
+    test(
+      'PIN match-over feedback: PIN決着した試合の最終feedbackで'
+      'pinOutcome==matchOverが得られる（controller独自のcount推測なし）',
+      () {
+        CombatV1PlayableMatchController? found;
+
+        outer:
+        for (final wrestlerId in _wrestlerIds) {
+          for (var seed = 0; seed < 60; seed++) {
+            final controller = CombatV1PlayableMatchController(
+              _config(
+                humanWrestlerId: wrestlerId,
+                cpuWrestlerId: wrestlerId,
+                engineSeed: seed,
+                maxActions: 400,
+              ),
+            );
+            var iterations = 0;
+            while (controller.status ==
+                    CombatV1PlayableControllerStatus.active &&
+                iterations < 400) {
+              iterations += 1;
+              final snap = controller.snapshot;
+              if (snap.isHumanInputRequired) {
+                final action = chooseFirstLegalHumanAction(snap);
+                final result = controller.submitHumanAction(
+                  expectedRevision: snap.revision,
+                  action: action,
+                );
+                if (!result.isAccepted) break;
+              } else {
+                final advance = controller.advanceCpuUntilHumanInput();
+                if (advance.actionsExecuted == 0) break;
+              }
+            }
+
+            final result = controller.result;
+            if (result != null &&
+                result.status == CombatV1PlayableControllerStatus.matchOver &&
+                (result.terminalCause ==
+                        CombatV1MatchTerminalCause.normalPin ||
+                    result.terminalCause ==
+                        CombatV1MatchTerminalCause.directPin)) {
+              found = controller;
+              break outer;
+            }
+          }
+        }
+
+        expect(found, isNotNull, reason: '探索範囲内でPIN決着の試合が見つかりませんでした');
+        final feedback = found!.snapshot.latestFeedback;
+        expect(feedback, isNotNull);
+        expect(feedback!.pinOutcome, CombatV1PlayablePinFeedbackOutcome.matchOver);
+      },
+    );
   });
 }

@@ -12,6 +12,7 @@ import '../combat_v1_counter.dart';
 import '../combat_v1_enums.dart';
 import '../combat_v1_legal_action.dart';
 import '../combat_v1_technique.dart';
+import 'combat_v1_playable_action_feedback.dart';
 
 /// [CombatV1PlayableMatchController]の定常状態
 /// （docs/design/combat_v1_playable_match_ui.md 17章）。
@@ -222,6 +223,8 @@ class CombatV1PlayableMatchSnapshot {
     required this.pendingAttack,
     required this.recentObservations,
     this.diagnosticMessage,
+    this.latestFeedback,
+    this.recentFeedback = const [],
   });
 
   /// controller独自のmonotonic revision（stale action検出専用、
@@ -262,4 +265,13 @@ class CombatV1PlayableMatchSnapshot {
 
   /// `status`が`error`/`invariantViolation`の場合のみ非null。
   final String? diagnosticMessage;
+
+  /// 直近1件のaction feedback（Playable 1C「Action Feedback Model」）。
+  /// 試合開始直後（まだ1件もactionが実行されていない）場合のみ`null`。
+  final CombatV1PlayableActionFeedback? latestFeedback;
+
+  /// 直近のaction feedback（bounded、[recentObservations]と同じ保持件数。
+  /// O(totalActions)保持にしない）。末尾が最新（[latestFeedback]と同じ
+  /// 値）。
+  final List<CombatV1PlayableActionFeedback> recentFeedback;
 }
