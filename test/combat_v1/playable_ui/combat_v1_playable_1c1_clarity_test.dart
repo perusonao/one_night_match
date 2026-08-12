@@ -146,6 +146,52 @@ void main() {
       expect(find.textContaining('投2 / 4'), findsOneWidget);
     });
 
+    testWidgets(
+      'Cost比較表示は＊(wild)使用可能量を分母へ含める'
+      '（GitHub Codex App Finding、PR #22）',
+      (tester) async {
+        // Cost 投2に対し、具体的な投の使用可能量は1のみだが＊が1あるため、
+        // 技は実際には使用可能（isUsable==true、TECHNIQUE支払いは常に
+        // wild補完を許可する——docs/combat_rules_v1.md 5.1章）。
+        // 分母が具体属性のみ（1）だと支払い不可能に見えてしまうため、
+        // ＊込みの2（1+1）が表示されなければならない。
+        final snapshot = testSnapshot(
+          phase: CombatV1MatchPhase.action,
+          human: testHumanStatus(
+            hand: [
+              testTechniqueCard(
+                instanceId: 'h1',
+                technique: testTechniqueRequiresStandResultsDown,
+                isUsable: true,
+              ),
+            ],
+            energyPool: const CombatV1EnergyPool({
+              CombatV1EnergyAttribute.throwing: 1,
+              CombatV1EnergyAttribute.wild: 1,
+            }),
+            availableEnergy: const {
+              CombatV1EnergyAttribute.throwing: 1,
+              CombatV1EnergyAttribute.wild: 1,
+            },
+          ),
+          legalActions: const [
+            CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
+            CombatV1EndTurnAction(actorPlayerIndex: 0),
+          ],
+        );
+        await tester.pumpWidget(
+          _wrap(_screen(FakePlayableMatchSession(snapshot))),
+        );
+        await tester.pump();
+
+        // 具体属性のみ（誤った表示）ではなく、＊込みの数値が表示される。
+        expect(find.textContaining('投2 / 2'), findsOneWidget);
+        expect(find.textContaining('投2 / 1'), findsNothing);
+        // isUsable==trueのままなので「Energy不足」表示は出ない。
+        expect(find.textContaining('Energy不足'), findsNothing);
+      },
+    );
+
     testWidgets('ENERGY不足で使用不可な場合、Core Engineと同じ支払いロジックで安全に理由を表示する', (
       tester,
     ) async {

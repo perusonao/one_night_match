@@ -1139,6 +1139,28 @@ legality判定は行わない——2つの公開数値（技のCost・現在の�
 そのまま呼び出しているだけであり、UI側で新しい判定ロジックを実装
 していない。
 
+### 55.1 GitHub Codex App Finding修正（wild ENERGYを比較表示へ含める）
+
+PR #22作成後、GitHub連携のCodex App（`chatgpt-codex-connector`、オフ
+ラインで実施したexact-HEAD独立レビューとは別の自動レビュー統合）が
+`combatV1PlayableEnergyComparisonLabel`（54章「Card Cost
+Comparison」）に対してP2 findingを投稿した: 技のTECHNIQUE支払いは
+常に＊(wild)補完を許可する（docs/combat_rules_v1.md 5.1章）ため、
+具体属性だけが不足していても＊で支払えれば`isUsable == true`のまま
+だが、比較表示の分母（使用可能量）が具体属性の保有量のみだったため、
+実際は使用可能な技でも`打2 / 1`のように支払い不可能に見える表示に
+なりうる、という指摘だった。
+
+分母へ、その属性の具体的な使用可能量に加えて＊(wild)の使用可能量を
+加算するよう修正した。[cost]は`CombatV1EnergyCost.isValid`により
+＊自体をコストとして持たない（5.1章）ため、同じwild量を複数属性へ
+加算しても二重計上にはならない——Production Catalogの現行技は
+いずれも単一属性costのみのため、この表示は実際の支払い可否と常に
+一致する。新しいlegality判定の追加ではなく、既に公開されている
+＊保有量（`availableEnergy[wild]`）を比較表示へ含めるだけの変更
+であり、`_energyWouldFail`（55章、`resolveEnergyPayment`を再利用する
+安全診断）の判定結果とも整合する。
+
 ## 56. Counter Semantics（新規help、既存sheetは維持）
 
 - 通常Action中（`counterResponsePending`ではない）のCounter cardは

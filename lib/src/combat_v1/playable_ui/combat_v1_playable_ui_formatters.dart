@@ -162,15 +162,29 @@ String combatV1PlayableEnergyCostLabel(
 /// 属性ごとに並べた比較表示（例: `打2 / 3`＝cost2・使用可能3）。[cost]に
 /// 含まれる属性のみ表示する。UI側のlegality判定ではなく、単に2つの公開
 /// 数値を並べるだけの表示。
+///
+/// Codex Review Finding修正（PR #22）: 分母（使用可能量）には、その属性の
+/// 具体的な保有量に加えて＊(wild)の使用可能量も加算する——TECHNIQUE支払いは
+/// 常にwild補完を許可する（docs/combat_rules_v1.md 5.1章）ため、wildを
+/// 含めないと、実際は支払い可能（`isUsable == true`）な技でも
+/// 具体属性だけが不足して見える表示（例: `打2 / 1`）になり、支払い
+/// 不可能だと誤解させてしまう。[cost]は`CombatV1EnergyCost.isValid`に
+/// より複数属性にまたがる場合でもwildをコスト側に持たないため（5.1章）、
+/// ここで各属性へ同じwild量を加算しても二重計上にはならない
+/// （Production Catalogの現行技は単一属性costのみのため、複数属性が
+/// 同時に不足するケースでも実際の支払い可否とこの表示は一致する）。
+/// 新しいlegality判定の追加ではなく、既に公開されているwild保有量を
+/// 比較表示へ含めるだけの変更。
 String combatV1PlayableEnergyComparisonLabel(
   CombatV1EnergyCost cost,
   Map<CombatV1EnergyAttribute, int> availableEnergy,
 ) {
+  final wildAvailable = availableEnergy[CombatV1EnergyAttribute.wild] ?? 0;
   final parts = <String>[
     for (final entry in cost.amounts.entries)
       if (entry.value > 0)
         '${entry.key.displayLabel}${entry.value} / '
-            '${availableEnergy[entry.key] ?? 0}',
+            '${(availableEnergy[entry.key] ?? 0) + (entry.key == CombatV1EnergyAttribute.wild ? 0 : wildAvailable)}',
   ];
   return parts.isEmpty ? '-' : parts.join(' ・ ');
 }
