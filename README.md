@@ -35,8 +35,23 @@ Technique Matchの開発状況・次に何をすべきかは、以下のドキ�
 
 ## Web deploy
 
-- **GitHub Pages（本番）**: `./deploy_web.sh` — `flutter build web --release`
-  してから `gh-pages` ブランチへpushする。
+- **GitHub Pages（本番・自動）**: `main` へのmerge/pushをトリガーに
+  GitHub Actions workflow
+  [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml)
+  （workflow名: **Deploy to GitHub Pages**）が自動実行される。
+  `flutter pub get` → `flutter analyze` → `flutter test` →
+  `flutter build web --release --base-href /one_night_match/ --no-web-resources-cdn`
+  を通し、検証が全て成功した場合のみ `build/web` をGitHub Pages公式actions
+  （`configure-pages` / `upload-pages-artifact` / `deploy-pages`）でdeployする。
+  `workflow_dispatch` にも対応しており、Actionsタブから手動実行も可能。
+  - 本番URL: https://perusonao.github.io/one_night_match/
+  - deployが失敗した場合はGitHub Actionsの実行ログを確認する。
+  - **前提**: リポジトリの `Settings → Pages → Build and deployment → Source`
+    が `GitHub Actions` になっている必要がある（`gh-pages` ブランチ配信の
+    レガシー設定のままだとこのworkflowのdeployは反映されない）。
+  - `./deploy_web.sh`（`flutter build web --release` してから `gh-pages`
+    ブランチへ直接push）は、緊急時やActions外での手動デプロイ手段として
+    引き続き利用できる。ただし通常運用ではActions経由の自動デプロイを使う。
 - **Firebase Hosting（Preview、Playtest Analytics検証用）**: このリポジトリ管理下の
   `firebase.json` / `.firebaserc`（プロジェクト: `one-night-match-preview`、
   Hostingのみ。Firestore/Authentication/Security Rulesは未設定＝Phase B以降）
