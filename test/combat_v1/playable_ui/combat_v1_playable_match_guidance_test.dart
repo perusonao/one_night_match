@@ -97,7 +97,7 @@ void main() {
   });
 
   group('Counter response', () {
-    test('使用できるCounterがある場合は効果を補足する', () {
+    test('Counter可能: primaryにCounter選択、secondaryに無効化説明がある', () {
       final snapshot = testSnapshot(
         phase: CombatV1MatchPhase.counterResponsePending,
         isHumanInputRequired: true,
@@ -109,11 +109,16 @@ void main() {
       );
       final guidance = _derive(snapshot)!;
       expect(guidance.kind, CombatV1PlayableGuidanceKind.counterResponse);
-      expect(guidance.primary, contains('Counter'));
+      expect(guidance.primary, contains('Counterするか'));
       expect(guidance.secondary, isNotNull);
+      expect(guidance.secondary, contains('無効化'));
     });
 
-    test('使用できるCounterが無い場合は効果を断定しない', () {
+    // Review Findings Fix（Major）——legalActionsがDecline Counterのみ
+    // （＝Counter actionが1件も無い）場合に、primaryが存在しない
+    // Counterという選択肢を提示していた回帰を防ぐguard。
+    test('Counter不能: legalActionsがDecline Counterのみの場合、'
+        '存在しないCounter選択を案内しない', () {
       final snapshot = testSnapshot(
         phase: CombatV1MatchPhase.counterResponsePending,
         isHumanInputRequired: true,
@@ -123,6 +128,13 @@ void main() {
         ],
       );
       final guidance = _derive(snapshot)!;
+      // legalActionsに実在する唯一の進行（技を受ける）を正しく説明する。
+      expect(guidance.primary, contains('受け'));
+      // 「Counterするか」のような、Counterが選べるかのような表現を
+      // 一切含めない。
+      expect(guidance.primary, isNot(contains('Counterするか')));
+      expect(guidance.primary, isNot(contains('Counterを選択')));
+      // Counter可能性を示すsecondaryも出さない。
       expect(guidance.secondary, isNull);
     });
   });
@@ -203,19 +215,33 @@ void main() {
       expect(guidance.secondary, isNot(contains('PINできます')));
     });
 
-    test('Shared HEATが閾値以上 — Finisher解禁のcontextを示す', () {
+    // Review Findings Fix（Minor）——HEAT条件が満たされたことのみを
+    // 述べ、「双方がFinisherを使用できる」とは断定しない。Human側の
+    // legalActionsがEnd Turnのみ（Finisher actionが非legal）でも、
+    // HEAT条件のcontext自体は表示してよい——「使用できる」という
+    // 断定さえしなければLegalAction SSOTと矛盾しないため。
+    test('Shared HEATが閾値以上 — HEAT条件到達のcontextを示す（使用可能とは断定しない）', () {
       final snapshot = testSnapshot(
         phase: CombatV1MatchPhase.action,
         isHumanInputRequired: true,
         sharedHeat: 200,
         finisherHeatThreshold: 200,
+        // FinisherのLegalActionは存在しない——HEAT以外の条件
+        // （card所持等）が満たされていない前提でも、文言が「使用
+        // できる」と誤読される表現を含めてはいけない。
         legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: _human)],
       );
       final guidance = _derive(snapshot)!;
-      expect(guidance.secondary, contains('FINISHER解禁'));
+      expect(guidance.secondary, contains('FINISHER HEAT到達'));
+      expect(guidance.secondary, contains('HEAT条件'));
+      // 「使用できます」「使用可能」等、Finisherが実際にlegalである
+      // かのような断定を含めない。
+      expect(guidance.secondary, isNot(contains('使用でき')));
+      expect(guidance.secondary, isNot(contains('使用可能')));
+      expect(guidance.secondary, isNot(contains('使用条件を満たせます')));
     });
 
-    test('Shared HEATが閾値未満では解禁contextを出さない', () {
+    test('Shared HEATが閾値未満ではHEAT到達contextを出さない', () {
       final snapshot = testSnapshot(
         phase: CombatV1MatchPhase.action,
         isHumanInputRequired: true,
@@ -224,7 +250,7 @@ void main() {
         legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: _human)],
       );
       final guidance = _derive(snapshot)!;
-      expect(guidance.secondary, isNot(contains('FINISHER解禁')));
+      expect(guidance.secondary, isNot(contains('FINISHER HEAT到達')));
     });
 
     test('相手DOWN（PIN非合法）— ルール上安全な表現に留める', () {
@@ -239,8 +265,8 @@ void main() {
       expect(guidance.secondary, isNot(contains('PINできます')));
     });
 
-    test('PIN可能 > Finisher解禁 > 相手DOWN の優先順位', () {
-      // PINも合法、HEATも解禁済み、相手もDOWN——全て同時成立してもPINの
+    test('PIN可能 > Shared HEAT到達 > 相手DOWN の優先順位', () {
+      // PINも合法、HEATも閾値到達済み、相手もDOWN——全て同時成立してもPINの
       // hintだけが返る。
       final snapshot = testSnapshot(
         phase: CombatV1MatchPhase.action,

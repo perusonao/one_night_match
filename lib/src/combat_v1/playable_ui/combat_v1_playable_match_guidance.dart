@@ -121,6 +121,13 @@ CombatV1PlayableMatchGuidance _discardGuidance(
 /// COUNTER応答待ち（design doc「68章 Counter response」）。Counter
 /// outcome詳細・pending攻撃のHEAT・Direct PIN/Submission/Finisher
 /// type・unusable Counter理由は今回のscope外（Playable 2A-4予定）。
+///
+/// Review Findings Fix（Major）: `legalActions`（SSOT）にCounter
+/// actionが実在しない場合（＝`CombatV1DeclineCounterAction`のみが
+/// legal）、primary自体も「技を受ける」一本の進行のみを案内する——
+/// 存在しないCounterという選択肢を「Counterするか」のように提示しては
+/// いけない（design doc「68章 Action guidanceは実際に存在する
+/// LegalActionだけを案内する」原則）。
 CombatV1PlayableMatchGuidance _counterResponseGuidance(
   CombatV1PlayableMatchSnapshot snapshot,
   int humanPlayerIndex,
@@ -130,13 +137,16 @@ CombatV1PlayableMatchGuidance _counterResponseGuidance(
         action.kind == CombatV1LegalActionKind.counter &&
         action.actorPlayerIndex == humanPlayerIndex,
   );
-  return CombatV1PlayableMatchGuidance(
+  if (!hasUsableCounter) {
+    return const CombatV1PlayableMatchGuidance(
+      kind: CombatV1PlayableGuidanceKind.counterResponse,
+      primary: '使用できるCounterがありません。技を受けます',
+    );
+  }
+  return const CombatV1PlayableMatchGuidance(
     kind: CombatV1PlayableGuidanceKind.counterResponse,
     primary: 'Counterするか、技を受けるか選択してください',
-    // legalActions（SSOT）にCounter actionが実在する場合のみ、ルール上
-    // 確実な効果を補足する。使用できるCounterが無い場合に「無効化
-    // できます」と案内すると誤解させるため出さない。
-    secondary: hasUsableCounter ? 'Counterすると攻撃を無効化できます' : null,
+    secondary: 'Counterすると攻撃を無効化できます',
   );
 }
 
@@ -211,8 +221,14 @@ String? _actionPhaseContextHint(
   // 5. Shared HEAT near / at Finisher unlock — 閾値はsnapshot自身の
   // `finisherHeatThreshold`を参照する（UI側にmagic number 200を複製
   // しない、design doc「68章 Shared HEAT」）。
+  //
+  // Review Findings Fix（Minor）: 満たされているのはFinisherのHEAT
+  // 条件のみ——Finisher card所持・Energy・posture・その他LegalAction
+  // 条件、CPU側のhidden hand内容までは断定できないため、「双方が
+  // 使用条件を満たせます」（Finisherを実際に使用できるかのように
+  // 誤読されうる）ではなく、HEAT条件についてのみ述べる。
   if (snapshot.sharedHeat >= snapshot.finisherHeatThreshold) {
-    return 'FINISHER解禁 — Shared HEATなので双方が使用条件を満たせます';
+    return 'FINISHER HEAT到達 — Shared HEATなので双方がHEAT条件を満たしています';
   }
 
   // 6. Opponent DOWN significance — PINがlegalでない場合のみ、ルール上

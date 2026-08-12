@@ -71,6 +71,24 @@ void main() {
     );
   });
 
+  // Review Findings Fix（Major）——widget levelでもCounter不能状態を
+  // 1ケース検証する。
+  testWidgets('Counter不能: primaryが存在しないCounter選択を案内しない', (tester) async {
+    final snapshot = testSnapshot(
+      phase: CombatV1MatchPhase.counterResponsePending,
+      isHumanInputRequired: true,
+      pendingAttack: testPendingAttack(),
+      legalActions: const [CombatV1DeclineCounterAction(actorPlayerIndex: 0)],
+    );
+    await tester.pumpWidget(_wrap(_screen(FakePlayableMatchSession(snapshot))));
+    await tester.pumpAndSettle();
+
+    final primaryText = tester.widget<Text>(find.byKey(_primaryKey)).data!;
+    expect(primaryText, isNot(contains('Counterするか')));
+    expect(primaryText, contains('受け'));
+    expect(find.byKey(_secondaryKey), findsNothing);
+  });
+
   testWidgets('CPU処理中はguidance widget自体を表示しない（human操作を促さない）', (tester) async {
     // design doc「84章 CPU loop widget tests」と同じ方針——CPU turn
     // snapshotから開始し、`cpuScript`の最後をHuman turnにして、CPU

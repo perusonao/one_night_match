@@ -1469,17 +1469,22 @@ formatting helpers」層——Flutter widget treeを構築しない、副作用
 2. Discard phase → 強制discardの案内（+ DOWNなら「次の行動前に
    Stand Up／Restが必要」、そうでなければ「残したカードは攻撃や
    Counterに使用できます」）。
-3. Counter response（`counterResponsePending`） → 「Counterするか、
-   技を受けるか選択してください」（+ legalActionsにCounterが実在
-   する場合のみ「無効化できます」を補足）。
+3. Counter response（`counterResponsePending`） → legalActionsに
+   Counter actionが実在する場合のみ「Counterするか、技を受けるか
+   選択してください」（+「無効化できます」を補足）。実在しない場合
+   （`CombatV1DeclineCounterAction`のみがlegal）は「使用できる
+   Counterがありません。技を受けます」——存在しない選択肢を
+   提示しない（Review Findings Fix、68.6章）。
 4. DOWN decision（`action`かつHuman DOWN） → Stand Up／Restの意味。
 5. Action phase（`action`かつHuman STAND） → primaryはlegalActionsに
    実在するkindのみ列挙。secondaryはcontext hintを以下の順で1件のみ
-   選ぶ: (a) PIN opportunity → (b) Shared HEAT Finisher unlock →
+   選ぶ: (a) PIN opportunity → (b) Shared HEAT threshold到達 →
    (c) Opponent DOWN significance（PINが非legalの場合のみ） →
    (d) continued Technique／Energy（このターン中に既にTechniqueを
    使用済み、かつ現在も合法な場合のみ——「1ターン1Technique」の誤解を
-   防ぐ。毎ターン表示しないよう、未使用ターンでは出さない）。
+   防ぐ。毎ターン表示しないよう、未使用ターンでは出さない）。(b)の
+   文言はHEAT条件についてのみ述べ、Finisherを実際に使用できるとは
+   断定しない（Review Findings Fix、68.6章）。
 
 ### 68.5 Tests（Playable 2A-1）
 
@@ -1514,3 +1519,28 @@ formatting helpers」層——Flutter widget treeを構築しない、副作用
   「HPを回復してターン終了」と一字一句一致させない）へ調整した——
   既存test自体は無変更。
 - 合計1780件がgreen（既存1744件 + 新設36件）。
+
+## 69. Review Findings Fix（Codex独立レビュー、Major 1件・Minor 1件）
+
+review target: `ce7dfbcbb2844e4d017f59b54a4793d723e3e8e9`。
+
+- **Major — Counter不能時にも存在しないCounter選択を案内**:
+  `_counterResponseGuidance`が、`legalActions`に
+  `CombatV1CounterAction`が1件も無い（＝`CombatV1DeclineCounterAction`
+  のみがlegal）場合でも、primaryが「Counterするか、技を受けるか
+  選択してください」のまま変わらず、実際には存在しないCounterという
+  選択肢を提示していた。Fix: `hasUsableCounter`（既存判定、SSOTは
+  `snapshot.legalActions`のまま変更なし）でprimary自体を分岐させ、
+  Counter不能時は「使用できるCounterがありません。技を受けます」の
+  みを返す（secondaryも付けない）。
+- **Minor — Shared HEAT文言がFinisher全体の使用条件を満たしたように
+  読める**: 「FINISHER解禁 — Shared HEATなので双方が使用条件を
+  満たせます」は、Finisher card所持・Energy・posture等の他条件や
+  CPU側のhidden handまで満たしているかのように誤読されうる。Fix:
+  「FINISHER HEAT到達 — Shared HEATなので双方がHEAT条件を満たして
+  います」へ変更し、HEAT条件についてのみ述べる（Finisherが実際に
+  legalかどうかは断定しない）。
+
+いずれもCombat rule・LegalAction semantics・Guidance derivationの
+pure architecture（Snapshot → derivation → view model → Widget）は
+無変更。修正はderivation関数内の文言分岐のみ。
