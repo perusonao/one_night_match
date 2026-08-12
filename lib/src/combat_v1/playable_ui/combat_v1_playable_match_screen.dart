@@ -660,6 +660,7 @@ class _ActorAndRecentPanel extends StatelessWidget {
 /// persistenceで解決する方針）。
 class _LatestFeedbackBanner extends StatelessWidget {
   const _LatestFeedbackBanner({
+    super.key,
     required this.feedback,
     required this.humanPlayerIndex,
   });
@@ -1595,10 +1596,29 @@ class _ResultOverlay extends StatelessWidget {
         : winnerIndex == CombatV1PlayableMatchController.humanPlayerIndex
         ? 'YOU WIN'
         : 'CPU WIN';
+    // Final Merge Gate Major fix「Terminal PIN / Submission Feedback
+    // Visibility」——PIN/SUBMISSIONで決着した瞬間、同じsnapshotで
+    // status==matchOverとなりResult overlayが全画面を覆うため、
+    // `_ActorAndRecentPanel`側のbannerは（同じ土台Column上に残っては
+    // いるが）overlayの下に完全に隠れて見えなくなる。決着させた
+    // action自体のfeedback（PIN ATTEMPT→3 COUNT—MATCH OVER等）は
+    // Playable 1Cの主目的そのものなので、Result overlayの中でも
+    // 必ず見えるようにする——新しいPIN/SUBMISSION判定ロジックは
+    // 追加せず、既存`snapshot.latestFeedback`（唯一のsource of
+    // truth）をそのまま同じ`_LatestFeedbackBanner`で再表示するだけ。
+    final terminalFeedback = snapshot.latestFeedback;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (terminalFeedback != null) ...[
+          _LatestFeedbackBanner(
+            key: const Key('combat_v1_playable_result_terminal_feedback'),
+            feedback: terminalFeedback,
+            humanPlayerIndex: CombatV1PlayableMatchController.humanPlayerIndex,
+          ),
+          const SizedBox(height: 16),
+        ],
         Text(
           title,
           key: const Key('combat_v1_playable_result_title'),

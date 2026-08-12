@@ -138,11 +138,31 @@ void main() {
 
   testWidgets('Result overlay: 320px幅でoverflowしない', (tester) async {
     await _withNarrowViewport(tester, () async {
+      // Final Merge Gate Major fix: Result overlay内にterminal
+      // feedback（技名・damage・HP/posture/HEAT変化・PIN/SUBMISSION
+      // outcome）が増えたため、最も内容量が多い構成でoverflowを確認する。
+      final terminalFeedback = testActionFeedback(
+        actionDisplayName: 'テストフィニッシャー・ドロップキック合体技',
+        damage: 60,
+        hpOwnerPlayerIndex: 1,
+        hpBefore: 80,
+        hpAfter: 0,
+        postureOwnerPlayerIndex: 1,
+        postureBefore: CombatV1WrestlerPosture.stand,
+        postureAfter: CombatV1WrestlerPosture.down,
+        heatBefore: 180,
+        heatAfter: 220,
+        kocOwnerPlayerIndex: 1,
+        kocBefore: 0,
+        kocAfter: 0,
+        pinOutcome: CombatV1PlayablePinFeedbackOutcome.matchOver,
+      );
       final snapshot = testSnapshot(
         status: CombatV1PlayableControllerStatus.matchOver,
         isHumanInputRequired: false,
         currentActorPlayerIndex: null,
         legalActions: const [],
+        latestFeedback: terminalFeedback,
       );
       final session = FakePlayableMatchSession(
         snapshot,
@@ -269,11 +289,31 @@ void main() {
 
     testWidgets('Result overlay: 390×844でoverflowしない', (tester) async {
       await _withNarrowViewport(tester, () async {
+        // Final Merge Gate Major fix: Result overlay内にterminal
+        // feedback（技名・damage・HP/posture/HEAT変化・PIN/SUBMISSION
+        // outcome）が増えたため、最も内容量が多い構成でoverflowを確認する。
+        final terminalFeedback = testActionFeedback(
+          actionDisplayName: 'テストフィニッシャー・ドロップキック合体技',
+          damage: 60,
+          hpOwnerPlayerIndex: 1,
+          hpBefore: 80,
+          hpAfter: 0,
+          postureOwnerPlayerIndex: 1,
+          postureBefore: CombatV1WrestlerPosture.stand,
+          postureAfter: CombatV1WrestlerPosture.down,
+          heatBefore: 180,
+          heatAfter: 220,
+          kocOwnerPlayerIndex: 1,
+          kocBefore: 0,
+          kocAfter: 0,
+          pinOutcome: CombatV1PlayablePinFeedbackOutcome.matchOver,
+        );
         final snapshot = testSnapshot(
           status: CombatV1PlayableControllerStatus.matchOver,
           isHumanInputRequired: false,
           currentActorPlayerIndex: null,
           legalActions: const [],
+          latestFeedback: terminalFeedback,
         );
         final session = FakePlayableMatchSession(
           snapshot,

@@ -12,7 +12,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_match_lifecycle.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_action_feedback.dart';
+import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_controller.dart';
+import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart';
 import 'package:one_night_match/src/combat_v1/playable_ui/combat_v1_playable_match_screen.dart';
 import 'package:one_night_match/src/combat_v1/playable_ui/combat_v1_playable_setup_screen.dart';
 
@@ -170,9 +173,19 @@ void main() {
       expect(find.textContaining('PIN ATTEMPT'), findsOneWidget);
       expect(find.textContaining('KICK OUT'), findsOneWidget);
       expect(find.textContaining('MATCH OVER'), findsNothing);
+      // Kick outはterminalではないため、Result overlayは出ない
+      // （Final Merge Gate Major fixがnon-terminal PINを壊していないことの
+      // regression確認）。
+      expect(
+        find.byKey(const Key('combat_v1_playable_result_overlay')),
+        findsNothing,
+      );
     });
 
-    testWidgets('PIN match-overメッセージを表示する（推測countなし）', (tester) async {
+    testWidgets('PIN match-overメッセージを表示する（推測countなし・Result overlayの下に'
+        '隠れず、overlay自身のcontentとして見える——Final Merge Gate Major fix）', (
+      tester,
+    ) async {
       final feedback = testActionFeedback(
         kind: CombatV1PlayableFeedbackKind.pinResolved,
         actorPlayerIndex: 0,
@@ -182,9 +195,25 @@ void main() {
         kocAfter: 0,
         pinOutcome: CombatV1PlayablePinFeedbackOutcome.matchOver,
       );
+      // PIN/SUBMISSIONで決着すると同じsnapshotでstatus==matchOverと
+      // なりResult overlayが全画面を覆う（production path）。
+      // statusをactiveのままにするとResult overlay自体が出現せず、
+      // 「overlayの下に隠れる」不具合を検出できないため、statusも
+      // terminal状態に揃える。
       final snapshot = testSnapshot(
+        status: CombatV1PlayableControllerStatus.matchOver,
+        isHumanInputRequired: false,
+        currentActorPlayerIndex: null,
         legalActions: const [],
         latestFeedback: feedback,
+      );
+      final session = FakePlayableMatchSession(
+        snapshot,
+        result: testResult(
+          status: CombatV1PlayableControllerStatus.matchOver,
+          terminalCause: CombatV1MatchTerminalCause.normalPin,
+          winnerPlayerIndex: CombatV1PlayableMatchController.humanPlayerIndex,
+        ),
       );
       await tester.pumpWidget(
         _wrap(
@@ -192,19 +221,171 @@ void main() {
             humanWrestlerId: 'akari',
             cpuWrestlerId: 'reina',
             cpuDelay: Duration.zero,
-            sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+            sessionFactory: (_) => session,
           ),
         ),
       );
       await tester.pump();
 
-      expect(find.textContaining('PIN ATTEMPT'), findsOneWidget);
-      expect(find.textContaining('3 COUNT'), findsOneWidget);
-      expect(find.textContaining('MATCH OVER'), findsOneWidget);
+      final overlay = find.byKey(
+        const Key('combat_v1_playable_result_overlay'),
+      );
+      expect(overlay, findsOneWidget);
+
+      // terminal feedbackが、hidden layerのsiblingとしてではなく
+      // Result overlay自身のcontent（子孫）としてrenderされていること。
+      final terminalFeedback = find.descendant(
+        of: overlay,
+        matching: find.byKey(
+          const Key('combat_v1_playable_result_terminal_feedback'),
+        ),
+      );
+      expect(terminalFeedback, findsOneWidget);
+      expect(
+        find.descendant(
+          of: terminalFeedback,
+          matching: find.textContaining('PIN ATTEMPT'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: terminalFeedback,
+          matching: find.textContaining('3 COUNT'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: terminalFeedback,
+          matching: find.textContaining('MATCH OVER'),
+        ),
+        findsOneWidget,
+      );
       // 「1」「2」「2.9」のようなカウント数値は一切表示しない。
-      expect(find.textContaining('1 COUNT'), findsNothing);
-      expect(find.textContaining('2 COUNT'), findsNothing);
-      expect(find.textContaining('2.9'), findsNothing);
+      expect(
+        find.descendant(
+          of: terminalFeedback,
+          matching: find.textContaining('1 COUNT'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: terminalFeedback,
+          matching: find.textContaining('2 COUNT'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: terminalFeedback,
+          matching: find.textContaining('2.9'),
+        ),
+        findsNothing,
+      );
+
+      // terminal feedbackと同じoverlay内で、winner/terminal causeも
+      // 同時にvisibleであること（53章 Winner Display Guardと整合）。
+      expect(
+        find.descendant(of: overlay, matching: find.text('YOU WIN')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: overlay,
+          matching: find.byKey(const Key('combat_v1_playable_result_cause')),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('Submission match-overメッセージがResult overlay自身のcontentとして'
+        '見える（Final Merge Gate Major fix）', (tester) async {
+      final feedback = testActionFeedback(
+        kind: CombatV1PlayableFeedbackKind.techniqueResolved,
+        actorPlayerIndex: 0,
+        actionDisplayName: 'テスト関節技',
+        damage: 10,
+        hpOwnerPlayerIndex: 1,
+        hpBefore: 40,
+        hpAfter: 30,
+        heatBefore: 100,
+        heatAfter: 110,
+        submissionOutcome: CombatV1PlayableSubmissionFeedbackOutcome.matchOver,
+      );
+      final snapshot = testSnapshot(
+        status: CombatV1PlayableControllerStatus.matchOver,
+        isHumanInputRequired: false,
+        currentActorPlayerIndex: null,
+        legalActions: const [],
+        latestFeedback: feedback,
+      );
+      final session = FakePlayableMatchSession(
+        snapshot,
+        result: testResult(
+          status: CombatV1PlayableControllerStatus.matchOver,
+          terminalCause: CombatV1MatchTerminalCause.submission,
+          winnerPlayerIndex: CombatV1PlayableMatchController.humanPlayerIndex,
+        ),
+      );
+      await tester.pumpWidget(
+        _wrap(
+          CombatV1PlayableMatchScreen(
+            humanWrestlerId: 'akari',
+            cpuWrestlerId: 'reina',
+            cpuDelay: Duration.zero,
+            sessionFactory: (_) => session,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final overlay = find.byKey(
+        const Key('combat_v1_playable_result_overlay'),
+      );
+      expect(overlay, findsOneWidget);
+
+      final terminalFeedback = find.descendant(
+        of: overlay,
+        matching: find.byKey(
+          const Key('combat_v1_playable_result_terminal_feedback'),
+        ),
+      );
+      expect(terminalFeedback, findsOneWidget);
+      expect(
+        find.descendant(
+          of: terminalFeedback,
+          matching: find.textContaining('SUBMISSION'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: terminalFeedback,
+          matching: find.textContaining('GIVE UP'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: terminalFeedback,
+          matching: find.textContaining('MATCH OVER'),
+        ),
+        findsOneWidget,
+      );
+
+      expect(
+        find.descendant(of: overlay, matching: find.text('YOU WIN')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: overlay,
+          matching: find.byKey(const Key('combat_v1_playable_result_cause')),
+        ),
+        findsOneWidget,
+      );
     });
   });
 
