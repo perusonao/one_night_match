@@ -479,5 +479,41 @@ void main() {
       expect(find.text('PIN Cards'), findsWidgets);
       expect(find.text('KOC'), findsWidgets);
     });
+
+    testWidgets(
+      '用語ヘルプのKOC説明は「必要KOCを支払えない」ことを決着条件として説明する'
+      '（Codex Review Major Finding、KOC==0ではない）',
+      (tester) async {
+        final snapshot = testSnapshot(
+          legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: 0)],
+        );
+        await tester.pumpWidget(
+          _wrap(_screen(FakePlayableMatchSession(snapshot))),
+        );
+        await tester.pump();
+
+        await tester.tap(
+          find.byKey(const Key('combat_v1_playable_rules_help_button')),
+        );
+        await tester.pumpAndSettle();
+
+        // 決着条件は「必要なKOCを支払えないこと」——PINのkickout
+        // progressionでは要求costが段階ごとに変わりうる（例: remaining
+        // KOC=2・required KOC=3でも3カウントになりうる）ため、KOC==0を
+        // 決着条件だと誤解させる表現であってはならない。
+        expect(
+          find.textContaining('必要なKOCを支払えないと'),
+          findsOneWidget,
+        );
+        // PIN（3カウント）・SUBMISSION（GIVE UP）双方に共通する説明で
+        // あること。
+        expect(find.textContaining('3カウント'), findsWidgets);
+        expect(find.textContaining('GIVE UP'), findsWidgets);
+
+        // 誤った「残量ゼロで決着」を意味する表現（旧文言）が存在しない
+        // ことを回帰的に確認する。
+        expect(find.textContaining('尽きると'), findsNothing);
+      },
+    );
   });
 }

@@ -270,8 +270,8 @@ class _CombatV1PlayableMatchScreenState
                 term: 'KOC',
                 body:
                     'PINのKICK OUTやSUBMISSIONからの脱出に使うリソースです'
-                    '（開始時10、防御側のみ消費）。尽きると3カウント／'
-                    'GIVE UPで試合が決着します。',
+                    '（開始時10、防御側のみ消費）。必要なKOCを支払えないと、'
+                    '3カウント／GIVE UPで試合が決着します。',
               ),
             ],
           ),

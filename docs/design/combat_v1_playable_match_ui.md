@@ -1264,6 +1264,29 @@ Human/CPU status panelのKOC Tooltipを「PINのKICK OUTやSubmissionから
 （`combat_v1_playable_feedback_formatters.dart`、無変更）がそのまま
 表示し続ける。
 
+### 62.1 Codex Review Major Finding修正（決着条件の表現）
+
+初版の用語ヘルプ（63章）KOC説明は「尽きると3カウント／GIVE UPで試合
+が決着します」という文言だった。Codex独立レビューで、Core
+semantics上の決着条件は「KOC残量が0になること」ではなく「その時点で
+要求されるKOC costを支払えないこと」である指摘を受けた
+（`combat_v1_pin_rules.dart`の`determinePinCountResult`——
+`CombatV1RulesConfig`の閾値（既定: 1カウント3／2カウント2／
+2.9カウント1）のいずれも支払えない場合に`null`を返し、
+`CombatV1Engine._resolvePin`がPIN決着とする。SUBMISSIONも同様に
+`rules.submissionEscapeKocCost`を支払えない場合にGIVE UP、
+`_resolveSubmission`参照）。既定値では最終的な閾値がKOC1のため
+「残り0で決着」という結果になりやすいが、これはrules
+configの既定値に起因する結果であり、決着条件そのものの定義ではない
+——ruleを変更すれば「remaining KOC=2・required KOC=3」のように
+0以外でも支払い不能になり得る。
+
+用語ヘルプの文言を「必要なKOCを支払えないと、3カウント／GIVE UPで
+試合が決着します」へ修正した（`combat_v1_playable_match_screen.dart`）。
+PIN／SUBMISSION双方に共通する説明として成立し、UI側で新しい
+legality/決着判定ロジックを実装していない（既存の`_resolvePin`/
+`_resolveSubmission`が確定させた結果を説明する文言のみの変更）。
+
 ## 63. Compact Rule Help（新設ダイアログ、tutorialではない）
 
 AppBarへ新しいIconButton（key:
