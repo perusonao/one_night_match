@@ -30,7 +30,7 @@ import '../playable/combat_v1_playable_match_snapshot.dart';
 /// （強調色など）専用の識別子として扱う——優先順位判定ロジック自体は
 /// このenumではなく[combatV1PlayableDeriveMatchDirection]へ集約する。
 enum CombatV1PlayableMatchDirectionKind {
-  /// 相手KOCが0——次のPIN／SUBMISSIONが決着のチャンス（最優先）。
+  /// 相手KOCが0——次に成立するPIN／SUBMISSIONで決着する状態（最優先）。
   decisiveKoc,
 
   /// legalActionsにPINが実在する（今すぐPINを狙える）。
@@ -96,22 +96,33 @@ CombatV1PlayableMatchDirection? combatV1PlayableDeriveMatchDirection(
 
   // 1. 相手KOCが0——`determinePinCountResult`/`determineSubmissionOutcome`
   // （`combat_v1_pin_rules.dart`/`combat_v1_submission_rules.dart`）は
-  // KOC 0では支払い可能なcostが1件も無いため、次のPIN／SUBMISSIONは
-  // 必ず決着（3カウント／GIVE UP）になる。ここだけは「0」というKOCの
-  // 構造的な下限（負のKOCが存在しない）を根拠にした判定であり、rules
-  // configのcost値（1/2/3）を複製するものではない。
+  // KOC 0では支払い可能なcostが1件も無いため、次に成立したPIN／
+  // SUBMISSIONは決着（3カウント／GIVE UP）になる。ここだけは「0」という
+  // KOCの構造的な下限（負のKOCが存在しない）を根拠にした判定であり、
+  // rules configのcost値（1/2/3）を複製するものではない。「必ず決着する」
+  // と読める言い切りは避け、PIN／SUBMISSIONが実際に成立することを前提と
+  // した表現にとどめる（Review Findings Fix、8章「Documentation
+  // Wording」）——KOC 0はあくまで「PIN／SUBMISSIONが成立した場合に防御側
+  // が耐えられない」状態であり、それ自体が試合を終わらせるわけではない。
   if (snapshot.cpu.koc <= 0) {
     return const CombatV1PlayableMatchDirection(
       kind: CombatV1PlayableMatchDirectionKind.decisiveKoc,
       primary: '相手はKOCを使い果たしています',
-      secondary: '次のPINまたはSubmissionが決着のチャンスです',
+      secondary: '次に成立したPINまたはSubmissionで決着します',
     );
   }
 
   // 2. PIN opportunity——legalActionsにPINが実在する場合のみ断定する
-  // （design doc「70章 LegalAction SSOT」）。Guidanceの「PIN可能」
-  // （現在選べる操作）と重複させないため、ここでは「PINが何につながる
-  // か」（KOCを削り決着へ近づく）という目的を述べる。
+  // （design doc「70章 LegalAction SSOT」）。
+  //
+  // Review Findings Fix（Minor）: 当初の文言「PINで相手のKOCを削り
+  // ましょう」/「KOCが尽きると、PINやSubmissionで決着します」は、
+  // Guidanceの「PIN可能 — 相手のKOCを削り、決着を狙えます」とほぼ同じ
+  // 内容を繰り返していた。Guidanceは「今できること」（PINが選べる、
+  // というlegal action SSOTに基づく事実）を担当するので、Directionは
+  // 同じ事実を言い換えて反復せず、「KOCというresourceが何を意味するか
+  // ／勝利までの位置づけ」（なぜPINが勝ち筋になるのか）だけを述べる。
+  // PINのlegalityそのものはlegalActions（SSOT）のまま再計算しない。
   if (snapshot.isHumanInputRequired &&
       snapshot.phase == CombatV1MatchPhase.action &&
       snapshot.legalActions.any(
@@ -121,8 +132,8 @@ CombatV1PlayableMatchDirection? combatV1PlayableDeriveMatchDirection(
       )) {
     return const CombatV1PlayableMatchDirection(
       kind: CombatV1PlayableMatchDirectionKind.pinOpportunity,
-      primary: 'PINで相手のKOCを削りましょう',
-      secondary: 'KOCが尽きると、PINやSubmissionで決着します',
+      primary: '相手のKOCを削るチャンスです',
+      secondary: 'KOCが尽きると、成立したPINやSubmissionで決着します',
     );
   }
 

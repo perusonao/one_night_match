@@ -1635,7 +1635,7 @@ formatting helpers」層）。`combat_v1_playable_match_guidance.dart`
 自体は無変更——14章の方針どおり、責務が異なるため既存fileを肥大化
 させず新規fileへ分離した。
 
-- **LegalAction SSOT**: 「PINで相手のKOCを削りましょう」という
+- **LegalAction SSOT**: 「相手のKOCを削るチャンスです」という
   pinOpportunity routeは、`snapshot.legalActions`にPIN actionが実在
   する場合のみ選ばれる。独自の合法性判定は一切追加しない。
 - **Magic number複製の回避**: Finisher解禁閾値は既存
@@ -1644,10 +1644,10 @@ formatting helpers」層）。`combat_v1_playable_match_guidance.dart`
   `submissionHpThreshold`として追加した
   （`CombatV1RulesConfig.submissionHpThreshold`を`finisherHeatThreshold`
   と全く同じ方法で公開するだけ——Core rule・値そのものは無変更。71章）。
-  PINのKOC cost表（1/2/2.9＝KOC3/2/1）は公開しない——「KOC 0＝次の
-  PIN/Submissionが必ず決着」という、KOCの構造的下限（負のKOCが存在
-  しない）だけを根拠にした判定にとどめ、rules configのcost値を複製
-  しない（70.4章decisiveKoc）。
+  PINのKOC cost表（1/2/2.9＝KOC3/2/1）は公開しない——「KOC 0＝次に
+  成立したPIN/Submissionで決着」という、KOCの構造的下限（負のKOCが
+  存在しない）だけを根拠にした判定にとどめ、rules configのcost値を
+  複製しない（70.4章decisiveKoc）。
 - **Hidden information safety**: 参照するのは`CombatV1PlayableMatchSnapshot`
   の公開fieldのみ（`cpu.hp`・`cpu.koc`・`cpu.posture`・
   `human.posture`・`sharedHeat`・`finisherHeatThreshold`・
@@ -1663,12 +1663,17 @@ formatting helpers」層）。`combat_v1_playable_match_guidance.dart`
 
 1. `status != active` → `null`（Result overlayが既に決着を説明する
    ため重複表示しない、Guidanceの優先順位1と同じ考え方）。
-2. **decisiveKoc**（相手KOC ≤ 0） → 次のPIN／Submissionが必ず決着
-   になる、最も強い信号（70.2章参照）。
+2. **decisiveKoc**（相手KOC ≤ 0） → 次に成立したPIN／Submissionで
+   決着する、最も強い信号（70.2章参照）。「必ず決着になる」という
+   言い切りは避け、PIN／Submissionが実際に成立することを前提とした
+   表現にとどめる（Review Findings Fix、70.10章）。
 3. **pinOpportunity**（`legalActions`にPINが実在＝Human手番かつ
-   action phase） → 「PINで相手のKOCを削りましょう」——2A-1の
-   「PIN可能」（現在選べる操作）と重複させず、「PINが何につながるか」
-   （KOC消費 → 決着）を述べる。
+   action phase） → 「相手のKOCを削るチャンスです」——2A-1の「PIN可能
+   — 相手のKOCを削り、決着を狙えます」（現在選べる操作）とほぼ同じ
+   内容を繰り返さないよう、Review Findings Fixで文言を調整した
+   （70.10章）。Guidanceが「今できること」を担当するため、Directionは
+   同じ事実を反復せず「KOCが何を意味するか／なぜPINが勝ち筋になるか」
+   だけを述べる。
 4. **submissionRoute**（相手HPが`submissionHpThreshold`以下・0より
    大） → Submissionが視野に入っていることを示す。KOCによる
    ESCAPE可能性があることも明示し、「HPが下がれば即決着」という
@@ -1703,7 +1708,7 @@ fallbackする（「PINが合法」と誤って断定しない）。
   の入口」「HP0＝即敗北ではない」という文脈でのみ扱う。
 - **KOC = finish resistance**: 「KOC = life」という単純化はしない
   （8章の禁止事項）。Direction側もKOCの多寡を連続的な優劣として
-  語らず、「0＝次のPIN/Submissionが必ず決着」という構造的に安全な
+  語らず、「0＝次に成立したPIN/Submissionで決着」という構造的に安全な
   境界のみを特別扱いする——KOCが1でも10でも、0でない限り同じ
   neutral/他のroute扱いとなる（KOC 1〜9の間で異なる文言を出し
   分けない）。
@@ -1730,9 +1735,12 @@ Core rule・`CombatV1RulesConfig`の値・計算ロジックは一切変更し�
 
 `_MatchDirectionPanel`（`combat_v1_playable_match_screen.dart`）は
 `_ActorAndRecentPanel`内、Match Guidance・latest feedback banner・
-recent action logと同じ高さ上限つきscroll領域
-（`ConstrainedBox(maxHeight: 132)` +
-`SingleChildScrollView(NeverScrollableScrollPhysics)`）の中へ置いた。
+recent action logと同じ高さ上限つき領域（`ConstrainedBox(maxHeight:
+132)`）の中へ置いた。この領域は実際にscroll可能——初版実装では
+`SingleChildScrollView(physics: NeverScrollableScrollPhysics())`により
+scrollそのものを無効化しており、これがReview Findings Fix（70.10章）で
+Major findingとして指摘・修正された。以下は初版実装時点の配置判断の
+記録。
 
 当初、Shared status panelの直下に独立panelとして常時固定領域へ追加
 したところ、320px幅の既存mobile overflow test（Playable 2A-1で追加
@@ -1741,9 +1749,12 @@ recent action logと同じ高さ上限つきscroll領域
 （非scroll）領域の合計高さが増え、`Expanded`（Technique area）へ
 渡る残り高さが不足したため。17章「guidanceがTechnique areaを過度に
 押し下げない」の直接的な回帰であり、Match Guidanceと同じ「内容量が
-可変な情報は高さ上限つきscroll領域内に置く」という既存の安全弁
-（40章）へDirectionも合流させることで解消した——Guidance自体の位置・
-挙動は無変更のまま。
+可変な情報は高さ上限つき領域内に置く」という既存の安全弁（40章）へ
+Directionも合流させることで解消した——Guidance自体の位置・挙動は
+無変更のまま。ただしこの時点では領域内のscrollを`NeverScrollableScrollPhysics`
+のまま無効化していたため、「overflowは起きないが、高さ上限を超えた
+情報にユーザーが到達できない」という別の問題を残していた（70.10章で
+修正）。
 
 役割は明確に分離しつつ、視覚的にも一目で区別できるよう、Direction
 のprimaryは`_teal`（新規accent color）、Guidanceは既存white70/38の
@@ -1752,21 +1763,24 @@ action（下部bottom bar）より視覚的に強くならないようにして�
 （17章）。
 
 320／360／390pxの3幅で、Match Guidance（PIN可能）とMatch Direction
-（PINで相手のKOCを削りましょう）が同時に最長表示される代表構成、
+（相手のKOCを削るチャンスです）が同時に最長表示される代表構成、
 および相手KOC0（decisiveKoc、primary+secondaryとも表示）の代表構成を
 追加検証した（70.8章）。
 
-### 70.8 Tests（Playable 2A-2）
+### 70.8 Tests（Playable 2A-2、Review Findings Fix反映後の最終状態）
 
 - **Pure derivation logic**
   （`test/combat_v1/playable_ui/combat_v1_playable_match_direction_test.dart`、
-  新設、22 case）: match start/neutral・opponent HP
+  新設、32 case）: match start/neutral・opponent HP
   high/low/zero・opponent KOC high/low/zero・opponent STAND/DOWN・PIN
   legal/illegal・HEAT below/at閾値・Human DOWN・Counter response
   phase・CPU turn（Guidanceと異なりnullにしない）・match over
   （null）・priority ordering（KOC0＞PIN legal＞HP低下＞相手DOWNの
   優先順位、同時成立時の絞り込み含む）・hidden information regression
-  guard。
+  guard・Submission/HEAT threshold境界値（＝／＋1・－1）・priority
+  collision（KOC0+PIN legal・KOC0+Human DOWN・HP0+KOC0・submission
+  threshold+opponent DOWN・CPU turn+KOC0・Counter response+脆弱な
+  相手、71章「Review Findings Fix」9章対応）。
 - **Widget**
   （`test/combat_v1/playable_ui/combat_v1_playable_match_direction_widget_test.dart`、
   新設、5 case）: 通常action phase・相手が脆弱な状態（HP低下→
@@ -1775,22 +1789,25 @@ action（下部bottom bar）より視覚的に強くならないようにして�
   表示しない。
 - **Mobile overflow**
   （既存`combat_v1_playable_mobile_overflow_test.dart`へ追加、新設
-  group「Match Direction（Playable 2A-2 追加）」、320／360／390pxの
-  3幅×2 caseで計6 case）: Match Guidance PIN可能 + Match Direction
-  pinOpportunity + latest feedback banner併発、および相手KOC0
-  （decisiveKoc、secondaryまで表示）の代表構成を検証。既存「Match
-  Guidance（Playable 2A-1 追加）」groupも本Phaseの構造変更
-  （70.7章）後に再検証し、全ケースgreenのままであることを確認した
+  group「Match Direction（Playable 2A-2 追加）」320／360／390pxの
+  3幅×2 caseで計6 case + 「Match Direction Reachability（Review
+  Findings Fix、Major）」1 case、計7 case）: Match Guidance PIN可能 +
+  Match Direction pinOpportunity + latest feedback banner併発、相手
+  KOC0（decisiveKoc、secondaryまで表示）の代表構成、および高さ上限を
+  超える内容量でも実際にscrollして末尾のrecent logへ到達できることを
+  widget rectangleのintersectionで検証（71章「Review Findings Fix」）。
+  既存「Match Guidance（Playable 2A-1 追加）」groupも本Phaseの構造
+  変更（70.7章）後に再検証し、全ケースgreenのままであることを確認した
   （このgroup追加時点で一度`RenderFlex overflowed`回帰を検出し、
   70.7章の対応で解消している）。
 - `test/combat_v1/playable/`・`test/combat_v1/playable_ui/`配下
-  （既存164件 + 新設33件 = 197件）が全件green
+  （既存164件 + 新設44件 = 208件）が全件green
   （`flutter test test/combat_v1/playable test/combat_v1/playable_ui`）。
   既存test（`combat_v1_playable_ui_test_fixtures.dart`の`testSnapshot`
   へ`submissionHpThreshold`を既定値50付きで追加した以外）は無変更の
   ままpassする。
-- リポジトリ全体`flutter test`は1814件が全件green
-  （`flutter analyze`はNo issues found）。
+- リポジトリ全体`flutter test`・`flutter analyze`の最終結果は71章
+  「Validation」に記載する。
 
 ### 70.9 Scope / Non-Scope（2A-2）
 
@@ -1809,3 +1826,209 @@ Cards rule変更・LegalAction semantics変更・Core Engine変更・CPU AI
 表示・AIによる推奨カード・hidden information利用（CPU hand/Energy/
 Counter推測を含む）。Technique card自体へのSubmission badge追加
 （Playable 2A-3予定）にも着手していない。
+
+## 71. Review Findings Fix（Playable 2A-2独立レビュー、Major 1件・Minor 2件）
+
+review target: `6eec4a06629bdb9654599d3dd2ea5e237d1c8c52`。CHANGES
+REQUIREDの独立レビュー結果を受け、以下のみを修正した——Playable 2A-3
+には着手せず、Combat Core／rule／LegalAction semantics／CPU AI／
+wrestler・technique data／dependenciesはいずれも無変更のまま。
+
+### 71.1 Major — Reachable Information（Match Direction / feedback / recent logが到達不能）
+
+**問題**: `_ActorAndRecentPanel`内の高さ上限つき領域
+（`ConstrainedBox(maxHeight: 132)`）が、`SingleChildScrollView(physics:
+const NeverScrollableScrollPhysics())`によりscrollそのものを無効化して
+いた。Match Direction（primary/secondary）・latest feedback banner・
+recent action logの合計content量が132pxを超えても`RenderFlex
+overflowed`は起きないが（70.7章の初版判断どおり）、ユーザーは
+末尾の情報へ一切到達できなかった——「overflow exceptionが無い」ことと
+「表示された情報に実際に到達できる」ことは別問題であるという指摘
+どおりの回帰だった。
+
+**Fix**: `_ActorAndRecentPanel`を`StatelessWidget`から`StatefulWidget`
+へ変更し、Stateが保持する`ScrollController`を`SingleChildScrollView`
+（`physics`指定を削除——既定の可動physicsに戻す）と`Scrollbar`
+（`thumbVisibility: true`）へ接続した。
+
+- **旧構造**: `ConstrainedBox(maxHeight: 132)` →
+  `SingleChildScrollView(physics: NeverScrollableScrollPhysics())` →
+  `Column([...])`。
+- **新構造**: `ConstrainedBox(maxHeight: 132)` → `Scrollbar(controller:
+  _scrollController, thumbVisibility: true)` →
+  `SingleChildScrollView(key: ..., controller: _scrollController)` →
+  `Column([...])`。
+- **なぜ情報へ到達可能になったか**: 高さ上限（132px）自体は変更して
+  いない（4章「Do Not Solve by Simply Increasing Height」——固定値を
+  増やすだけの対応は根本解決にならないため採用しなかった）。
+  かわりに、上限を超えた分の内容を実際にscrollできるようにすること
+  で、content量（長文・feedback・4件のrecent log・320px幅）が
+  どれだけ増えても、末尾まで到達可能な構造にした。`_scrollController`
+  はWidgetのState（`_ActorAndRecentPanelState`）が生存する間保持され、
+  毎buildごとに再生成されないため、`Scrollbar(thumbVisibility: true)`
+  が要求する「ScrollPositionにattachされたScrollController」を安定
+  して満たす。
+- **outer scroll / Technique areaとの競合確認**: この領域は画面上、
+  Technique area（`Expanded` + 独立した`SingleChildScrollView`）とは
+  Columnの兄弟要素であり、親子関係にない（`_ActorAndRecentPanel`は
+  `Expanded`の外側）。そのため、この領域を実際にscroll可能にしても、
+  Technique area側のscroll gestureとは競合しない——3章「Preferred
+  approach」が想定した「まずは内部領域を縦scroll可能にする最小修正」
+  がそのまま安全に適用できるケースだった。
+- **Scroll UX**: `Scrollbar(thumbVisibility: true)`により、常時
+  visibleなscrollbar thumbを表示し、ユーザーが「この領域はscroll
+  可能」だと視覚的に把握できるようにした（5章）。既存デザイン
+  （padding・font size・panel構成）は変更していない。
+
+**Major Regression Test**（実際のwidget testによる証明）:
+`test/combat_v1/playable_ui/combat_v1_playable_mobile_overflow_test.dart`
+の新設group「Match Direction Reachability（Review Findings Fix、
+Major）」（1 case、320px幅）:
+
+- Direction primary＋secondaryとも表示される代表状態（相手KOC0）・
+  複数行のlatest feedback（damage/HP/posture/HEATすべて変化）・
+  recent action log最大代表数（4件）を組み合わせ、`ConstrainedBox`の
+  132px上限を確実に超える構成にした。
+- **Before scroll**: `tester.getRect`で取得した末尾のrecent log entry
+  （`combat_v1_playable_recent_log_item_3`、新設key）のRectが、
+  scrollable viewport（`combat_v1_playable_actor_recent_scroll`、
+  新設key）のRectと交差していない（`item.bottom > viewport.bottom`）
+  ことを確認——この確認自体が「そもそもscrollが必要な状況を
+  再現できているか」のテスト前提チェックを兼ねる。
+- **User scroll**: `tester.drag`でscrollable領域を上方向へdragし、
+  `tester.pumpAndSettle()`。
+- **After scroll**: 同じ末尾recent log entryのRectが、viewportの
+  Rectと`overlaps`（交差）することを確認——`tester.takeException() ==
+  null`だけに頼らず、実際に情報へ到達できたことをrectangleの
+  intersectionで直接検証した。
+
+### 71.2 Minor — PIN Guidance / Direction Duplication
+
+**問題**: PIN legal時、Guidance「PIN可能 — 相手のKOCを削り、決着を
+狙えます」とDirection「PINで相手のKOCを削りましょう」/「KOCが尽きる
+と、PINやSubmissionで決着します」がほぼ同じ内容を繰り返していた。
+
+**Fix**: Guidanceの役割（「今できること」＝PINが選べるという
+legalActions SSOTに基づく事実）はそのまま維持し、Directionの文言を
+「KOCという勝ち筋resourceの意味」だけに絞った。
+
+| | Before | After |
+| --- | --- | --- |
+| Direction primary | `PINで相手のKOCを削りましょう` | `相手のKOCを削るチャンスです` |
+| Direction secondary | `KOCが尽きると、PINやSubmissionで決着します` | `KOCが尽きると、成立したPINやSubmissionで決着します` |
+| Guidance（維持） | `PIN可能 — 相手のKOCを削り、決着を狙えます`（無変更） | 同左 |
+
+責務分離: Guidance＝「PINが今選べる」という事実（legalActions
+SSOTのまま、Direction側では独自に再計算しない）。Direction＝「なぜ
+それが勝ち筋になるか」（KOCというresourceの意味・決着へのつながり）。
+PIN legalityの判定・KOC減少量の独自計算はいずれも追加していない
+——`combatV1PlayableDeriveMatchDirection`のpinOpportunity分岐は
+既存どおり`snapshot.legalActions`のみを参照する（71.1章の構造変更・
+本Fixのいずれもこの分岐のlegality判定ロジック自体は無変更）。
+
+### 71.3 Documentation Wording
+
+「次のPIN／Submissionが必ず決着」という、PIN／Submissionの成立を
+前提としない言い切りが、code comment・design doc双方に残っていた
+（KOC 0は「PIN／SUBMISSIONが成立した場合に防御側が支払えない」状態
+であり、それ自体が試合を自動的に終わらせるわけではない）。
+
+- `lib/src/combat_v1/playable_ui/combat_v1_playable_match_direction.dart`:
+  decisiveKocのcode comment・UI文言（secondary）を「次に成立した
+  PIN／SUBMISSIONは決着になる」という、成立を前提とした表現へ修正。
+- 本ドキュメント（70.3・70.4・70.5・70.7・70.8章）の該当箇所も同様に
+  修正した。
+- UI文言自体（decisiveKocのsecondary）も「次のPINまたはSubmissionが
+  決着のチャンスです」→「次に成立したPINまたはSubmissionで決着
+  します」へ変更——UI文言より強い断定をdocumentationに残さない
+  （8章）方針を、UI文言自体の精度向上と合わせて満たした。
+
+### 71.4 Boundary Tests / Priority Collisions
+
+9章の要求どおり、Core上到達可能な組み合わせのみを
+`test/combat_v1/playable_ui/combat_v1_playable_match_direction_test.dart`
+へ追加した（thresholdはsnapshot構築時に使った同一のlocal変数を
+assertion側でも再利用し、Coreのmagic numberをテストロジックへ
+独自に複製していない）。
+
+- **Submission threshold**: `HP == submissionHpThreshold`
+  （submissionRouteになる）／`HP == submissionHpThreshold + 1`
+  （ならない）。
+- **HEAT threshold**: `sharedHeat == finisherHeatThreshold`
+  （finisherRouteになる）／`sharedHeat == finisherHeatThreshold - 1`
+  （ならない）。
+- **Priority collisions**（6 case）: `KOC 0 + PIN legal` →
+  decisiveKoc／`KOC 0 + Human DOWN` → decisiveKoc／`HP 0 + KOC 0` →
+  decisiveKoc（hpZeroClarifyより上位）／`submission threshold +
+  opponent DOWN` → submissionRoute（opponentDownRouteより上位）／
+  `CPU turn + KOC 0` → decisiveKoc（CPUの手番でも表示）／`Counter
+  response + 脆弱な相手（HP低下）` → submissionRoute（phaseに
+  関わらず計算される）。
+
+いずれも実装済みpriority（70.4章の順序）どおりの結果であることを
+確認した——priority順序自体（decisiveKoc＞pinOpportunity＞
+submissionRoute＞hpZeroClarify＞opponentDownRoute＞humanDownRisk＞
+finisherRoute＞neutral）は本Fixで変更していない。
+
+### 71.5 HP/KOC Rule Wording（維持確認）
+
+独立レビューでrule correctness自体はPASS。本Fixでも以下の意味は
+一切変更していない（10章）:
+
+- HP: HP 0だけでは通常決着しない（hpZeroClarify、decisiveKocに
+  優先されない限り表示される）。
+- KOC: KOC 0は「PIN／Submissionが成立したとき」に防御側が支払える
+  costが無くなる状態（＝最終抵抗消失）であり、それ自体が試合を
+  終わらせるものではない（71.3章の文言修正で明確化）。
+- Submission: HP threshold以下であることだけをもって、Submission
+  actionが現在使用可能とは断定しない（submissionRouteの文言は
+  「視野に入っている」に留め、legalActionsの断定は行わない）。
+- PIN: 現在PIN可能かどうかは引き続き`snapshot.legalActions`のみを
+  SSOTとする（71.2章のpinOpportunity文言修正後も判定ロジックは
+  無変更）。
+
+### 71.6 CPU Turn / Hidden Information（維持確認）
+
+Match DirectionはCPU turn中も表示され続ける（70.1・70.4章の既存
+設計を維持）。本Fixで新しいhidden information依存は追加していない
+——参照fieldは70.3章に記載の公開fieldのみのまま
+（`submissionHpThreshold`追加を含め、CPU hand／CPU Energy／CPU
+Counter／CPU Finisher possession／deck order／next draw／AI internal
+stateはいずれも参照していない）。71.4章の追加testでも、CPU turn中の
+decisiveKoc表示が「Humanが今操作可能に見える命令形」を含まないこと
+（primary文言はUI表示状態の説明のみで、Counter/PIN等の具体的な
+button操作を指示する文言を含まない）を確認済み。
+
+### 71.7 Validation
+
+- `flutter analyze`: No issues found。
+- `flutter test test/combat_v1/playable test/combat_v1/playable_ui`:
+  既存197件 + 新設11件（reachability regression test 1件・boundary/
+  priority collision test 10件） = **208件**全件green。
+- `flutter test`（リポジトリ全体）: **1825件**全件green（前回報告
+  1814件 + 本Fix新設11件）。
+- `flutter build web --release --base-href /one_night_match/
+  --no-web-resources-cdn`: 成功。
+
+### 71.8 Changed Files（本Fix）
+
+- `lib/src/combat_v1/playable_ui/combat_v1_playable_match_screen.dart`:
+  `_ActorAndRecentPanel`をStateful化しscroll可能にした（71.1章）。
+  recent log各itemへindexed keyを追加（reachability testで安定して
+  末尾要素を特定するため）。
+- `lib/src/combat_v1/playable_ui/combat_v1_playable_match_direction.dart`:
+  pinOpportunity・decisiveKocの文言・code commentを修正（71.2・
+  71.3章）。derivationのpriority判定ロジック自体は無変更。
+- `test/combat_v1/playable_ui/combat_v1_playable_match_direction_test.dart`:
+  新wordingに合わせたassertion更新（PIN文言重複を検出するguard追加）・
+  boundary/priority collision test追加（71.4章）。
+- `test/combat_v1/playable_ui/combat_v1_playable_mobile_overflow_test.dart`:
+  reachability regression test追加（71.1章）。
+- `docs/design/combat_v1_playable_match_ui.md`: 本章（71章）追加、
+  70章内の該当wording修正（71.3章）。
+
+### 71.9 Scope Verification
+
+Combat rule変更: NO / Core変更: NO / LegalAction semantics変更: NO /
+CPU AI変更: NO / data変更: NO / dependencies変更: NO / hidden
+information exposure変更: NO（71.6章）。

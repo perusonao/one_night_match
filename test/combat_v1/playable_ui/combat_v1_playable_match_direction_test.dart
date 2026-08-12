@@ -91,7 +91,7 @@ void main() {
       expect(direction.kind, isNot(CombatV1PlayableMatchDirectionKind.decisiveKoc));
     });
 
-    test('zero — 次のPIN/Submissionが決着のチャンスであることを示す（最優先）', () {
+    test('zero — 次に成立したPIN/Submissionで決着することを示す（最優先）', () {
       final snapshot = testSnapshot(
         cpu: testCpuStatus(hp: 150, koc: 0, posture: CombatV1WrestlerPosture.stand),
         legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: _human)],
@@ -127,7 +127,13 @@ void main() {
   });
 
   group('PIN legality', () {
-    test('legal — PINの目的（KOCを削る）を示す', () {
+    // Review Findings Fix（Minor）——「PINで相手のKOCを削りましょう」
+    // （旧文言）はGuidanceの「PIN可能 — 相手のKOCを削り、決着を狙えます」
+    // とほぼ同じ内容を繰り返していた。DirectionはPINのlegalityそのもの
+    // （Guidanceの役割）を反復せず、KOCという勝ち筋resourceの意味を
+    // 述べるだけにとどめる。
+    test('legal — KOCという勝ち筋resourceの意味を示す（Guidanceの'
+        '「PIN可能」文言とは重複させない）', () {
       final snapshot = testSnapshot(
         phase: CombatV1MatchPhase.action,
         isHumanInputRequired: true,
@@ -139,8 +145,11 @@ void main() {
       );
       final direction = _derive(snapshot)!;
       expect(direction.kind, CombatV1PlayableMatchDirectionKind.pinOpportunity);
-      expect(direction.primary, contains('PIN'));
       expect(direction.primary, contains('KOC'));
+      expect(direction.secondary, contains('KOC'));
+      // Guidanceの既存文言（2A-1）と一字一句重複させない。
+      expect(direction.primary, isNot(contains('PIN可能')));
+      expect(direction.primary, isNot(contains('決着を狙えます')));
     });
 
     test('illegal（相手DOWNだがPINなし）— opponentDownRouteへfallback', () {
@@ -326,6 +335,157 @@ void main() {
         legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: _human)],
       );
       expect(_derive(snapshot), isNotNull);
+    });
+  });
+
+  // Review Findings Fix（9章 Boundary Tests）——thresholdはsnapshot自身の
+  // fieldから取り、テストロジック側でCoreのmagic numberを独自に
+  // 再実装しない（同じ変数をsnapshot構築とassertion双方へ渡す）。
+  group('Submission threshold boundary', () {
+    const threshold = 50;
+
+    test('HP == submissionHpThreshold（境界値）— submission routeになる', () {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        cpu: testCpuStatus(hp: threshold, koc: 9, posture: CombatV1WrestlerPosture.stand),
+        submissionHpThreshold: threshold,
+        legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: _human)],
+      );
+      final direction = _derive(snapshot)!;
+      expect(direction.kind, CombatV1PlayableMatchDirectionKind.submissionRoute);
+    });
+
+    test('HP == submissionHpThreshold + 1（境界値の外）— submission routeにならない', () {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        cpu: testCpuStatus(
+          hp: threshold + 1,
+          koc: 9,
+          posture: CombatV1WrestlerPosture.stand,
+        ),
+        submissionHpThreshold: threshold,
+        legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: _human)],
+      );
+      final direction = _derive(snapshot)!;
+      expect(direction.kind, isNot(CombatV1PlayableMatchDirectionKind.submissionRoute));
+    });
+  });
+
+  group('HEAT threshold boundary', () {
+    const heatThreshold = 200;
+
+    test('sharedHeat == finisherHeatThreshold（境界値）— finisher routeになる', () {
+      final snapshot = testSnapshot(
+        cpu: testCpuStatus(hp: 150, koc: 9, posture: CombatV1WrestlerPosture.stand),
+        human: testHumanStatus(posture: CombatV1WrestlerPosture.stand),
+        sharedHeat: heatThreshold,
+        finisherHeatThreshold: heatThreshold,
+        legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: _human)],
+      );
+      final direction = _derive(snapshot)!;
+      expect(direction.kind, CombatV1PlayableMatchDirectionKind.finisherRoute);
+    });
+
+    test('sharedHeat == finisherHeatThreshold - 1（境界値の外）— finisher routeにならない', () {
+      final snapshot = testSnapshot(
+        cpu: testCpuStatus(hp: 150, koc: 9, posture: CombatV1WrestlerPosture.stand),
+        human: testHumanStatus(posture: CombatV1WrestlerPosture.stand),
+        sharedHeat: heatThreshold - 1,
+        finisherHeatThreshold: heatThreshold,
+        legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: _human)],
+      );
+      final direction = _derive(snapshot)!;
+      expect(direction.kind, isNot(CombatV1PlayableMatchDirectionKind.finisherRoute));
+    });
+  });
+
+  // Review Findings Fix（9章 Priority collisions）——到達可能なCore state
+  // の組み合わせのみを対象とする。
+  group('Priority collisions', () {
+    test('KOC 0 + PIN legal — decisiveKocが優先される', () {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        cpu: testCpuStatus(hp: 100, koc: 0, posture: CombatV1WrestlerPosture.down),
+        legalActions: const [
+          CombatV1PinAction(actorPlayerIndex: _human),
+          CombatV1EndTurnAction(actorPlayerIndex: _human),
+        ],
+      );
+      final direction = _derive(snapshot)!;
+      expect(direction.kind, CombatV1PlayableMatchDirectionKind.decisiveKoc);
+    });
+
+    test('KOC 0 + Human DOWN — decisiveKocが優先される', () {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        cpu: testCpuStatus(hp: 100, koc: 0, posture: CombatV1WrestlerPosture.stand),
+        human: testHumanStatus(posture: CombatV1WrestlerPosture.down),
+        legalActions: const [
+          CombatV1StandUpAction(actorPlayerIndex: _human),
+          CombatV1RestAction(actorPlayerIndex: _human),
+        ],
+      );
+      final direction = _derive(snapshot)!;
+      expect(direction.kind, CombatV1PlayableMatchDirectionKind.decisiveKoc);
+    });
+
+    test('HP 0 + KOC 0 — decisiveKocが優先される（hpZeroClarifyより上位）', () {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        cpu: testCpuStatus(hp: 0, koc: 0, posture: CombatV1WrestlerPosture.stand),
+        legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: _human)],
+      );
+      final direction = _derive(snapshot)!;
+      expect(direction.kind, CombatV1PlayableMatchDirectionKind.decisiveKoc);
+    });
+
+    test('submission threshold + opponent DOWN — submissionRouteが優先される', () {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        cpu: testCpuStatus(hp: 30, koc: 9, posture: CombatV1WrestlerPosture.down),
+        submissionHpThreshold: 50,
+        legalActions: const [
+          // このターンまだ技を成功させていない想定でPINは非legal。
+          CombatV1EndTurnAction(actorPlayerIndex: _human),
+        ],
+      );
+      final direction = _derive(snapshot)!;
+      expect(direction.kind, CombatV1PlayableMatchDirectionKind.submissionRoute);
+    });
+
+    test('CPU turn + KOC 0 — CPUの手番でもdecisiveKocを表示する', () {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: false,
+        currentActorPlayerIndex: _cpu,
+        cpu: testCpuStatus(hp: 100, koc: 0, posture: CombatV1WrestlerPosture.stand),
+        legalActions: const [],
+      );
+      final direction = _derive(snapshot)!;
+      expect(direction.kind, CombatV1PlayableMatchDirectionKind.decisiveKoc);
+    });
+
+    test('Counter response + 脆弱な相手（HP低下）— submissionRouteを示す'
+        '（PIN opportunityは主張しない）', () {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.counterResponsePending,
+        isHumanInputRequired: true,
+        pendingAttack: testPendingAttack(),
+        cpu: testCpuStatus(hp: 30, koc: 9, posture: CombatV1WrestlerPosture.stand),
+        submissionHpThreshold: 50,
+        legalActions: const [
+          CombatV1CounterAction(actorPlayerIndex: _human, cardInstanceId: 'c1'),
+          CombatV1DeclineCounterAction(actorPlayerIndex: _human),
+        ],
+      );
+      final direction = _derive(snapshot)!;
+      expect(direction.kind, CombatV1PlayableMatchDirectionKind.submissionRoute);
     });
   });
 }
