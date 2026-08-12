@@ -1,0 +1,78 @@
+name: Deploy to GitHub Pages
+
+# main への push（PRマージ後）で自動デプロイ。
+# workflow_dispatch で手動実行も可能（初回導入時など）。
+# PR段階では本番デプロイしない（pull_request トリガーを含めない）。
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# GitHub Pages 公式デプロイ方式（actions/deploy-pages）に必要な最小権限。
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時に複数の Pages デプロイが走った場合に古いデプロイと競合しないよう、
+# GitHub Pages 公式推奨の concurrency グループを使用する。
+# 進行中のデプロイは中断せず、次のデプロイをキューイングする。
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # flutter pub get / analyze / test を通し、web release build を作成して
+  # Pages artifact としてアップロードする。ここが失敗した場合は deploy job は実行されない。
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          # .metadata の revision (058e0af2c2b57e369d905a03ac9748b0ebf543c6) に対応する
+          # Flutter stable release。将来 stable channel が進んでも勝手に変わらないよう
+          # 明示的なバージョンで固定する。
+          flutter-version: "3.44.8"
+          channel: "stable"
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build web (release)
+        run: |
+          flutter build web \
+            --release \
+            --base-href /one_night_match/ \
+            --no-web-resources-cdn
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/web
+
+  # build-and-test が成功した場合のみ実行される。
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
