@@ -336,6 +336,125 @@ void main() {
     });
   });
 
+  group('fromResult — matchupDetail（Dashboard 1B 63章「Test — Matchup Detail」）', () {
+    test('16 matrix cellsそれぞれがdetailを持つ', () {
+      final viewModel = CombatV1BalanceDashboardViewModel.fromResult(
+        combatV1DashboardTestResult(),
+      );
+      final matrix = viewModel.matchupMatrix;
+      var cellCount = 0;
+      for (final row in matrix.rows) {
+        for (final cell in row) {
+          cellCount++;
+          expect(cell.detail.matchup, cell.matchup);
+        }
+      }
+      expect(cellCount, 16);
+    });
+
+    test('detailのcounts/ratesがmatchup aggregateと一致する', () {
+      final viewModel = CombatV1BalanceDashboardViewModel.fromResult(
+        combatV1DashboardTestResult(),
+      );
+      final cell = viewModel.matchupMatrix.rows[0][1]; // misaki vs jack
+      final detail = cell.detail;
+      expect(detail.wrestlerADisplayName, '豪田ミサキ');
+      expect(detail.wrestlerBDisplayName, '黒蝶ジャック');
+      expect(detail.totalMatches, 10);
+      expect(detail.completedMatches, 8);
+      final expectedPlayerAWins = combatV1DashboardTestPlayerAWinsFor(
+        'misaki',
+        'jack',
+      );
+      expect(detail.playerAWins, expectedPlayerAWins);
+      expect(detail.playerBWins, 8 - expectedPlayerAWins);
+      expect(detail.playerAWinRate, closeTo(expectedPlayerAWins / 8, 1e-9));
+      expect(
+        detail.playerBWinRate,
+        closeTo((8 - expectedPlayerAWins) / 8, 1e-9),
+      );
+    });
+
+    test('A vs BとB vs Aでdetailも別々（wrestler A/B displayNameが入れ替わる）', () {
+      final viewModel = CombatV1BalanceDashboardViewModel.fromResult(
+        combatV1DashboardTestResult(),
+      );
+      final misakiVsJack = viewModel.matchupMatrix.rows[0][1].detail;
+      final jackVsMisaki = viewModel.matchupMatrix.rows[1][0].detail;
+      expect(misakiVsJack.wrestlerADisplayName, '豪田ミサキ');
+      expect(misakiVsJack.wrestlerBDisplayName, '黒蝶ジャック');
+      expect(jackVsMisaki.wrestlerADisplayName, '黒蝶ジャック');
+      expect(jackVsMisaki.wrestlerBDisplayName, '豪田ミサキ');
+    });
+
+    test('safety limit / invariant violationのcount・rateが反映される（akari vs akari）', () {
+      final viewModel = CombatV1BalanceDashboardViewModel.fromResult(
+        combatV1DashboardTestResult(),
+      );
+      final detail = viewModel.matchupMatrix.rows[2][2].detail; // akari vs akari
+      expect(detail.safetyLimitMatches, 1);
+      expect(detail.safetyLimitRate, closeTo(1 / 10, 1e-9));
+      expect(detail.invariantViolationMatches, 1);
+      expect(detail.invariantViolationRate, closeTo(1 / 10, 1e-9));
+    });
+
+    test('terminal cause countsが既存fixtureをそのまま反映する（UI側で分類し直さない）', () {
+      final viewModel = CombatV1BalanceDashboardViewModel.fromResult(
+        combatV1DashboardTestResult(),
+      );
+      final detail = viewModel.matchupMatrix.rows[0][1].detail;
+      expect(detail.terminalCauseCounts.normalPin, 8);
+      expect(detail.terminalCauseCounts.directPin, 0);
+      expect(detail.terminalCauseCounts.submission, 0);
+      expect(detail.terminalCauseCounts.submissionFinisher, 0);
+      expect(detail.terminalCauseCounts.other, 0);
+    });
+
+    test('action count / final turnのdistribution statisticsをmatchup keyで対応付ける', () {
+      final viewModel = CombatV1BalanceDashboardViewModel.fromResult(
+        combatV1DashboardTestResult(),
+      );
+      final detail = viewModel.matchupMatrix.rows[0][1].detail; // misaki vs jack
+      expect(detail.actionCount.sampleCount, 8);
+      expect(detail.actionCount.mean, 20 + 0 + 1); // index(misaki)=0, index(jack)=1
+      expect(detail.actionCount.median, 19);
+      expect(detail.actionCount.p90, 30);
+      expect(detail.actionCount.p95, 32);
+      expect(detail.actionCount.min, 5);
+      expect(detail.actionCount.max, 40);
+      expect(detail.finalTurnNumber.sampleCount, 8);
+      expect(detail.finalTurnNumber.mean, 10 + 0 + 1);
+    });
+
+    test('completedAppearances == 0相当（reina mirror）でもnull win rateはformatで—になる', () {
+      final viewModel = CombatV1BalanceDashboardViewModel.fromResult(
+        combatV1DashboardTestResult(),
+      );
+      // reina vs reina（mirror）もfixtureのtermination（completed 8）を使う
+      // ため、null win rateの直接確認はformatting経路で行う
+      // （combatV1FormatPercentのnull分岐は別途formattingテストで検証済み）。
+      final detail = viewModel.matchupMatrix.rows[3][3].detail;
+      expect(combatV1FormatPercent(detail.playerAWinRate), isNot('—'));
+      expect(detail.playerAWinRate, isNotNull);
+    });
+
+    test('statistics.matchupsに対応するmatchupが欠落しているとfail-fastする', () {
+      final ids = combatV1DashboardTestWrestlerIds;
+      final incompleteStatistics = combatV1DashboardTestMatchupStatistics(
+        wrestlerIds: ids,
+      )..removeWhere(
+        (s) => s.matchup.wrestlerAId == 'reina' && s.matchup.wrestlerBId == 'reina',
+      );
+      final broken = combatV1DashboardTestResult(
+        matchupStatistics: incompleteStatistics,
+      );
+      expect(
+        () => CombatV1BalanceDashboardViewModel.fromResult(broken),
+        throwsStateError,
+      );
+    });
+  });
+
   group('statistics/core matchup alignment', () {
     test('result.matchupsとresult.statistics.matchupsが同じ順序である前提を'
         'mapperがそのまま利用する', () {

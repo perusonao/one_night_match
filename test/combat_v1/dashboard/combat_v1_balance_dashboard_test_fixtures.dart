@@ -146,6 +146,11 @@ List<CombatV1WrestlerAggregate> combatV1DashboardTestWrestlers() => const [
 /// synthetic [CombatV1BatchSimulationResult]を組み立てるtest helper
 /// （engineを一切起動しない、Phase 12B-1/12B-2A pure value typeの
 /// constructorのみを使う）。
+///
+/// [config]を渡すと、Dashboard 1Bのfake run function（screen test）が
+/// 「run開始時に渡されたconfigをそのままrun metadataへ反映する」ことを
+/// 確認できるよう、既定のsynthetic configを上書きできる（wrestlerIdsは
+/// [config.wrestlerIds]優先）。
 CombatV1BatchSimulationResult combatV1DashboardTestResult({
   List<String>? wrestlerIds,
   List<CombatV1MatchupAggregate>? matchups,
@@ -153,17 +158,20 @@ CombatV1BatchSimulationResult combatV1DashboardTestResult({
   List<CombatV1WrestlerAggregate>? wrestlers,
   int globalSafetyLimit = 3,
   int globalInvariantViolation = 2,
+  CombatV1BatchSimulationConfig? config,
 }) {
-  final ids = wrestlerIds ?? combatV1DashboardTestWrestlerIds;
-  final config = CombatV1BatchSimulationConfig(
-    wrestlerIds: ids,
-    matchesPerMatchup: 10,
-    masterSeed: 12345,
-    pairing: CombatV1PolicyPairing.randomVsRandom,
-    maxActions: 500,
-  );
+  final resolvedConfig =
+      config ??
+      CombatV1BatchSimulationConfig(
+        wrestlerIds: wrestlerIds ?? combatV1DashboardTestWrestlerIds,
+        matchesPerMatchup: 10,
+        masterSeed: 12345,
+        pairing: CombatV1PolicyPairing.randomVsRandom,
+        maxActions: 500,
+      );
+  final ids = wrestlerIds ?? resolvedConfig.wrestlerIds;
   return CombatV1BatchSimulationResult(
-    config: config,
+    config: resolvedConfig,
     requestedMatchCount: ids.length * ids.length * 10,
     executedMatchCount: ids.length * ids.length * 10,
     global: CombatV1GlobalAggregate(

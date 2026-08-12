@@ -1,11 +1,17 @@
-/// Balance Dashboard 1A — Simulation Service
-/// （docs/design/combat_v1_balance_dashboard_1a.md 5・11・24章）。
+/// Balance Dashboard 1A/1B — Simulation Service
+/// （docs/design/combat_v1_balance_dashboard_1a.md 5・11・24章、
+/// docs/design/combat_v1_balance_dashboard_1b.md「Execution」）。
 ///
-/// [combatV1BalanceDashboardDefaultConfig]がDashboard 1Aの正式fixed
-/// default config（5章）を組み立て、[CombatV1BalanceSimulationService]が
-/// Stopwatch計測 → `CombatV1BatchSimulationRunner.run`呼び出し → pure
-/// ViewModel mapping → [CombatV1BalanceRunOutput]構築、を行う薄い
-/// service層。
+/// [combatV1BalanceDashboardDefaultConfig]がDashboard 1Bの初期draft config
+/// （54章「Default Draft」、1Aのfixed defaultと同値）を組み立て、
+/// [CombatV1BalanceSimulationService]がStopwatch計測 →
+/// `CombatV1BatchSimulationRunner.run`呼び出し → pure ViewModel mapping →
+/// [CombatV1BalanceRunOutput]構築、を行う薄いservice層。
+///
+/// Dashboard 1Bでは`config`が呼び出し元（screen）から渡される——ただし
+/// service自身はUI state（draft/last-run区別等）を一切持たない、pure
+/// wrapperのまま（41章「Config Immutability」——run開始時にscreen側が
+/// snapshotしたconfigをそのまま渡す）。
 ///
 /// Batch Runner本体（`CombatV1BatchSimulationRunner`）へprogress
 /// callback・cancellation・chunkingを追加しない（Core変更禁止、57章）。
@@ -55,22 +61,29 @@ class CombatV1BalanceRunOutput {
 
 /// production/testで差し替え可能なrun function（25章「Test Injection」）。
 ///
-/// Widget testでは1,600 simulationを実行させず、この型のfakeを注入する。
-typedef CombatV1BalanceRunFunction = Future<CombatV1BalanceRunOutput> Function();
+/// Dashboard 1Bでは呼び出し元（screen）がrun開始時にsnapshotした
+/// `CombatV1BatchSimulationConfig`（draft configから変換済み）を渡す
+/// （41章「Config Immutability」）。Widget testでは大規模simulationを
+/// 実行させず、この型のfakeを注入する。
+typedef CombatV1BalanceRunFunction =
+    Future<CombatV1BalanceRunOutput> Function(
+      CombatV1BatchSimulationConfig config,
+    );
 
-/// Dashboard 1A用の薄いsimulation service（24章「Service / Runner
+/// Dashboard 1A/1B用の薄いsimulation service（24章「Service / Runner
 /// Wrapper」）。repository/interface hierarchyは持たない。
 class CombatV1BalanceSimulationService {
   const CombatV1BalanceSimulationService();
 
-  /// fixed default configで1回batch simulationを実行し、[CombatV1BalanceRunOutput]
-  /// を返す（19章「Run Default Simulation」5〜10のステップ）。
+  /// [config]で1回batch simulationを実行し、[CombatV1BalanceRunOutput]を
+  /// 返す（19章「Run Default Simulation」5〜10のステップ）。
   ///
   /// 例外（`CombatV1IllegalActionException`等）はcatchせずそのまま
   /// 呼び出し元（UI側）へ伝播する——呼び出し元がerror stateへ遷移させる
   /// 責務を持つ（19章11、46章「Error Handling」）。
-  Future<CombatV1BalanceRunOutput> run() async {
-    final config = combatV1BalanceDashboardDefaultConfig();
+  Future<CombatV1BalanceRunOutput> run(
+    CombatV1BatchSimulationConfig config,
+  ) async {
     final stopwatch = Stopwatch()..start();
     const runner = CombatV1BatchSimulationRunner();
     final result = runner.run(config);

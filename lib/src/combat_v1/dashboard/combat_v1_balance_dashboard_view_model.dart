@@ -159,6 +159,11 @@ class CombatV1DashboardWrestlerRow {
 /// [rowWrestlerId]がPlayer A、[columnWrestlerId]がPlayer Bとして戦った
 /// matchupを表す。[matchup]はdomainの`CombatV1Matchup`（immutable value
 /// object）をそのまま保持する——複製構造を追加で持たせない。
+///
+/// [detail]はDashboard 1B「Matchup Detail」（24〜27章）用のread-only
+/// structureで、cellと同じ`fromResult`呼び出し内で組み立てる——widget
+/// 側がcellをtap/clickした際、domain treeを再探索せずそのまま表示できる
+/// （39章「Pure ViewModel」）。
 class CombatV1DashboardMatchupCell {
   const CombatV1DashboardMatchupCell({
     required this.matchup,
@@ -169,6 +174,7 @@ class CombatV1DashboardMatchupCell {
     required this.safetyLimitMatches,
     required this.invariantViolationMatches,
     required this.isMirror,
+    required this.detail,
   });
 
   final CombatV1Matchup matchup;
@@ -182,6 +188,61 @@ class CombatV1DashboardMatchupCell {
   final int safetyLimitMatches;
   final int invariantViolationMatches;
   final bool isMirror;
+  final CombatV1DashboardMatchupDetail detail;
+}
+
+/// 1 matchup（`CombatV1Matchup`）のdetail view（Dashboard 1B 24〜27章
+/// 「Matchup Detail」）。既存matchup aggregate/statisticsから取得した値の
+/// pass-throughのみで、UI側で分類し直さない（26章「Terminal Cause
+/// Detail」）。
+class CombatV1DashboardMatchupDetail {
+  const CombatV1DashboardMatchupDetail({
+    required this.matchup,
+    required this.wrestlerADisplayName,
+    required this.wrestlerBDisplayName,
+    required this.totalMatches,
+    required this.completedMatches,
+    required this.playerAWins,
+    required this.playerBWins,
+    required this.playerAWinRate,
+    required this.playerBWinRate,
+    required this.safetyLimitMatches,
+    required this.safetyLimitRate,
+    required this.invariantViolationMatches,
+    required this.invariantViolationRate,
+    required this.terminalCauseCounts,
+    required this.actionCount,
+    required this.finalTurnNumber,
+  });
+
+  final CombatV1Matchup matchup;
+  final String wrestlerADisplayName;
+  final String wrestlerBDisplayName;
+
+  final int totalMatches;
+  final int completedMatches;
+  final int playerAWins;
+  final int playerBWins;
+
+  /// 分母は[completedMatches]（既存domain contractと同じ、13章）。
+  final double? playerAWinRate;
+  final double? playerBWinRate;
+
+  final int safetyLimitMatches;
+  final double? safetyLimitRate;
+  final int invariantViolationMatches;
+  final double? invariantViolationRate;
+
+  /// 正常終了causeの内訳（26章）。既存`CombatV1TerminalCauseCounts`
+  /// （normalPin/directPin/submission/submissionFinisher/other）をそのまま
+  /// 保持する。
+  final CombatV1TerminalCauseCounts terminalCauseCounts;
+
+  /// completed-onlyのaction数分布（27章「Matchup Length Detail」）。
+  final CombatV1DashboardDistributionSummary actionCount;
+
+  /// completed-onlyのfinal turn番号分布（27章）。
+  final CombatV1DashboardDistributionSummary finalTurnNumber;
 }
 
 /// 4×4 ordered matchup matrix。行＝Player A、列＝Player B（33章）。
@@ -403,6 +464,12 @@ class CombatV1BalanceDashboardViewModel {
     final byMatchup = <CombatV1Matchup, CombatV1MatchupAggregate>{
       for (final aggregate in result.matchups) aggregate.matchup: aggregate,
     };
+    // Dashboard 1B「Domain Alignment」（40章）——matrix aggregateとlength
+    // statisticsを、indexの暗黙一致ではなくmatchup keyで対応付ける。
+    final statisticsByMatchup =
+        <CombatV1Matchup, CombatV1MatchupDescriptiveStatistics>{
+          for (final stats in result.statistics.matchups) stats.matchup: stats,
+        };
 
     final rows = <List<CombatV1DashboardMatchupCell>>[];
     for (final rowWrestlerId in wrestlerIds) {
@@ -424,6 +491,35 @@ class CombatV1BalanceDashboardViewModel {
             '$rowWrestlerId vs $columnWrestlerId',
           );
         }
+        final statistics = statisticsByMatchup[matchup];
+        if (statistics == null) {
+          // 同様に、Phase 12B-2A statisticsもmatrixと同じcanonical
+          // matchup集合を持つ（`combat_v1_batch_length_statistics.dart`
+          // 20章）。不一致はdomain resultとViewModelの前提が崩れている
+          // ことを意味するためfail-fastする（40章「Domain Alignment」）。
+          throw StateError(
+            'Dashboard matrix構築中に対応するmatchup statisticsが見つかりません: '
+            '$rowWrestlerId vs $columnWrestlerId',
+          );
+        }
+        final detail = CombatV1DashboardMatchupDetail(
+          matchup: matchup,
+          wrestlerADisplayName: combatV1DashboardDisplayName(rowWrestlerId),
+          wrestlerBDisplayName: combatV1DashboardDisplayName(columnWrestlerId),
+          totalMatches: aggregate.totalMatches,
+          completedMatches: aggregate.completedMatches,
+          playerAWins: aggregate.playerAWins,
+          playerBWins: aggregate.playerBWins,
+          playerAWinRate: aggregate.playerAWinRateCompletedMatches,
+          playerBWinRate: aggregate.playerBWinRateCompletedMatches,
+          safetyLimitMatches: aggregate.safetyLimitMatches,
+          safetyLimitRate: aggregate.safetyLimitRate,
+          invariantViolationMatches: aggregate.invariantViolationMatches,
+          invariantViolationRate: aggregate.invariantViolationRate,
+          terminalCauseCounts: aggregate.terminalCauseCounts,
+          actionCount: _mapDistribution(statistics.length.actionCount),
+          finalTurnNumber: _mapDistribution(statistics.length.finalTurnNumber),
+        );
         rowCells.add(
           CombatV1DashboardMatchupCell(
             matchup: matchup,
@@ -435,6 +531,7 @@ class CombatV1BalanceDashboardViewModel {
             safetyLimitMatches: aggregate.safetyLimitMatches,
             invariantViolationMatches: aggregate.invariantViolationMatches,
             isMirror: matchup.isMirror,
+            detail: detail,
           ),
         );
       }

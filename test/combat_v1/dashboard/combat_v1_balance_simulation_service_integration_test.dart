@@ -1,17 +1,22 @@
-// Balance Dashboard 1A: small-scale real integration test
+// Balance Dashboard 1A/1B: small-scale real integration test
 // （docs/design/combat_v1_balance_dashboard_1a.md 16章「Integration
-// test」）。
+// test」、docs/design/combat_v1_balance_dashboard_1b.md「Small Real
+// Integration」67章）。
 //
 // 実`CombatV1BatchSimulationRunner`（Phase 12B-1、engineを実際に起動する）を
 // canonical 4 wrestler・1 match/matchup（16 matches）で実行し、
 // `CombatV1BalanceDashboardViewModel.fromResult`（pure mapper）まで正しく
-// 結線されることを確認する。Dashboard 1Aの正式fixed default
-// （100 matches/matchup、1,600 total）そのものの大量再実行はここでは行わない
-// ——正式default値の検証は
+// 結線されることを確認する。Dashboard 1Bの
+// `CombatV1BalanceDashboardRunConfig`（editable config service）→
+// `CombatV1BalanceSimulationService.run`（runner）→ ViewModel → matchup
+// detail mapperの実結線も確認する（67章「Small Real Integration」）。
+// 正式fixed default（100 matches/matchup、1,600 total）そのものの大量
+// 再実行はここでは行わない——正式default値の検証は
 // [combatV1BalanceDashboardDefaultConfig]の値そのものを確認する軽量testで
 // 行う。
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:one_night_match/src/combat_v1/dashboard/combat_v1_balance_dashboard_run_config.dart';
 import 'package:one_night_match/src/combat_v1/dashboard/combat_v1_balance_dashboard_view_model.dart';
 import 'package:one_night_match/src/combat_v1/dashboard/combat_v1_balance_simulation_service.dart';
 import 'package:one_night_match/src/combat_v1/simulation/batch/combat_v1_batch_matchup.dart';
@@ -99,6 +104,52 @@ void main() {
         viewModel.seatSummary.playerBCompletedMatches,
         viewModel.globalSummary.completedMatches,
       );
+    },
+  );
+
+  test(
+    'Dashboard 1B: editable config service → runner → ViewModel → matchup '
+    'detail mapperの実結線（canonical 4 wrestler・1 match/matchup、16 '
+    'matches、67章「Small Real Integration」）',
+    () async {
+      // draft config（UI層相当）→ toBatchConfig()（変換）→ serviceという
+      // Dashboard 1Bの実際の呼び出し経路をそのまま辿る。
+      final draft = CombatV1BalanceDashboardRunConfig.initial().copyWith(
+        matchesPreset: CombatV1BalanceDashboardMatchesPreset.custom,
+        customMatchesPerMatchupText: '1',
+        masterSeedText: '12345',
+        playerAPolicy: CombatV1SimulationPolicyKind.firstLegal,
+        playerBPolicy: CombatV1SimulationPolicyKind.randomLegal,
+        maxActionsText: '500',
+      );
+      expect(draft.isValid, isTrue);
+      final batchConfig = draft.toBatchConfig();
+      expect(batchConfig.matchesPerMatchup, 1);
+      expect(batchConfig.playerAPolicy, CombatV1SimulationPolicyKind.firstLegal);
+      expect(batchConfig.playerBPolicy, CombatV1SimulationPolicyKind.randomLegal);
+
+      const service = CombatV1BalanceSimulationService();
+      final output = await service.run(batchConfig);
+      final viewModel = output.viewModel;
+
+      expect(viewModel.runSummary.executedMatchCount, 16);
+      expect(viewModel.runSummary.masterSeed, 12345);
+      expect(viewModel.runSummary.playerAPolicyLabel, 'First Legal');
+      expect(viewModel.runSummary.playerBPolicyLabel, 'Random Legal');
+
+      // matchup detail mapper（Dashboard 1B）が16 cellすべてで構築されて
+      // いること、かつmatchup keyがcell自身と一致すること。
+      var detailCount = 0;
+      for (final row in viewModel.matchupMatrix.rows) {
+        for (final cell in row) {
+          detailCount++;
+          expect(cell.detail.matchup, cell.matchup);
+          expect(cell.detail.totalMatches, greaterThanOrEqualTo(0));
+        }
+      }
+      expect(detailCount, 16);
+
+      expect(output.runtime, isNotNull);
     },
   );
 }
