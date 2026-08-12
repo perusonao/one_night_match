@@ -9,6 +9,7 @@
 library;
 
 import '../combat_v1_counter.dart';
+import '../combat_v1_energy.dart';
 import '../combat_v1_enums.dart';
 import '../combat_v1_legal_action.dart';
 import '../combat_v1_technique.dart';
@@ -93,6 +94,8 @@ class CombatV1PlayableHumanStatus {
     required this.discardPileCount,
     required this.pinCardsHeld,
     required this.reshuffleCount,
+    required this.energyPool,
+    required this.availableEnergy,
   });
 
   final String wrestlerId;
@@ -109,6 +112,18 @@ class CombatV1PlayableHumanStatus {
   final int discardPileCount;
   final int pinCardsHeld;
   final int reshuffleCount;
+
+  /// このレスラー固有の固定ENERGYプール（`CombatV1PlayerState.energyPool`
+  /// をそのまま公開する。保有量そのものであり、ターン内で変化しない
+  /// ——docs/combat_rules_v1.md 5章、Playable 1C.1「Energy Semantics」）。
+  /// Human自身のENERGYなのでhidden情報ではない。
+  final CombatV1EnergyPool energyPool;
+
+  /// 現在使用可能な（[energyPool]から自ターン内の使用済み分を引いた）
+  /// 属性別ENERGY残量（`CombatV1PlayerState.availableEnergyFor`と同じ値。
+  /// 自ターン開始時に[energyPool]と同値へ全回復する、Playable
+  /// 1C.1「Energy Semantics」）。
+  final Map<CombatV1EnergyAttribute, int> availableEnergy;
 }
 
 /// CPU（対戦相手、playerIndex 1）のhidden-safe status projection
@@ -162,6 +177,7 @@ class CombatV1PlayablePendingAttackView {
     required this.family,
     required this.damage,
     required this.resultOpponentState,
+    required this.energyCostTotal,
   });
 
   final int attackerPlayerIndex;
@@ -174,6 +190,13 @@ class CombatV1PlayablePendingAttackView {
   final CombatV1TechniqueFamily family;
   final int damage;
   final CombatV1WrestlerPosture? resultOpponentState;
+
+  /// この攻撃のENERGY COST合計（`CombatV1EnergyCost.total`）。COUNTERの
+  /// 動的必要量（docs/combat_rules_v1.md 7章「返し必要コストは、返される側の
+  /// TECHNIQUEのENERGY COST『総量』と同値」）と同じ値——宣言済みの攻撃の
+  /// 静的metadataなので、既に両者へ公開された情報（hidden information
+  /// 違反にならない）。
+  final int energyCostTotal;
 }
 
 /// 過去に成功実行された1件のpublic actionの、bounded recent

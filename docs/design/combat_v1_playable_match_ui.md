@@ -1005,3 +1005,379 @@ snapshotへ載せる（7・48章のsession/controller boundaryをそのまま
   green——HEAT表示format変更に伴い`combat_v1_playable_match_screen_test.dart`
   の該当assertionのみ更新した（`HEAT 40 / 200` →
   `Shared HEAT 40`/`Finisher Unlock 200`）。
+
+---
+
+# Playable 1C.1 — Rule Clarity（実装追記）
+
+Production上の実ブラウザ検証で、ユーザーが以前指摘した5項目のうち
+「A. Discard」はRESOLVED、残り4項目（B. Energy／C. COUNTER／D.
+TECHNIQUE DOWN対象／E. PIN）がPARTIAL〜NOT RESOLVEDだった。今回は
+**ルールを一切変更せず**、UI/help/presentation層のみでこの4項目を
+解消する。
+
+## 50. Production UX Findings（今回の起点）
+
+| 項目 | Production検証結果 | 対応 |
+|---|---|---|
+| A. Discard | RESOLVED | 今回scope外（維持） |
+| B. 使用可能な技ENERGY | PARTIAL | 53〜57章 |
+| C. COUNTERの通常時使用可否 | PARTIAL | 58〜59章 |
+| D. 技のDOWN対象 | PARTIAL | 60〜61章 |
+| E. PINの状態・意味 | NOT RESOLVED | 62〜65章 |
+
+## 51. Strict Purpose / Non-Scope
+
+**目的**: プレイヤーが画面だけで、自分が使えるENERGYの種類・量、技の
+ENERGY COST、カードが使える／使えない理由、COUNTERの用途、TECHNIQUEの
+DOWN/STANDが誰に対するものか、PINの意味・条件、`PIN N`の意味、KOCとPIN
+の関係を理解できるようにする。
+
+**禁止事項（今回は一切変更しない）**: energy rules・card cost・discard
+rules・Counter legality・Technique result posture・PIN
+condition・KOC rule・Submission rule・wrestler balance・Production
+Data・RNG。すべてUI表示（新しいsnapshot fieldの追加を含む、下記52章）と
+文言のみ。
+
+大規模tutorial（tutorial state machine・spotlight overlay・tutorial
+persistence・step-by-step onboarding engine）は今回も作らない（30章
+「No Full Tutorial」と同じ方針を維持）。
+
+## 52. Energy Semantics 調査結果（実装前提）
+
+`lib/src/combat_v1/combat_v1_energy.dart`・`combat_v1_match_state.dart`・
+docs/combat_rules_v1.md 5章から確認した事実:
+
+- `CombatV1EnergyPool`（`CombatV1PlayerState.energyPool`）はレスラー
+  固有の**固定**capacity。技使用で減少しない。
+- `CombatV1PlayerState.spentEnergy`が「今サイクルで使用済みのENERGY」
+  （属性別Map）。自ターン開始時（`_startTurn`）に`spentEnergy: const {}`
+  へ戻すだけで、`energyPool`自体は一切変化しない。
+- 現在使用可能な量 = `energyPool.amountFor(attr) -
+  (spentEnergy[attr] ?? 0)`（`CombatV1PlayerState.availableEnergyFor`、
+  既存の公開getter）。
+- **結論**: ENERGYはターン内では消費されるが、自ターン開始時に全回復
+  する。「消費されない固定値」でも「永続的に減り続ける値」でもない
+  ため、`Current Energy`という名称は使わず、`Technique Energy`と
+  `Your Energy`（比較文脈）を採用した（8章の既定方針どおり）。
+- HEAT（`CombatV1MatchState.sharedHeat`）とは完全に別モデル（両者
+  共有・蓄積型・消費されない・FINISHER解禁の可否のみに関係）。ENERGY
+  は個人所有・属性別・技/COUNTERの支払いにのみ関係。UIでも別セクション
+  として表示する（既存の`_SharedStatusPanel`とHuman専用の新設
+  `_EnergyPanel`で分離、54章）。
+- FINISHER cardは「ENERGY COST」（技を宣言するための支払い）と
+  「HEAT解禁閾値」（`category==finisher`を宣言できる前提条件）が
+  独立した別条件（13章）。HEAT到達だけで「使用可能」と断定しない
+  （既存のfinisher HEAT hint/disabled messageを維持）。
+- Technique支払いは常に`allowWildSubstitution: true`
+  （docs 5.1章・Phase 1で確定）。COUNTER支払いは
+  `CombatV1RulesConfig.counterAllowsWildSubstitution`（既定false）。
+  今回のUI診断（56章）はTechniqueのみを対象とし、COUNTER側のポリシー
+  値をUIへ複製しない。
+
+**Snapshot変更**（表示専用の読み取りモデル拡張、legality判定は一切
+追加しない）:
+
+- `CombatV1PlayableHumanStatus`へ`energyPool`
+  （`CombatV1EnergyPool`）・`availableEnergy`
+  （`Map<CombatV1EnergyAttribute, int>`、全属性の現在使用可能量）を
+  追加。いずれも`CombatV1PlayerState`の既存fieldをそのまま読むだけ。
+- `CombatV1PlayableOpponentStatus`（CPU）には追加しない——Humanの
+  ENERGY構成のみを画面へ出す（9章「Match Screen Energy Panel」の
+  要求どおり、CPUの内部状態は公開しない）。
+- `CombatV1PlayablePendingAttackView`へ`energyCostTotal`
+  （`CombatV1PendingAttack.energyCost.total`）を追加。COUNTERの動的
+  必要量（7章「返される側のTECHNIQUEのENERGY COST総量」）を表示する
+  ために必要——宣言済みの攻撃の静的metadataであり、既に両者へ公開
+  済みの情報のため hidden information違反にならない。
+
+## 53. Match Screen Energy Panel（新設 `_EnergyPanel`）
+
+`combat_v1_playable_match_screen.dart`の`_HumanStatusPanel`直下に
+Human専用の`_EnergyPanel`（key:
+`combat_v1_playable_energy_panel`）を常時表示する（Setup画面だけの
+表示ではなく、Match中いつでも参照できる、9章）。
+
+- 表示形式: 保有量が1以上の属性のみ、`{属性} {使用可能}/{保有}`
+  （例: `打 2/5`）。保有量0の属性（そのレスラーが持たない属性）は
+  表示しない。
+- Tooltipで「ENERGYは技/COUNTERで消費されるが自ターン開始時に全回復
+  する」「HEATとは別リソース」の2点を明示する。
+
+## 54. Card Cost Comparison（`_HandCardTile`拡張）
+
+Technique cardの本文に、既存の`Cost {属性}{量}`表示に代えて
+`Energy {属性}{cost} / {available}`
+（`combatV1PlayableEnergyComparisonLabel`、`availableEnergy`が無い
+呼び出し元では従来の`Cost`表示にfallback）を表示する。UI側で新しい
+legality判定は行わない——2つの公開数値（技のCost・現在の使用可能量）
+を並べて見せるだけ。
+
+## 55. Why Unusable — Energy（安全な診断のみ）
+
+`_HandCardTile._disabledMessage()`は、`card.isUsable == false`の
+場合に理由を推測せず、安全に判定できる場合のみ具体的な理由を出す
+（既存のFINISHER HEAT不足判定と同じ方針を踏襲）:
+
+1. `card.category == counter` → 用途説明（58章）。
+2. FINISHER HEAT不足だと判定できる → 既存の`Requires HEAT
+   X (current Y)`。
+3. Technique cardで、**Core Engineの`resolveEnergyPayment`関数
+   そのもの**（`combat_v1_energy.dart`、再実装ではなく同一関数の
+   呼び出し）を、公開snapshot値（`availableEnergy`を仮想的な
+   pool・`spent: {}`として渡す）に対して再適用し、実際に支払いが
+   失敗すると判定できた場合のみ`Energy不足: {属性}{available} /
+   必要{cost}`を表示する。
+4. 上記いずれでもない場合は既存の汎用`現在は使用できません`に留める
+   （posture不一致・ROUGH制限など、UIが安全に断定できない理由は
+   推測しない）。
+
+この方式は「UI独自のlegality判定」ではない——`isUsable`自体は
+一貫してLegalAction（`CombatV1LegalActionEnumerator` →
+`CombatV1Engine.checkTechniqueLegality`）がSSOTのまま変更されず、
+`resolveEnergyPayment`はEngine本体が支払い解決に使っている関数を
+そのまま呼び出しているだけであり、UI側で新しい判定ロジックを実装
+していない。
+
+### 55.1 GitHub Codex App Finding修正（wild ENERGYを比較表示へ含める）
+
+PR #22作成後、GitHub連携のCodex App（`chatgpt-codex-connector`、オフ
+ラインで実施したexact-HEAD独立レビューとは別の自動レビュー統合）が
+`combatV1PlayableEnergyComparisonLabel`（54章「Card Cost
+Comparison」）に対してP2 findingを投稿した: 技のTECHNIQUE支払いは
+常に＊(wild)補完を許可する（docs/combat_rules_v1.md 5.1章）ため、
+具体属性だけが不足していても＊で支払えれば`isUsable == true`のまま
+だが、比較表示の分母（使用可能量）が具体属性の保有量のみだったため、
+実際は使用可能な技でも`打2 / 1`のように支払い不可能に見える表示に
+なりうる、という指摘だった。
+
+分母へ、その属性の具体的な使用可能量に加えて＊(wild)の使用可能量を
+加算するよう修正した。[cost]は`CombatV1EnergyCost.isValid`により
+＊自体をコストとして持たない（5.1章）ため、同じwild量を複数属性へ
+加算しても二重計上にはならない——Production Catalogの現行技は
+いずれも単一属性costのみのため、この表示は実際の支払い可否と常に
+一致する。新しいlegality判定の追加ではなく、既に公開されている
+＊保有量（`availableEnergy[wild]`）を比較表示へ含めるだけの変更
+であり、`_energyWouldFail`（55章、`resolveEnergyPayment`を再利用する
+安全診断）の判定結果とも整合する。
+
+## 56. Counter Semantics（新規help、既存sheetは維持）
+
+- 通常Action中（`counterResponsePending`ではない）のCounter cardは
+  必ずdisabled（Engineが`counterResponsePending`以外でCounter
+  actionを列挙しないため）。この場合の`_disabledMessage()`は
+  「相手の技を受ける時に使用」を返す（COUNTERの用途を明示、14・15章の
+  要求）。
+- COUNTER response sheet（`_CounterPromptSheet`）自体は既存のまま
+  （タイトル「返し技を選択」で通常カード選択と区別済み、16章の判断
+  どおり大改造しない）。
+- 新規追加: `_PendingAttackSummary`に「COUNTERに必要なENERGY: 合計X
+  （COUNTERカード自身の属性1種で支払います）」を追加
+  （`pending.energyCostTotal`、7章のCOUNTER動的cost仕様を画面へ
+  反映）。Counter card自身にも、pending文脈がある場合は`Cost {属性}
+  {合計}`を、無い場合は「必要量は返す技によって変わります」を表示
+  する。
+- Usability判定はCounter response時・通常Action時いずれも
+  `card.isUsable`（LegalActionのSSOT）のみを使用し、変更していない
+  （17章）。
+
+## 57. Opponent Target Semantics 調査結果（Technique DOWN/STAND）
+
+`combat_v1_technique.dart`・`combat_v1_pending_attack.dart`から確認
+した事実:
+
+- `CombatV1Technique`/`CombatV1PendingAttack`は
+  `requiredOpponentState`（`CombatV1WrestlerPosture?`）と
+  `resultOpponentState`（同）のみを持つ。**いずれも「相手」の状態を
+  指すfieldであり、使用者自身（自分）のpostureを変える field は
+  技モデルに一切存在しない**。
+- 自分（active player）のposture制約は技ごとの個別fieldではなく、
+  `selfDown`という汎用reasonCode（DOWN状態では技を宣言できない、11章）
+  として一律に効いている——起き上がり/RESTの画面（既存の
+  `_DownIndicator`）が既にこの制約を説明している。
+- **Self-Down Possibility Check（21章）の結論**: Techniqueによって
+  使用者自身のpostureが変化する仕組みは存在しない（コード上に
+  該当fieldが無いことをgrepで確認済み）。したがって「一律 相手→DOWN
+  に変更してよいか」のSTOP判定は不要——`resultOpponentState`は
+  常に相手を指すという前提のままラベリングしてよい。
+- 20章の例文「自分: STAND必要」は、実際のmodelには存在しない
+  self-required-posture fieldを指しているように読めるが、上記の
+  とおりそのfieldはコード上存在しない。「Technique使用者側の必要
+  postureが存在する場合は対象を明示する」という条件付き指示は、
+  存在しないため該当なし（vacuously satisfied）——per-card表示は
+  追加していない。32章「Card Detail」の`Required posture`は
+  `requiredOpponentState`（相手の必要状態）を指すと解釈し、59章の
+  とおり実装した。
+
+## 58. Opponent Target Label（実装）
+
+`combat_v1_playable_ui_formatters.dart`に3つの純関数を追加した:
+
+- `combatV1PlayableRequiredOpponentStateLabel` — 例:
+  `相手がSTANDの時のみ使用可`（`requiredOpponentState`が非nullの
+  場合のみ表示）。
+- `combatV1PlayableOpponentResultStateLabel` — 例: `相手 →
+  DOWN`（`resultOpponentState`が非nullの場合のみ表示。単独の
+  `DOWN`/`STAND`表示は行わない、19章）。
+- `combatV1PlayablePendingResultStateLabel` — COUNTER応答中の
+  pending攻撃（相手＝CPUが使用した技）専用。対象は防御側＝Human
+  自身になるため`あなた → DOWN`とラベリングする（カード面とは
+  向きが逆であることに注意——`_PendingAttackSummary`で使用）。
+  `resultOpponentState == null`の場合は`状態変化なし`。
+
+Technique cardには required/result いずれも「該当する場合のみ」
+表示し、`resultOpponentState == null`（状態変化なし）の技には何も
+表示しない（推測で「状態変化なし」を全カードに付与するとノイズに
+なるため、非nullの場合のみ明示する方針とした）。
+
+## 59. PIN Semantics 調査結果（最優先項目）
+
+`combat_v1_match_state.dart`・`combat_v1_engine.dart`・
+docs/combat_rules_v1.md 8・9章から確認した事実:
+
+- `CombatV1PlayerState.pinCardsHeld`は**保有しているPINカードの
+  物理枚数**（共有4枚、開始時各2枚）であり、「PINカウント」
+  （kick outの1/2/2.9/3カウント）とは**別概念**。旧UI表示
+  `PIN {pinCardsHeld}`の`{pinCardsHeld}`はこのカード枚数であり、
+  カウントの意味ではない——ユーザー指摘のとおり初見では誤解を招く
+  表記だった。
+- PIN action（`declarePin`、通常PIN）は攻撃側が保有PINカードを1枚
+  使用して開始する。1/2カウントでkick outされると、その1枚が攻撃側
+  →防御側へ移動する（最低1枚保証あり）。2.9カウントでは移動しない。
+  DIRECT PINも同様にPINカードを使用する。
+- PINのカウント（1/2/2.9/3）は防御側の**KOC**から一括で決まる
+  （表: docs 8.2章）。KOC支払いは防御側のみが行う。KICK OUTは
+  「保有していれば必ず行う」自動判定（選択肢は無い）。
+- KOC（初期値10）はPINのKICK OUTと、SUBMISSIONからのESCAPE
+  （10章）の両方に使う共通リソース。
+- 通常PINの宣言条件: 相手がDOWN・そのターン中にTECHNIQUEを成功
+  させている・自分がROUGH技をそのターン使用していない、の3条件
+  （checkPinLegality）。既存の`CombatV1LegalActionEnumerator`が
+  legalなときのみPIN actionを列挙する。
+
+## 60. PIN Status Label（実装、`PIN N`廃止）
+
+`_StatusPanelShell`の表示を`PIN {pinCardsHeld}`から**`PIN Cards
+{pinCardsHeld}`**へ変更した（key:
+`combat_v1_playable_pin_cards_text`）。曖昧な`PIN N`はUI上どこにも
+残していない。近傍にTooltipで「PINを仕掛ける際に使用する保有カード
+枚数です（開始時2枚）。KICK OUTの結果次第で相手との間を移動します」
+を追加した（PIN resourceの意味の説明、24章）。
+
+Match resultのcount表示（PIN ATTEMPT / KICK OUT / 3 COUNT — MATCH
+OVER、既存Playable 1Cの`combat_v1_playable_feedback_formatters.dart`）
+は無変更のまま維持し、`PIN Cards`という語とは明確に別のfeedback
+として扱われている（28章「PIN Card vs Count Clarity」）。
+
+## 61. PIN Action Condition Help（実装）
+
+PIN button（`combat_v1_playable_action_pin`）にTooltipを追加した:
+「PINカードを1枚使ってDOWN中の相手にPINを仕掛けます（このターン中に
+技を成功させている場合のみ選択できます）」。完全な条件の羅列はせず、
+実際にLegalActionが存在する時だけbuttonが表示される既存の挙動は
+維持している（25章）。
+
+## 62. KOC + PIN Relation（実装）
+
+Human/CPU status panelのKOC Tooltipを「PINのKICK OUTやSubmissionから
+の脱出に使用するリソースです（開始時10、防御側のみ消費）」へ更新した
+（26章）。KICK OUT時の実際のKOC delta（`{owner} KOC {before} →
+{after}`）は既存Playable 1Cの`_LatestFeedbackBanner`
+（`combat_v1_playable_feedback_formatters.dart`、無変更）がそのまま
+表示し続ける。
+
+### 62.1 Codex Review Major Finding修正（決着条件の表現）
+
+初版の用語ヘルプ（63章）KOC説明は「尽きると3カウント／GIVE UPで試合
+が決着します」という文言だった。Codex独立レビューで、Core
+semantics上の決着条件は「KOC残量が0になること」ではなく「その時点で
+要求されるKOC costを支払えないこと」である指摘を受けた
+（`combat_v1_pin_rules.dart`の`determinePinCountResult`——
+`CombatV1RulesConfig`の閾値（既定: 1カウント3／2カウント2／
+2.9カウント1）のいずれも支払えない場合に`null`を返し、
+`CombatV1Engine._resolvePin`がPIN決着とする。SUBMISSIONも同様に
+`rules.submissionEscapeKocCost`を支払えない場合にGIVE UP、
+`_resolveSubmission`参照）。既定値では最終的な閾値がKOC1のため
+「残り0で決着」という結果になりやすいが、これはrules
+configの既定値に起因する結果であり、決着条件そのものの定義ではない
+——ruleを変更すれば「remaining KOC=2・required KOC=3」のように
+0以外でも支払い不能になり得る。
+
+用語ヘルプの文言を「必要なKOCを支払えないと、3カウント／GIVE UPで
+試合が決着します」へ修正した（`combat_v1_playable_match_screen.dart`）。
+PIN／SUBMISSION双方に共通する説明として成立し、UI側で新しい
+legality/決着判定ロジックを実装していない（既存の`_resolvePin`/
+`_resolveSubmission`が確定させた結果を説明する文言のみの変更）。
+
+## 63. Compact Rule Help（新設ダイアログ、tutorialではない）
+
+AppBarへ新しいIconButton（key:
+`combat_v1_playable_rules_help_button`、`Icons.help_outline`）を追加
+し、`_showRulesHelp()`でTechnique
+Energy／Shared HEAT／COUNTER／PIN Cards／KOCの5用語を1〜2文ずつ
+説明するAlertDialogを表示する。tutorial state machine・spotlight
+overlay・tutorial persistence・step-by-step onboarding engineは
+一切実装していない（29〜30章の既定方針を維持）。
+
+## 64. Card Detail（32章の反映）
+
+`_HandCardTile`のTechnique分岐に、既存のCategory/Energy Cost
+（比較表示化）/Damage/HEATに加え、Required posture
+（`requiredOpponentState`）・Result opponent posture
+（`resultOpponentState`）を追加した。COUNTER分岐には動的Costの
+説明（56章）を追加した。FINISHER thresholdの表示（Requires HEAT
+hint）は既存のまま。
+
+## 65. Hidden Information Regression（維持確認）
+
+`CombatV1PlayableOpponentStatus`（CPU）にはENERGY関連fieldを一切
+追加していない——構造的にCPUのENERGY構成をUIへ渡すことができない
+（コンパイル時に該当fieldが存在しない）。`_EnergyPanel`はHuman
+専用の1インスタンスのみで、CPU用のEnergyパネルは存在しない。既存の
+hidden information regression test（40章）に加え、63章のテストで
+Energy panelがHuman専用であることも確認した。
+
+## 66. Scope / Non-Scope（1C.1）
+
+**Scope**: 上記のUI表示・snapshot読み取りモデルの拡張（Energy pool/
+available energy/pending energy cost totalの3 field追加）・
+formatter追加・widgetのラベル/Tooltip/Dialog追加。
+
+**Non-Scope（今回変更しない）**:
+
+- energy rules・card cost・discard rules・Counter legality・
+  Technique result posture・PIN condition・KOC rule・Submission
+  rule・wrestler balance・Production Data・RNG（Core Engine層は
+  一切変更していない）。
+- disabled card tap・scroll cue・controller feedback test深化などの
+  Playable 1C既知Minor（33章、今回は同じwidgetを触った箇所以外は
+  意図的に手を付けていない）。
+- Flutter SDK pinning・deploy provenance・build reproducibility
+  （34章、別follow-up）。
+- Balance Dashboard 1B branch（35章、PR未作成のまま保留・今回一切
+  変更していない）。
+- Phase 12B-2B/2C（今回のscope外、リークなし）。
+
+## 67. Tests（Playable 1C.1）
+
+- **Widget**
+  （`test/combat_v1/playable_ui/combat_v1_playable_1c1_clarity_test.dart`、
+  新設）: Energy panel表示・保有量0属性の非表示・card cost
+  comparison・`resolveEnergyPayment`経由の安全なEnergy不足診断
+  （支払い可能な場合に誤って断定しないケースも含む）・Shared
+  HEATとの分離・CPU側非公開・通常Action中Counter cardの用途
+  caption・Counter応答時のCOUNTER動的cost表示・Technique
+  cardのrequired/result posture表示（相手→DOWN・相手がSTAND/DOWNの
+  時のみ使用可）・pending攻撃の`あなた → DOWN`表示・`PIN N`が存在
+  しないこと/`PIN Cards N`表示・PIN Cards Tooltip・PIN button
+  Tooltip・KOC Tooltip（PIN/Submission両方に言及）・用語ヘルプ
+  ダイアログの内容。全17 caseがgreen。
+- 既存Playable 1A/1B/1C test（1721件）はいずれも無変更のままgreen
+  （snapshot/fixture側のみ、新規必須fieldへ既定値を追加する形で
+  更新した——`CombatV1PlayableHumanStatus.energyPool`/
+  `availableEnergy`・`CombatV1PlayablePendingAttackView.energyCostTotal`）。
+- Mobile overflow test（320×720・390×844、既存
+  `combat_v1_playable_mobile_overflow_test.dart`、無変更）も新しい
+  Energy panel/card comparison行を含めてgreenのまま——`_HandRow`の
+  card高さを182px→232pxへ拡張し、新規行が`SingleChildScrollView`の
+  範囲内に収まるようにした。

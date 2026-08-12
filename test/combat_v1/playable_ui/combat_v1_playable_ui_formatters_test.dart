@@ -2,6 +2,7 @@
 // （lib/src/combat_v1/playable_ui/combat_v1_playable_ui_formatters.dart）。
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_energy.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_match_lifecycle.dart';
@@ -189,6 +190,53 @@ void main() {
 
     test('空・全0はハイフン', () {
       expect(combatV1PlayableEnergyCostLabel(const {}), '-');
+    });
+  });
+
+  group('combatV1PlayableEnergyComparisonLabel（GitHub Codex App Finding、'
+      'PR #22）', () {
+    test('具体属性が不足していても＊(wild)を分母へ加算する', () {
+      // Cost 打2に対し、具体的な打の使用可能量は1のみだが＊が1あるため、
+      // TECHNIQUE支払いは常にwild補完を許可する（docs/combat_rules_v1.md
+      // 5.1章）ことにより実際は支払い可能（isUsable==trueになりうる）。
+      // 分母が具体属性のみ（1）だと「打2 / 1」に見え、支払い不可能だと
+      // 誤解させる——＊込みの2でなければならない。
+      final cost = CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 2});
+      final label = combatV1PlayableEnergyComparisonLabel(cost, {
+        CombatV1EnergyAttribute.strike: 1,
+        CombatV1EnergyAttribute.wild: 1,
+      });
+      expect(label, '打2 / 2');
+    });
+
+    test('＊が無い場合は具体属性の使用可能量のみを表示する（従来どおり）', () {
+      final cost = CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 2});
+      final label = combatV1PlayableEnergyComparisonLabel(cost, {
+        CombatV1EnergyAttribute.strike: 3,
+      });
+      expect(label, '打2 / 3');
+    });
+
+    test('複数属性costでも、それぞれへ同じ＊使用可能量を加算する', () {
+      final cost = CombatV1EnergyCost({
+        CombatV1EnergyAttribute.strike: 2,
+        CombatV1EnergyAttribute.throwing: 1,
+      });
+      final label = combatV1PlayableEnergyComparisonLabel(cost, {
+        CombatV1EnergyAttribute.strike: 1,
+        CombatV1EnergyAttribute.throwing: 0,
+        CombatV1EnergyAttribute.wild: 1,
+      });
+      expect(label, '打2 / 2 ・ 投1 / 1');
+    });
+
+    test('costが空の場合はハイフン', () {
+      expect(
+        combatV1PlayableEnergyComparisonLabel(CombatV1EnergyCost.zero, {
+          CombatV1EnergyAttribute.wild: 3,
+        }),
+        '-',
+      );
     });
   });
 }
