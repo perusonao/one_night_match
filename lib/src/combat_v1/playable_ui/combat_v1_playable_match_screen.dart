@@ -377,6 +377,17 @@ class _CombatV1PlayableMatchScreenState
                         child: IgnorePointer(
                           ignoring: _cpuBusy,
                           child: SingleChildScrollView(
+                            // Review Findings Fix（Minor、4.1章）——mobile
+                            // visibility testが、この領域の実際のclip
+                            // viewport（Expandedへ割り当てられた高さ）を
+                            // 正確に取得できるようにするためのkey。この
+                            // Viewport矩形こそが「実際に見えている範囲」
+                            // であり、画面全体のサイズをそのまま使うと
+                            // AppBar/他panelの分だけ広く見積もってしまう
+                            // （実際にはこの範囲外はscroll clipで見えない）。
+                            key: const Key(
+                              'combat_v1_playable_technique_area_scroll',
+                            ),
                             child: _MatchBody(
                               snapshot: snapshot,
                               selectedCardInstanceId: _selectedCardInstanceId,
@@ -2043,6 +2054,20 @@ class _PendingAttackSummary extends StatelessWidget {
             key: const Key('combat_v1_playable_pending_counter_prevents_hint'),
             style: const TextStyle(fontSize: 11, color: Colors.white54),
           ),
+          if (rough) ...[
+            const SizedBox(height: 2),
+            Text(
+              // Playable 2A-3 Review Findings Fix（Minor）——ROUGHの
+              // 2つの効果（宣言時点で確定するこのターンPIN不可／成立
+              // ベースの次ターンTECHNIQUE制限）は判定基準が異なり、
+              // Counterで防げるものと防げないものが混在する。「ROUGHの
+              // 全効果を防げる」という誤解を避けるため、prevents hintとは
+              // 別行で明示する（15.1章）。
+              combatV1PlayableRoughCounterAsymmetryNote(),
+              key: const Key('combat_v1_playable_pending_rough_counter_note'),
+              style: const TextStyle(fontSize: 11, color: Colors.white54),
+            ),
+          ],
           const SizedBox(height: 2),
           Text(
             // Playable 1C.1「COUNTER Semantics」——COUNTERの必要ENERGYは

@@ -350,6 +350,18 @@ void main() {
         find.byKey(const Key('combat_v1_playable_pending_counter_prevents_hint')),
       );
       expect(hint.data, contains('自動PINへの移行'));
+
+      // Review Findings Fix（Major）: DIRECT PIN badgeのTooltipは、
+      // 解決後の相手DOWN条件を含む（無条件のPIN移行と誤読させない）。
+      final tooltip = tester.widget<Tooltip>(
+        find.descendant(
+          of: find.byKey(
+            const Key('combat_v1_playable_pending_direct_pin_badge'),
+          ),
+          matching: find.byType(Tooltip),
+        ),
+      );
+      expect(tooltip.message, contains('DOWN'));
     });
 
     testWidgets('Submission incoming: SUBMISSION badgeとSubmission防止hintを表示する', (
@@ -414,6 +426,76 @@ void main() {
       );
       expect(find.text('FINISHER · SUBMISSION'), findsOneWidget);
     });
+
+    testWidgets(
+      'ROUGH incoming: ROUGH badgeに加え、Counterで防げるもの／防げない'
+      'ものを区別する非対称性noteを表示する（Review Findings Fix Minor、'
+      '15.1章）',
+      (tester) async {
+        final snapshot = testSnapshot(
+          phase: CombatV1MatchPhase.counterResponsePending,
+          isHumanInputRequired: true,
+          human: testHumanStatus(
+            hand: [
+              testCounterCard(instanceId: 'c1'),
+              testTechniqueCard(instanceId: 'h1'),
+            ],
+          ),
+          pendingAttack: testPendingAttack(technique: _roughTechnique),
+          legalActions: const [
+            CombatV1CounterAction(actorPlayerIndex: 0, cardInstanceId: 'c1'),
+            CombatV1DeclineCounterAction(actorPlayerIndex: 0),
+          ],
+        );
+        await tester.pumpWidget(
+          _wrap(_screen(FakePlayableMatchSession(snapshot))),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('combat_v1_playable_pending_rough_badge')),
+          findsOneWidget,
+        );
+        final note = tester.widget<Text>(
+          find.byKey(
+            const Key('combat_v1_playable_pending_rough_counter_note'),
+          ),
+        );
+        expect(note.data, contains('次ターン'));
+        expect(note.data, contains('既に'));
+      },
+    );
+
+    testWidgets(
+      '非ROUGH incoming: rough counter noteを表示しない', (tester) async {
+        final snapshot = testSnapshot(
+          phase: CombatV1MatchPhase.counterResponsePending,
+          isHumanInputRequired: true,
+          human: testHumanStatus(
+            hand: [
+              testCounterCard(instanceId: 'c1'),
+              testTechniqueCard(instanceId: 'h1'),
+            ],
+          ),
+          pendingAttack: testPendingAttack(),
+          legalActions: const [
+            CombatV1CounterAction(actorPlayerIndex: 0, cardInstanceId: 'c1'),
+            CombatV1DeclineCounterAction(actorPlayerIndex: 0),
+          ],
+        );
+        await tester.pumpWidget(
+          _wrap(_screen(FakePlayableMatchSession(snapshot))),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(
+            const Key('combat_v1_playable_pending_rough_counter_note'),
+          ),
+          findsNothing,
+        );
+      },
+    );
 
     testWidgets(
       'Counter unavailable: Counter選択を案内せず、incoming attack情報は'

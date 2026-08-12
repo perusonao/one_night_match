@@ -347,12 +347,135 @@ void main() {
     });
   });
 
-  group('DIRECT PIN Wording（通常PIN legalityと混同しない、9章）', () {
-    test('「自動でPINへ」と説明し、通常PIN選択とは別経路であることを明示する', () {
-      final detail = combatV1PlayableDirectPinTraitDetail();
-      expect(detail, contains('自動でPIN'));
-    });
-  });
+  group(
+    'DIRECT PIN Wording（Review Findings Fix・Major——DOWN条件を含める、'
+    '9章）',
+    () {
+      test(
+        '「自動でPINへ」と説明しつつ、解決後の相手DOWN条件・通常PIN選択とは'
+        '別経路であることを明示する（無条件PINと誤読させない）',
+        () {
+          final detail = combatV1PlayableDirectPinTraitDetail();
+          expect(detail, contains('自動でPIN'));
+          // Review Findings Fix（Major）: `_resolvePendingAttack`は
+          // `effectiveDirectPin`が真でも、解決後に相手がDOWNの場合にのみ
+          // 自動PINへ移行する（`next.opponent.posture == down`ガード）。
+          // 「成立すれば無条件でPINへ移行する」という誤読を防ぐため、
+          // DOWN条件を必ず含める。
+          expect(detail, contains('DOWN'));
+          // 通常のPIN LegalAction判定とは別概念であることの明示。
+          expect(detail, contains('別経路'));
+        },
+      );
+
+      test('無条件のPIN移行を断定しない（「成立時、自動でPINへ移行します」単独では'
+          '終わらない）', () {
+        final detail = combatV1PlayableDirectPinTraitDetail();
+        // 修正前の断定的な文言（DOWN条件を含まない完全一致）ではないこと。
+        expect(detail, isNot('成立時、自動でPINへ移行します（通常のPIN選択とは別の経路です）'));
+      });
+    },
+  );
+
+  group(
+    'DIRECT PIN — DOWNを保証しない技での挙動（Review Findings Fix Major、'
+    'regression A/B/C）',
+    () {
+      // A. directPin: true・resultOpponentState: null（成立してもSTANDの
+      // まま＝相手DOWNを保証しない非FINISHER技）。
+      const nonFinisherNoDownGuarantee = CombatV1Technique(
+        id: 'test_trait_direct_pin_no_down',
+        name: 'テストダイレクトピン技（DOWN非保証）',
+        category: CombatV1CardCategory.normal,
+        attribute: CombatV1EnergyAttribute.throwing,
+        energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.throwing: 2}),
+        damage: 20,
+        heatGain: 20,
+        family: CombatV1TechniqueFamily.slam,
+        directPin: true,
+        // resultOpponentStateは意図的に指定しない（null＝状態変化なし）。
+      );
+
+      // B. finisherType == directPinかつDOWNを保証しない構成。
+      const finisherNoDownGuarantee = CombatV1Technique(
+        id: 'test_trait_finisher_direct_pin_no_down',
+        name: 'テストダイレクトピンフィニッシャー（DOWN非保証）',
+        category: CombatV1CardCategory.finisher,
+        attribute: CombatV1EnergyAttribute.throwing,
+        energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.throwing: 3}),
+        damage: 30,
+        heatGain: 40,
+        family: CombatV1TechniqueFamily.powerbomb,
+        finisherType: CombatV1FinisherType.directPin,
+        // resultOpponentStateは意図的に指定しない。
+      );
+
+      // C. DOWNになるDirect PIN技（既存の_directPinTechnique/
+      // _directPinFinisher相当、resultOpponentStateは持たないが
+      // trait自体はCore「解決後の相手posture」を条件とするだけで
+      // technique自身のresultOpponentStateの有無には依存しない——
+      // ここでは「DOWNになる場合」の代表としてresultOpponentState:
+      // downを明示した構成を使う）。
+      const guaranteesDown = CombatV1Technique(
+        id: 'test_trait_direct_pin_guarantees_down',
+        name: 'テストダイレクトピン技（DOWN確定）',
+        category: CombatV1CardCategory.normal,
+        attribute: CombatV1EnergyAttribute.throwing,
+        energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.throwing: 2}),
+        damage: 20,
+        heatGain: 20,
+        family: CombatV1TechniqueFamily.slam,
+        resultOpponentState: CombatV1WrestlerPosture.down,
+        directPin: true,
+      );
+
+      test(
+        'A. DOWNを保証しない非FINISHER Direct PIN技でもDIRECT PIN trait'
+        'は表示対象になり、detail文言は無条件のPIN移行を断定しない',
+        () {
+          expect(
+            combatV1PlayableTechniqueHasEffectiveDirectPin(
+              nonFinisherNoDownGuarantee,
+            ),
+            isTrue,
+          );
+          final detail = combatV1PlayableDirectPinTraitDetail();
+          expect(detail, contains('DOWN'));
+          expect(detail, isNot(contains('成立時、自動でPINへ移行します（通常のPIN選択とは別の経路です）')));
+        },
+      );
+
+      test(
+        'B. DOWNを保証しないDirect PIN FINISHERでも、同じDOWN条件付き'
+        'detail文言が適用される（通常Direct PINと同一semantics）',
+        () {
+          expect(
+            combatV1PlayableTechniqueHasEffectiveDirectPin(
+              finisherNoDownGuarantee,
+            ),
+            isTrue,
+          );
+          expect(
+            combatV1PlayableFinisherResolutionBadgeLabel(
+              finisherNoDownGuarantee.finisherType!,
+            ),
+            'FINISHER · PIN',
+          );
+          // FINISHER · PINのdetailも同じcombatV1PlayableDirectPinTraitDetail
+          // を使うため、DOWN条件が含まれる。
+          final detail = combatV1PlayableDirectPinTraitDetail();
+          expect(detail, contains('DOWN'));
+        },
+      );
+
+      test('C. DOWNになるDirect PIN技でもtrait表示は消えない', () {
+        expect(
+          combatV1PlayableTechniqueHasEffectiveDirectPin(guaranteesDown),
+          isTrue,
+        );
+      });
+    },
+  );
 
   group('ROUGH Wording（15章の2つの判定基準を区別する）', () {
     test('「使用したターンはPINできない」「成立後は次ターン1枚制限」を両方含む', () {
@@ -436,6 +559,49 @@ void main() {
       expect(summary, contains('Submission'));
     });
   });
+
+  group(
+    'ROUGH + Counter Asymmetry（Review Findings Fix・Minor、15.1章）',
+    () {
+      test(
+        '次ターンTECHNIQUE制限は防げる（成立ベース——Counter成立でこの技は'
+        '成立しないため、lastSuccessfulTechniqueが更新されずtriggerが'
+        '発生しない）',
+        () {
+          final note = combatV1PlayableRoughCounterAsymmetryNote();
+          expect(note, contains('次ターン'));
+          expect(note, contains('防げます'));
+        },
+      );
+
+      test(
+        'このターンのPIN制限は既に発生済みで、Counterでは防げないことを'
+        '明示する（宣言ベース——`roughTechniqueUsedThisTurn`は宣言時点で'
+        '確定し、Counterされても取り消されない）',
+        () {
+          final note = combatV1PlayableRoughCounterAsymmetryNote();
+          expect(note, contains('既に'));
+          expect(note, contains('PIN'));
+          expect(note, contains('変わりません'));
+        },
+      );
+
+      test(
+        '「ROUGHの全効果を防げる」という意味にならない——2つの異なる'
+        '判定基準（防げるもの／防げないもの）を区別して両方言及する',
+        () {
+          final note = combatV1PlayableRoughCounterAsymmetryNote();
+          // 全部防げる、と読める断定文言を含まない。
+          expect(note, isNot(contains('すべて防')));
+          expect(note, isNot(contains('全て防')));
+          expect(note, isNot(contains('ROUGHを無効')));
+          // 防げるもの・防げないものの両方に触れている。
+          expect(note, contains('防げます'));
+          expect(note, contains('変わりません'));
+        },
+      );
+    },
+  );
 
   group('Family / Group Display Label', () {
     test('主要familyのlabelがCore enum名と対応する', () {

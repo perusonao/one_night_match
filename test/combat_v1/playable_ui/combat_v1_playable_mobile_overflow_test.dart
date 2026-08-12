@@ -5,6 +5,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_counter.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_energy.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
@@ -41,6 +42,38 @@ const CombatV1Technique _submissionFinisherTechnique = CombatV1Technique(
   heatGain: 40,
   family: CombatV1TechniqueFamily.legLock,
   finisherType: CombatV1FinisherType.submission,
+);
+
+// Review Findings Fix（Minor、4.1章）——jack_kurocho_driver相当（ROUGH +
+// Direct PIN FINISHER）に、長めの名前・required/result postureを追加した
+// 情報量最大級のTechnique card fixture。isUsable:falseと組み合わせて
+// unusable reason行も同時に表示させ、Tier1〜3の全情報が同時に存在する
+// 代表ケースを作る。
+const CombatV1Technique _maxInfoTechnique = CombatV1Technique(
+  id: 'test_mobile_max_info',
+  name: 'テスト最大情報量ダイレクトピンフィニッシャー・ドライバー',
+  category: CombatV1CardCategory.finisher,
+  attribute: CombatV1EnergyAttribute.rough,
+  energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.rough: 3}),
+  damage: 30,
+  heatGain: 50,
+  requiredOpponentState: CombatV1WrestlerPosture.stand,
+  resultOpponentState: CombatV1WrestlerPosture.down,
+  family: CombatV1TechniqueFamily.driver,
+  finisherType: CombatV1FinisherType.directPin,
+);
+
+/// [_maxInfoTechnique]（family: driver、throwing group）を実際に返せる
+/// Counter fixture——`testCounterCard()`既定の`testCounter`は
+/// `counterableFamilies: [elbow]`のみのため一致しない
+/// （`combat_v1_playable_ui_test_fixtures.dart`参照）。family/group
+/// information（`combat_v1_playable_counter_family_match`）が実際に
+/// 描画される状態でreachability testを行うため、専用のCounterを構築する。
+final CombatV1Counter _maxInfoMatchingCounter = CombatV1Counter(
+  id: 'test_mobile_counter_throw',
+  name: 'テスト投げ技カウンター',
+  attribute: CombatV1EnergyAttribute.throwing,
+  counterableGroups: const [CombatV1TechniqueFamilyGroup.throwing],
 );
 
 Widget _wrap(Widget child) => MaterialApp(
@@ -950,6 +983,388 @@ void main() {
             await tester.pumpAndSettle();
             expect(tester.takeException(), isNull);
             expect(find.text('FINISHER · SUBMISSION'), findsOneWidget);
+          }, size: size);
+        },
+      );
+    }
+  });
+
+  // Review Findings Fix（Minor、Playable 2A-3独立レビュー「4章 Mobile
+  // Visibility Tests」）——`tester.takeException() == null`だけでは
+  // 「情報が読める」ことを保証しない（Playable 2A-2で発生した
+  // regressionと同じ穴）。ここでは`getRect`で実座標を取得し、重要情報
+  // widgetが実際にviewportとintersectしていることを検証する。
+  group('Mobile Visibility — Technique Card（Review Findings Fix、4.1章）', () {
+    for (final width in [320.0, 360.0, 390.0]) {
+      final size = Size(width, 780);
+
+      testWidgets(
+        '情報量最大級のTechnique card（ROUGH+FINISHER·PIN+posture+unusable '
+        'reason）: ${width.toInt()}px幅で主要情報が実際にviewport内へ表示される',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              // sharedHeat < finisherHeatThreshold → unusable reason
+              // （HEAT要件hint）が同時に表示される最大情報量構成。
+              sharedHeat: 0,
+              finisherHeatThreshold: 200,
+              human: testHumanStatus(
+                hand: [
+                  testTechniqueCard(
+                    instanceId: 'h1',
+                    technique: _maxInfoTechnique,
+                    isUsable: false,
+                  ),
+                ],
+              ),
+              legalActions: const [],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+
+            // Review Findings Fix（Minor、4.1章）: 画面全体の矩形ではなく、
+            // 実際のclip viewport（Technique areaのSingleChildScrollView
+            // 自身のrender box）を使う——画面全体を使うと、AppBar/他panel
+            // の分だけ過大に見積もり、実際にはscroll clipで見えない要素を
+            // 誤って「viewport内」と判定してしまう（旧実装でclipされても
+            // greenになるtestにしないための対応）。
+            final scrollAreaFinder = find.byKey(
+              const Key('combat_v1_playable_technique_area_scroll'),
+            );
+            // `.first`——このkeyed SingleChildScrollView自身のScrollable
+            // （欲しいのはこちら）に加え、内側の`_HandRow`（横scroll
+            // ListView）のScrollableも子孫として一致してしまうため、
+            // tree順で先に現れる外側（縦scroll）のものを選ぶ。
+            final scrollableFinder = find
+                .descendant(of: scrollAreaFinder, matching: find.byType(Scrollable))
+                .first;
+
+            // Review Findings Fix（Minor、4.1章）: 320pxなど狭幅では他panel
+            // （HP/KOC/Hand/PIN Cards行等）がより多く折り返され、Technique
+            // areaの実際のclip viewport高が狭くなることがある——この場合、
+            // 末尾情報（unusable reason等）は初期scroll位置では見えない。
+            // 「scroll前は見えない／scroll後に実際に見える」ことを実座標で
+            // 検証することで、旧実装でclipされたままgreenになるtestに
+            // しない（4章）。
+            Future<void> expectReachableInViewport(
+              Finder finder,
+              String label,
+            ) async {
+              expect(finder, findsOneWidget, reason: '$labelが見つからない');
+              var viewportRect = tester.getRect(scrollAreaFinder);
+              var rect = tester.getRect(finder);
+              if (!rect.overlaps(viewportRect)) {
+                await tester.scrollUntilVisible(
+                  finder,
+                  50,
+                  scrollable: scrollableFinder,
+                );
+                await tester.pumpAndSettle();
+                viewportRect = tester.getRect(scrollAreaFinder);
+                rect = tester.getRect(finder);
+              }
+              expect(
+                rect.overlaps(viewportRect),
+                isTrue,
+                reason:
+                    '$labelへ実際に到達できない（scroll後もviewport外）: '
+                    'rect=$rect, viewport=$viewportRect',
+              );
+            }
+
+            // Technique name（ellipsisで折り返されても、Text自体の
+            // 実座標が画面内にあれば読める＝視認性の代理指標として使う）。
+            await expectReachableInViewport(
+              find.text(_maxInfoTechnique.name),
+              'Technique name',
+            );
+            // trait badge（FINISHER · PINとROUGHの両方）。
+            await expectReachableInViewport(
+              find.byKey(
+                const Key('combat_v1_playable_card_finisher_resolution_badge'),
+              ),
+              'FINISHER resolution badge',
+            );
+            await expectReachableInViewport(
+              find.byKey(const Key('combat_v1_playable_card_rough_badge')),
+              'ROUGH badge',
+            );
+            // DMG/HEAT行（keyが無いため内容で特定する）。
+            await expectReachableInViewport(
+              find.textContaining('DMG ${_maxInfoTechnique.damage}'),
+              'DMG/HEAT line',
+            );
+            // Energy行。
+            await expectReachableInViewport(
+              find.byKey(const Key('combat_v1_playable_card_energy_line')),
+              'Energy line',
+            );
+            // required/result posture行。
+            await expectReachableInViewport(
+              find.byKey(
+                const Key('combat_v1_playable_card_required_posture'),
+              ),
+              'required posture line',
+            );
+            await expectReachableInViewport(
+              find.byKey(const Key('combat_v1_playable_card_result_posture')),
+              'result posture line',
+            );
+            // unusable reason。
+            await expectReachableInViewport(
+              find.byKey(
+                const Key('combat_v1_playable_card_disabled_message'),
+              ),
+              'unusable reason',
+            );
+          }, size: size);
+        },
+      );
+
+      testWidgets(
+        '選択可能なTechnique card: ${width.toInt()}px幅でtap targetへ実際に'
+        'hit-testできる',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              sharedHeat: 200,
+              finisherHeatThreshold: 200,
+              human: testHumanStatus(
+                hand: [
+                  testTechniqueCard(
+                    instanceId: 'h1',
+                    technique: _maxInfoTechnique,
+                  ),
+                ],
+              ),
+              legalActions: const [
+                CombatV1TechniqueAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'h1',
+                ),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pump();
+
+            final cardFinder = find.byKey(
+              const Key('combat_v1_playable_hand_card_h1'),
+            );
+            expect(cardFinder, findsOneWidget);
+            await tester.ensureVisible(cardFinder);
+            await tester.pumpAndSettle();
+
+            // Review Findings Fix（Minor、4.1章）: `tester.tap()`は
+            // widgetの「全高込みの幾何中心」を狙うが、狭幅×実際のprimary
+            // action button併存時は、ensureVisible後も中心の数十pxが
+            // viewport外に残ることがある（`_MatchBody`のExpanded/
+            // SingleChildScrollViewの実高がcard高より小さいため）。これは
+            // real deviceでの実際の未到達を意味しない——指は現在
+            // 見えている範囲内の任意の点を押せる。そのため、widget中心
+            // ではなく「card rectとviewportの交差領域中心」（＝実際に
+            // 見えていて押せる点）でhit-testを検証する
+            // （`hitTestOnBinding`と同じ考え方、24章）。
+            // 実際のclip viewport（Technique areaのSingleChildScrollView
+            // 自身のrender box——`Expanded`が割り当てた高さそのもの）を
+            // 使う。画面全体の矩形をそのまま使うと、AppBar/他panel分
+            // 過大に見積もり、実際にはscroll clipで見えない領域まで
+            // 「見えている」と誤判定してしまう。
+            final clipViewportRect = tester.getRect(
+              find.byKey(
+                const Key('combat_v1_playable_technique_area_scroll'),
+              ),
+            );
+            final cardRect = tester.getRect(cardFinder);
+            final visibleRect = cardRect.intersect(clipViewportRect);
+            expect(
+              visibleRect.width > 0 && visibleRect.height > 0,
+              isTrue,
+              reason:
+                  'cardが実際のclip viewportと全く交差していない'
+                  '（真に到達不能）: card=$cardRect, '
+                  'viewport=$clipViewportRect',
+            );
+            // `tapAt`は指定座標へ実際のpointer eventを送るだけで
+            // widget-targetとの一致チェックは行わない——real deviceの
+            // タップと同じ動作。「そこを押すと本当に選択状態になるか」を
+            // 後続のbutton state assertionで検証することで、
+            // hit-testabilityを実際の挙動ベースで確認する。
+            await tester.tapAt(visibleRect.center);
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+
+            // 選択状態（selectedならTechnique action buttonが有効化される）
+            // への到達を確認する。`_ActionButton`（private widget）が
+            // 内部で`FilledButton`を構築するため、descendantとして取得する。
+            final techniqueButton = find.byKey(
+              const Key('combat_v1_playable_action_technique'),
+            );
+            expect(techniqueButton, findsOneWidget);
+            final filledButton = find.descendant(
+              of: techniqueButton,
+              matching: find.byType(FilledButton),
+            );
+            expect(
+              tester.widget<FilledButton>(filledButton).onPressed,
+              isNotNull,
+              reason: '見えている範囲をtapしてもcard選択状態にならなかった',
+            );
+          }, size: size);
+        },
+      );
+    }
+  });
+
+  // Review Findings Fix（Minor、4.2章）——Counter応答UIも同様に、
+  // 「overflowしない」だけでなく「重要情報へ実際に到達できる」ことを
+  // 実座標のintersection／scroll reachabilityで検証する。
+  group('Mobile Visibility — Counter UI（Review Findings Fix、4.2章）', () {
+    for (final width in [320.0, 360.0, 390.0]) {
+      final size = Size(width, 780);
+
+      testWidgets(
+        '情報量最大級のincoming Technique（ROUGH+FINISHER·PIN+family/group '
+        '+DMG+HEAT+posture）: ${width.toInt()}px幅でCounter応答UIの主要要素へ'
+        '実際に到達できる',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.counterResponsePending,
+              isHumanInputRequired: true,
+              human: testHumanStatus(
+                hand: [
+                  // Review Findings Fix（Minor、4.2章）: `_maxInfoTechnique`
+                  // （family: driver）を実際に返せるCounterを使う——既定の
+                  // `testCounterCard()`（family: elbowのみ対応）では
+                  // family/group informationが描画されない。
+                  CombatV1PlayableHandCard(
+                    instanceId: 'c1',
+                    cardId: _maxInfoMatchingCounter.id,
+                    category: CombatV1CardCategory.counter,
+                    displayName: _maxInfoMatchingCounter.name,
+                    isUsable: true,
+                    counter: _maxInfoMatchingCounter,
+                  ),
+                  testTechniqueCard(instanceId: 'h1'),
+                ],
+              ),
+              pendingAttack: testPendingAttack(technique: _maxInfoTechnique),
+              legalActions: const [
+                CombatV1CounterAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'c1',
+                ),
+                CombatV1DeclineCounterAction(actorPlayerIndex: 0),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull);
+
+            final viewportRect = Offset.zero & size;
+
+            // 到達確認: viewport内に無ければ、まずsheet内をscrollして
+            // 到達させてから確認する（旧実装でclipされたままgreenになる
+            // testにしない）。
+            Future<void> expectReachable(Finder finder, String label) async {
+              expect(finder, findsOneWidget, reason: '$labelが見つからない');
+              var rect = tester.getRect(finder);
+              if (!rect.overlaps(viewportRect)) {
+                await tester.scrollUntilVisible(
+                  finder,
+                  100,
+                  scrollable: find.byType(Scrollable).first,
+                );
+                await tester.pumpAndSettle();
+                rect = tester.getRect(finder);
+              }
+              expect(
+                rect.overlaps(viewportRect),
+                isTrue,
+                reason: '$labelへ到達できない: rect=$rect, viewport=$viewportRect',
+              );
+            }
+
+            // incoming summary（DMG/HEAT/posture結果）。
+            await expectReachable(
+              find.byKey(const Key('combat_v1_playable_pending_effect_line')),
+              'incoming summary',
+            );
+            // Counter prevents explanation。
+            await expectReachable(
+              find.byKey(
+                const Key('combat_v1_playable_pending_counter_prevents_hint'),
+              ),
+              'Counter prevents explanation',
+            );
+            // ROUGH consequence（非対称性note）。
+            await expectReachable(
+              find.byKey(
+                const Key('combat_v1_playable_pending_rough_counter_note'),
+              ),
+              'ROUGH consequence note',
+            );
+            // family/group information（usable Counter card側）。
+            await expectReachable(
+              find.byKey(
+                const Key('combat_v1_playable_counter_family_match'),
+              ),
+              'Counter card family/group information',
+            );
+            // Counter card information（Counter card自体）。
+            await expectReachable(
+              find.byKey(
+                const Key('combat_v1_playable_counter_card_c1'),
+              ),
+              'Counter card',
+            );
+            // decline / receive action。
+            await expectReachable(
+              find.byKey(
+                const Key('combat_v1_playable_counter_decline_button'),
+              ),
+              'decline button',
+            );
+            // Counter action（Play Counter button）。
+            await expectReachable(
+              find.byKey(
+                const Key('combat_v1_playable_counter_play_button'),
+              ),
+              'Play Counter button',
+            );
           }, size: size);
         },
       );

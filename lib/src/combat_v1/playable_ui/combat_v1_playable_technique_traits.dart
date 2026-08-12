@@ -18,7 +18,7 @@ import '../combat_v1_enums.dart';
 import '../combat_v1_technique.dart';
 import '../playable/combat_v1_playable_match_snapshot.dart';
 
-/// [technique]成立時に自動でPINへ移行するか（docs/combat_rules_v1.md 8章
+/// [technique]がDIRECT PINの性質を持つか（docs/combat_rules_v1.md 8章
 /// 「DIRECT PIN」）。
 ///
 /// `category == finisher`の場合は、技自身の[CombatV1Technique.directPin]
@@ -27,6 +27,13 @@ import '../playable/combat_v1_playable_match_snapshot.dart';
 /// と同じ優先順位ルール、docs/design/combat_v1_phase1_design.md
 /// 2.4章）——このfunctionはEngineの優先順位をそのまま再現するだけで、
 /// 新しい判定を追加しない。
+///
+/// 注意: この値がtrueでも、Technique成立が無条件でPINへ移行することを
+/// 意味しない——Engineは解決後に相手が`down`である場合にのみPINへ
+/// 自動移行する（`_resolvePendingAttack`の`next.opponent.posture ==
+/// down`ガード）。呼び出し側は[combatV1PlayableDirectPinTraitDetail]の
+/// DOWN条件付き文言をそのまま使うこと（無条件PINと誤読させる文言を
+/// 独自に作らない）。
 bool combatV1PlayableTechniqueHasEffectiveDirectPin(
   CombatV1Technique technique,
 ) => _effectiveDirectPin(
@@ -114,10 +121,21 @@ String combatV1PlayableFinisherResolutionBadgeLabel(
 };
 
 /// DIRECT PIN trait badgeのTooltip/detail文言（docs/combat_rules_v1.md
-/// 8章）。「今PIN actionがlegalである」こととは別概念であることを明示する
-/// ——通常PINのLegalAction判定と混同しない安全な言い回しに留める。
+/// 8章）。
+///
+/// Review Findings Fix（Major、Playable 2A-3独立レビュー）: 以前の文言
+/// 「成立時、自動でPINへ移行します」はCore semanticsより強すぎた——
+/// `combat_v1_engine.dart` `_resolvePendingAttack`は、`effectiveDirectPin`
+/// が真でも、Technique解決後に相手が`CombatV1WrestlerPosture.down`で
+/// ある場合にのみ自動PINへ移行する（`if (effectiveDirectPin &&
+/// next.opponent.posture == down)`）。DOWNにならない場合（例:
+/// `resultOpponentState: null`でSTANDのまま等）は、成立してもPINへは
+/// 移行しない。DOWN条件を必ず含めるよう修正した——通常のTechnique
+/// 成立・解決後の相手DOWN・その場合のみ自動PIN・通常PIN LegalAction
+/// とは別経路、という4点の意味を維持する。「今PIN actionがlegalである」
+/// こととも別概念——通常PINのLegalAction判定とは混同しない。
 String combatV1PlayableDirectPinTraitDetail() =>
-    '成立時、自動でPINへ移行します（通常のPIN選択とは別の経路です）';
+    '成立後、相手がDOWNなら自動でPINへ移行します（通常のPIN選択とは別経路です）';
 
 /// SUBMISSION trait badgeのTooltip/detail文言（docs/combat_rules_v1.md
 /// 10.1章）。「今Submissionできる／これで勝てる」という過剰断定を避け、
@@ -231,3 +249,31 @@ String combatV1PlayableCounterPreventsSummary({
   return 'Counterが成立すると、この技のDMG・HEAT・状態変化に加えて'
       '${extra.join('・')}も防げます';
 }
+
+/// ROUGH incoming技のCounter応答時、[combatV1PlayableCounterPreventsSummary]
+/// に必ず添える非対称性の説明（docs/combat_rules_v1.md 15.1章）。
+///
+/// Review Findings Fix（Minor、Playable 2A-3独立レビュー）: ROUGHの
+/// 2つの効果は判定基準が異なり、Counterで防げるものと防げないものが
+/// 混在する——「ROUGHの全効果を防げる」と誤解させてはいけない。
+///
+/// - **防げない（宣言時点で確定済み）**: 攻撃側の「このターンPIN宣言
+///   不可」（`roughTechniqueUsedThisTurn`、宣言＝使用ベース）は、
+///   ROUGH技を宣言した時点で確定し、Counterされても取り消されない
+///   （15.1章「COUNTERされたROUGH技も、そのターンのPIN不可の対象に
+///   なる」）。
+/// - **防げる（成立ベース）**: 相手の次ターンTECHNIQUE最大1枚制限
+///   （`roughTechniqueLimitActive`）は、`lastSuccessfulTechnique`
+///   ベース（成立ベース）——Counterが成立すればこの技はそもそも
+///   成立しないため、次ターン制限のトリガー自体が発生しない
+///   （15.1章「COUNTERされたROUGH技は`lastSuccessfulTechnique`を
+///   更新しないため、次ターン制限のトリガーにはならない」）。
+///
+/// 新しいCombat ruleではなく、Core（`combat_v1_engine.dart`
+/// `_advanceTurnAfterEnd`のROUGH次ターン制限判定・`declareTechnique`の
+/// `roughTechniqueUsedThisTurn`確定タイミング）が既に持つ2つの異なる
+/// 判定基準をそのまま言い換えるだけ。
+String combatV1PlayableRoughCounterAsymmetryNote() =>
+    '相手はこのターン、既にPINを宣言できません（宣言時点で確定・'
+    'Counterしても変わりません）。次ターンのTECHNIQUE制限（最大1枚）は'
+    'Counterで防げます';
