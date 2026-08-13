@@ -31,6 +31,17 @@ CombatV1PlayableMatchScreen _screen(
   sessionFactory: (_) => session,
 );
 
+/// Playable 2A-5 Review Findings Fix「3章 Compact Hand」——一覧
+/// （hand card自身）はcompact表示になり、DMG/HEAT/Energy比較/posture/
+/// 使用不可理由は選択後の`_SelectedTechniquePanel`（hand直下）へ移動
+/// した。これらの詳細を検証するtestは、まずcardをtapして選択する。
+Future<void> _selectHandCard(WidgetTester tester, String instanceId) async {
+  await tester.tap(
+    find.byKey(Key('combat_v1_playable_hand_card_$instanceId')),
+  );
+  await tester.pump();
+}
+
 /// 相手がSTANDの時のみ使用可・成立後は相手をDOWNにする、通常のテスト技。
 const CombatV1Technique testTechniqueRequiresStandResultsDown = CombatV1Technique(
   id: 'test_requires_stand_results_down',
@@ -141,9 +152,35 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      // Playable 2A-5 Review Findings Fix「3章」——Cost/現在Energyの
+      // 比較は選択後の`_SelectedTechniquePanel`（必要Energy/現在Energyを
+      // 別々の行で表示）が担当する。
+      await _selectHandCard(tester, 'h1');
 
-      // Cost 2・現在使用可能4 → `投2 / 4`。
-      expect(find.textContaining('投2 / 4'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(
+                const Key(
+                  'combat_v1_playable_selected_technique_required_energy',
+                ),
+              ),
+            )
+            .data,
+        contains('投2'),
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(
+                const Key(
+                  'combat_v1_playable_selected_technique_current_energy',
+                ),
+              ),
+            )
+            .data,
+        contains('投4'),
+      );
     });
 
     testWidgets(
@@ -183,12 +220,36 @@ void main() {
           _wrap(_screen(FakePlayableMatchSession(snapshot))),
         );
         await tester.pump();
+        await _selectHandCard(tester, 'h1');
 
-        // 具体属性のみ（誤った表示）ではなく、＊込みの数値が表示される。
-        expect(find.textContaining('投2 / 2'), findsOneWidget);
-        expect(find.textContaining('投2 / 1'), findsNothing);
+        // 具体属性のみ（誤った表示）ではなく、＊込みの数値（1+1=2）が
+        // 「現在Energy」行に表示される。
+        expect(
+          tester
+              .widget<Text>(
+                find.byKey(
+                  const Key(
+                    'combat_v1_playable_selected_technique_current_energy',
+                  ),
+                ),
+              )
+              .data,
+          contains('投2'),
+        );
         // isUsable==trueのままなので「Energy不足」表示は出ない。
         expect(find.textContaining('Energy不足'), findsNothing);
+        expect(
+          tester
+              .widget<Text>(
+                find.byKey(
+                  const Key(
+                    'combat_v1_playable_selected_technique_usable_status',
+                  ),
+                ),
+              )
+              .data,
+          '使用可能',
+        );
       },
     );
 
@@ -217,6 +278,7 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      await _selectHandCard(tester, 'h1');
 
       expect(find.textContaining('Energy不足: 投2 / 1'), findsOneWidget);
     });
@@ -246,6 +308,7 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      await _selectHandCard(tester, 'h1');
 
       expect(find.textContaining('Energy不足'), findsNothing);
       expect(find.textContaining('現在は使用できません'), findsOneWidget);
@@ -309,7 +372,11 @@ void main() {
       );
       await tester.pump();
 
+      // compact hand card自体にも「COUNTER」表示はある（一覧段階）。
       expect(find.text('COUNTER'), findsWidgets);
+
+      // 用途の説明（「相手の技を受ける時に使用」）は選択後のpanelが担当。
+      await _selectHandCard(tester, 'c1');
       expect(find.text('相手の技を受ける時に使用'), findsOneWidget);
       // 「現在は使用できません」という無内容なメッセージは出さない。
       expect(find.text('現在は使用できません'), findsNothing);
@@ -360,6 +427,9 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      // Playable 2A-5 Review Findings Fix「3章」——required/result
+      // postureは選択後の`_SelectedTechniquePanel`が担当する。
+      await _selectHandCard(tester, 'h1');
 
       expect(find.text('相手 → DOWN'), findsOneWidget);
       expect(find.text('相手がSTANDの時のみ使用可'), findsOneWidget);
@@ -387,6 +457,7 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      await _selectHandCard(tester, 'h1');
 
       expect(find.text('相手がDOWNの時のみ使用可'), findsOneWidget);
       // 状態変化なし（resultOpponentState==null）の技には結果状態行を

@@ -220,6 +220,10 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      // Playable 2A-5 Review Findings Fix「3章」——使用不可の理由は
+      // 選択後panelのusable status行が担当する。
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_h1')));
+      await tester.pump();
 
       expect(find.text('現在は使用できません'), findsOneWidget);
     });

@@ -497,7 +497,10 @@ String _handCardDisabledMessage(
       threshold != null &&
       heat != null &&
       heat < threshold) {
-    return 'Requires HEAT $threshold (current $heat)';
+    // Playable 2A-5 Review Findings Fix「7章 Minor — English unusable
+    // reason」——HEATというゲーム用語自体は維持しつつ、説明部分を
+    // 日本語化する。
+    return 'HEATが不足しています（必要 $threshold / 現在 $heat）';
   }
   final technique = card.technique;
   if (technique != null && _techniqueEnergyWouldFail(technique, availableEnergy)) {
@@ -1419,10 +1422,28 @@ class _SelectedTechniquePanel extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: Colors.white24),
         ),
-        child: Text(
-          '${card.displayName} — '
-          '${_handCardDisabledMessage(card, sharedHeat: sharedHeat, finisherHeatThreshold: finisherHeatThreshold, availableEnergy: availableEnergy)}',
-          style: const TextStyle(fontSize: 12, color: Colors.white54),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              card.displayName,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              _handCardDisabledMessage(
+                card,
+                sharedHeat: sharedHeat,
+                finisherHeatThreshold: finisherHeatThreshold,
+                availableEnergy: availableEnergy,
+              ),
+              style: const TextStyle(fontSize: 12, color: Colors.white54),
+            ),
+          ],
         ),
       );
     }
@@ -1466,6 +1487,7 @@ class _SelectedTechniquePanel extends StatelessWidget {
                 combatV1PlayableRequiredOpponentStateLabel(
                   technique.requiredOpponentState!,
                 ),
+                key: const Key('combat_v1_playable_card_required_posture'),
                 style: const TextStyle(fontSize: 11, color: Colors.white54),
               ),
             ),
@@ -1476,6 +1498,7 @@ class _SelectedTechniquePanel extends StatelessWidget {
                 combatV1PlayableOpponentResultStateLabel(
                   technique.resultOpponentState!,
                 ),
+                key: const Key('combat_v1_playable_card_result_posture'),
                 style: const TextStyle(
                   fontSize: 11,
                   color: Colors.white70,
@@ -1908,11 +1931,49 @@ class _HandRow extends StatelessWidget {
         child: Text('手札がありません', style: TextStyle(color: Colors.white38)),
       );
     }
+    if (!discardMode) {
+      // Playable 2A-5 Review Findings Fix「2〜4章 Hand Comparison」——
+      // 初期5枚のTechnique handを横scroll無しで比較できるようにする。
+      // 268px幅カードの横scroll listだった旧実装は、320〜390px幅では
+      // 同時に2枚程度しか見えず、5枚を比較するために必ずscrollが必要
+      // だった。`Wrap`で折り返す固定幅compact card
+      // （`_HandCardTile(compactMode: true)`）へ置き換え、詳細
+      // （DMG/HEAT/trait/posture/使用不可理由）は選択後に現れる
+      // `_SelectedTechniquePanel`（`_TechniqueSelectionArea`側）が担当
+      // する——「一覧＝比較」「詳細＝判断確認」の責務分離（design doc
+      // Playable 2A-5 Review Findings Fix追記参照）。discard phaseは
+      // 元々カード枚数が少なく、Technique文脈の情報を持たない簡潔な
+      // tileのため、既存の横scroll listのまま維持する（6章「Do Not
+      // Regress Play vs Discard」——discard UXを流用・変更しない）。
+      return Wrap(
+        key: const Key('combat_v1_playable_human_hand'),
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final card in hand)
+            _HandCardTile(
+              key: ValueKey(
+                'combat_v1_playable_hand_card_${card.instanceId}',
+              ),
+              card: card,
+              selected: card.instanceId == selectedCardInstanceId,
+              onTap: () => onSelectCard(card.instanceId),
+              sharedHeat: sharedHeat,
+              finisherHeatThreshold: finisherHeatThreshold,
+              availableEnergy: availableEnergy,
+              submissionHpThreshold: submissionHpThreshold,
+              compactMode: true,
+            ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Playable 1C「Horizontal Hand Cue」——右側のusable cardを見落とし
-        // やすいため、小さなscroll cueを添える（大規模carousel UI不要）。
+        // Playable 1C「Horizontal Hand Cue」——discard phaseのみ、右側の
+        // カードを見落としやすいため小さなscroll cueを添える
+        // （Technique modeはPlayable 2A-5 Review Findings Fixで横scroll
+        // 自体が不要になったため、discardModeの場合のみ表示する）。
         if (hand.length > 1)
           const Padding(
             padding: EdgeInsets.only(bottom: 4),
@@ -1923,14 +1984,7 @@ class _HandRow extends StatelessWidget {
             ),
           ),
         SizedBox(
-          // Playable 2A-3: Technique decision trait badges（DIRECT PIN/
-          // SUBMISSION/ROUGH/FINISHER resolution）が追加されたため
-          // 232px→268pxへ拡張（`_CounterPromptSheet`のcounter hand専用
-          // SizedBoxは対象外——counter cardはこのbadge行を持たないため）。
-          // Playable 2A-5: discardModeはTechnique文脈の情報を持たない
-          // ぶん低くできる（手札可視性の向上、design doc「4章 Hand
-          // Visibility」）。
-          height: discardMode ? 108 : 268,
+          height: 108,
           child: ListView.separated(
             key: const Key('combat_v1_playable_human_hand'),
             scrollDirection: Axis.horizontal,
@@ -1972,6 +2026,7 @@ class _HandCardTile extends StatelessWidget {
     this.submissionHpThreshold,
     this.pendingAttackFamily,
     this.discardMode = false,
+    this.compactMode = false,
   });
 
   final CombatV1PlayableHandCard card;
@@ -2009,10 +2064,23 @@ class _HandCardTile extends StatelessWidget {
   /// ように誤読させてしまう。
   final bool discardMode;
 
+  /// Playable 2A-5 Review Findings Fix「3章 Compact Hand」——hand一覧
+  /// （比較段階）専用のcompact表示へ切り替える。DMG/HEAT/posture/traitの
+  /// 全detailや使用不可の理由は出さない——それらは選択後に現れる
+  /// `_SelectedTechniquePanel`（同じ`card`から独立に導出、詳細＝判断
+  /// 確認の責務）が担当する。`_CounterPromptSheet`（Counter応答時の
+  /// hand）はこのmodeを使わず、既存の詳細表示のまま維持する
+  /// （Counter候補は通常1〜3枚程度で、2A-3で確立したreadabilityを
+  /// 壊さないため）。
+  final bool compactMode;
+
   @override
   Widget build(BuildContext context) {
     if (discardMode) {
       return _buildDiscardMode(context);
+    }
+    if (compactMode) {
+      return _buildCompactMode(context);
     }
     final technique = card.technique;
     final counter = card.counter;
@@ -2184,7 +2252,7 @@ class _HandCardTile extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        'Requires HEAT $threshold',
+                        'HEAT $threshold以上で使用可',
                         key: const Key('combat_v1_playable_finisher_heat_hint'),
                         style: const TextStyle(
                           fontSize: 10,
@@ -2288,6 +2356,144 @@ class _HandCardTile extends StatelessWidget {
       ),
     );
   }
+
+  /// Playable 2A-5 Review Findings Fix「3章A Compact Hand」——一覧
+  /// （比較）専用のcompact tile。必須: 識別できる名前・required
+  /// Energy・使用可能／不可能・selected state。可能な範囲でDMG・major
+  /// trait（FINISHER/PIN/SUBMISSION/ROUGHのいずれか1つ、優先順位は
+  /// `_TechniqueTraitBadges`と同じ）を追加する——全trait detail・
+  /// posture・使用不可の具体的理由は選択後の`_SelectedTechniquePanel`
+  /// （下記`_compactPrimaryTrait`と同じ優先度だが、そちらは複数trait
+  /// 同時表示・Tooltip付きの完全版）に譲る。
+  Widget _buildCompactMode(BuildContext context) {
+    final technique = card.technique;
+    final counter = card.counter;
+    final disabled = !card.isUsable;
+    final trait = technique == null ? null : _compactPrimaryTrait(technique);
+    return Semantics(
+      button: true,
+      selected: selected,
+      enabled: !disabled,
+      label: card.displayName,
+      child: Opacity(
+        opacity: disabled ? 0.5 : 1.0,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: 92,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            decoration: BoxDecoration(
+              color: _cardSurface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected ? _pink : Colors.white24,
+                width: selected ? 2 : 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  card.displayName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                if (technique != null) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          combatV1PlayableEnergyCostLabel(
+                            technique.energyCost.amounts,
+                          ),
+                          key: const Key('combat_v1_playable_card_energy_line'),
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        disabled ? Icons.block : Icons.check_circle,
+                        key: const Key(
+                          'combat_v1_playable_compact_card_usable_icon',
+                        ),
+                        size: 12,
+                        color: disabled ? _healthError : _teal,
+                      ),
+                    ],
+                  ),
+                  Text(
+                    'DMG ${technique.damage}',
+                    style: const TextStyle(fontSize: 9, color: Colors.white54),
+                  ),
+                  if (trait != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: _MiniBadge(label: trait.label, color: trait.color),
+                    ),
+                ] else if (counter != null) ...[
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'COUNTER',
+                          style: TextStyle(fontSize: 10, color: Colors.white70),
+                        ),
+                      ),
+                      Icon(
+                        disabled ? Icons.block : Icons.check_circle,
+                        key: const Key(
+                          'combat_v1_playable_compact_card_usable_icon',
+                        ),
+                        size: 12,
+                        color: disabled ? _healthError : _teal,
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Playable 2A-5 Review Findings Fix「3章A Compact Hand」——compact card
+/// へ載せる、最大1つのmajor trait（FINISHER/PIN/SUBMISSION/ROUGH）。
+/// `_TechniqueTraitBadges`と同じ優先度（FINISHER category＞DIRECT
+/// PIN＞SUBMISSION、ROUGHは常に独立して判定）だが、compact cardは
+/// スペースが限られるため、FINISHERの場合は"FINISHER · PIN"のような
+/// 合成labelではなく単独の`FINISHER`のみを示す（ROUGHとの併記もしない）。
+/// 全trait・詳細な合成labelは選択後の`_TechniqueTraitBadges`
+/// （`_SelectedTechniquePanel`内）が引き続き担当する。新しいtrait判定
+/// ロジックは追加しない——既存の`combat_v1_playable_technique_traits.dart`
+/// pure functionをそのまま参照するだけ。
+({String label, Color color})? _compactPrimaryTrait(
+  CombatV1Technique technique,
+) {
+  if (technique.category == CombatV1CardCategory.finisher) {
+    return (label: 'FINISHER', color: _pink);
+  }
+  if (combatV1PlayableTechniqueHasEffectiveDirectPin(technique)) {
+    return (label: 'PIN', color: _pink);
+  }
+  if (combatV1PlayableTechniqueHasEffectiveSubmissionHold(technique)) {
+    return (label: 'SUBMISSION', color: _submissionBadge);
+  }
+  if (combatV1PlayableTechniqueIsRough(technique)) {
+    return (label: 'ROUGH', color: _roughBadge);
+  }
+  return null;
 }
 
 /// Playable 2A-3「Technique Card — Decision Traits」（5・6章）——

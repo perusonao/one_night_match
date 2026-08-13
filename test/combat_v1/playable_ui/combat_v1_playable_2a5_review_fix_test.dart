@@ -1,0 +1,771 @@
+// Combat Ver.1 Playable 2A-5 Review Findings Fix — Hand Comparison /
+// Mobile Readability widget test
+// （lib/src/combat_v1/playable_ui/combat_v1_playable_match_screen.dart）。
+//
+// 独立レビュー指摘（Major: 初期手札5枚を比較するために横scrollが必要）
+// の修正を検証する。目的は「5枚すべての詳細カードを画面内へ押し込む」
+// ことではなく、「5枚の候補をscrollせず比較し、使うカードを決められる」
+// ことなので、ここでは:
+//
+// - compact hand（一覧＝比較）が5枚同時にscroll無しで認識できること
+// - compact card自体のtap targetが実際にhit-testできること
+// - Technique A→B→解除という選択の切り替わりが正しく反映されること
+// - Energyのexact boundary（required==available）でusable/unusableが
+//   正しく切り替わること
+// - 選択後detail（選択後にhand直下へ現れる`_SelectedTechniquePanel`）が
+//   320/360/390pxで（必要なら縦scrollを許容して）読めること
+// - compact card tap → detail確認 → 「技を使う」tap → 正しいLegalAction
+//   がsubmitされるところまでを実際のtapで検証すること
+//
+// を検証する。既存2A-1〜2A-4・2A-5 approved good behavior（Energy
+// visibility／Technique-discard分離／日本語化／LegalAction SSOT／
+// Counter flow）は他ファイルの既存testで引き続き検証されており、ここで
+// 重複しない。
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_energy.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_technique.dart';
+import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart';
+import 'package:one_night_match/src/combat_v1/playable_ui/combat_v1_playable_match_screen.dart';
+
+import 'combat_v1_playable_ui_test_fixtures.dart';
+
+Widget _wrap(Widget child) => MaterialApp(
+  theme: ThemeData(useMaterial3: true, brightness: Brightness.dark),
+  home: child,
+);
+
+CombatV1PlayableMatchScreen _screen(
+  FakePlayableMatchSession session, {
+  String humanWrestlerId = 'akari',
+  String cpuWrestlerId = 'reina',
+}) => CombatV1PlayableMatchScreen(
+  humanWrestlerId: humanWrestlerId,
+  cpuWrestlerId: cpuWrestlerId,
+  cpuDelay: Duration.zero,
+  sessionFactory: (_) => session,
+);
+
+bool _isEnabled(WidgetTester tester, Key key) {
+  final button = tester.widget<ButtonStyleButton>(
+    find.descendant(
+      of: find.byKey(key),
+      matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+    ),
+  );
+  return button.onPressed != null;
+}
+
+Future<void> _withViewport(
+  WidgetTester tester,
+  Future<void> Function() body, {
+  required Size size,
+}) async {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await body();
+}
+
+// 5枚の識別可能な技（required Energy属性・値をそれぞれ変える）。
+const CombatV1Technique _techA = CombatV1Technique(
+  id: 'test_review_fix_a',
+  name: 'テスト技A',
+  category: CombatV1CardCategory.normal,
+  attribute: CombatV1EnergyAttribute.strike,
+  energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 1}),
+  damage: 15,
+  heatGain: 10,
+  family: CombatV1TechniqueFamily.elbow,
+);
+const CombatV1Technique _techB = CombatV1Technique(
+  id: 'test_review_fix_b',
+  name: 'テスト技B',
+  category: CombatV1CardCategory.normal,
+  attribute: CombatV1EnergyAttribute.joint,
+  energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.joint: 1}),
+  damage: 12,
+  heatGain: 8,
+  family: CombatV1TechniqueFamily.armbar,
+);
+const CombatV1Technique _techC = CombatV1Technique(
+  id: 'test_review_fix_c',
+  name: 'テスト技C',
+  category: CombatV1CardCategory.normal,
+  attribute: CombatV1EnergyAttribute.throwing,
+  // 使用可能量を超える高cost——常にunusableな代表カード。
+  energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.throwing: 9}),
+  damage: 25,
+  heatGain: 20,
+  family: CombatV1TechniqueFamily.slam,
+);
+const CombatV1Technique _techD = CombatV1Technique(
+  id: 'test_review_fix_d',
+  name: 'テスト技D',
+  category: CombatV1CardCategory.normal,
+  attribute: CombatV1EnergyAttribute.aerial,
+  energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.aerial: 1}),
+  damage: 18,
+  heatGain: 12,
+  family: CombatV1TechniqueFamily.dropKick,
+);
+const CombatV1Technique _techE = CombatV1Technique(
+  id: 'test_review_fix_e',
+  name: 'テスト技E',
+  category: CombatV1CardCategory.finisher,
+  attribute: CombatV1EnergyAttribute.rough,
+  energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.rough: 2}),
+  damage: 40,
+  heatGain: 30,
+  family: CombatV1TechniqueFamily.choke,
+  finisherType: CombatV1FinisherType.normal,
+);
+
+/// docs/combat_rules_v1.md 5章のアカリEnergy配分例に、5枚が使用可能な
+/// 属性（`_techA`〜`_techD`分＋finisher `_techE`用のラフ）を加えた
+/// テスト専用pool。`_techC`（投9）だけは意図的に不足させる。
+const CombatV1EnergyPool _fiveCardPool = CombatV1EnergyPool({
+  CombatV1EnergyAttribute.strike: 5,
+  CombatV1EnergyAttribute.joint: 1,
+  CombatV1EnergyAttribute.throwing: 2,
+  CombatV1EnergyAttribute.aerial: 2,
+  CombatV1EnergyAttribute.rough: 2,
+  CombatV1EnergyAttribute.wild: 1,
+});
+
+List<CombatV1PlayableHandCard> _fiveCardHand({
+  bool techCUsable = false,
+  bool techEUsable = true,
+}) => [
+  testTechniqueCard(instanceId: 'a', technique: _techA, isUsable: true),
+  testTechniqueCard(instanceId: 'b', technique: _techB, isUsable: true),
+  testTechniqueCard(
+    instanceId: 'c',
+    technique: _techC,
+    isUsable: techCUsable,
+  ),
+  testTechniqueCard(instanceId: 'd', technique: _techD, isUsable: true),
+  testTechniqueCard(
+    instanceId: 'e',
+    technique: _techE,
+    isUsable: techEUsable,
+  ),
+];
+
+CombatV1PlayableHumanStatus _fiveCardHumanStatus({
+  bool techCUsable = false,
+  bool techEUsable = true,
+}) => testHumanStatus(
+  hand: _fiveCardHand(techCUsable: techCUsable, techEUsable: techEUsable),
+  energyPool: _fiveCardPool,
+  availableEnergy: {
+    for (final attribute in CombatV1EnergyAttribute.values)
+      attribute: _fiveCardPool.amountFor(attribute),
+  },
+);
+
+void main() {
+  group('A/B/C. Technique A→B→解除（8章）', () {
+    testWidgets('Aをtap→A selected、Bをtap→B selectedへ切り替わりA解除、detail/Energyが'
+        'Bへ更新される', (tester) async {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        human: _fiveCardHumanStatus(),
+        legalActions: const [
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'a'),
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'b'),
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'd'),
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'e'),
+          CombatV1EndTurnAction(actorPlayerIndex: 0),
+        ],
+      );
+      await tester.pumpWidget(
+        _wrap(_screen(FakePlayableMatchSession(snapshot))),
+      );
+      await tester.pump();
+
+      final nameKey = const Key(
+        'combat_v1_playable_selected_technique_name',
+      );
+
+      // Aをtap → A selected。
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_a')));
+      await tester.pump();
+      expect(tester.widget<Text>(find.byKey(nameKey)).data, _techA.name);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(
+                const Key(
+                  'combat_v1_playable_selected_technique_required_energy',
+                ),
+              ),
+            )
+            .data,
+        contains('打1'),
+      );
+
+      // Bをtap → B selected（Aは解除）。
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_b')));
+      await tester.pump();
+      expect(tester.widget<Text>(find.byKey(nameKey)).data, _techB.name);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(
+                const Key(
+                  'combat_v1_playable_selected_technique_required_energy',
+                ),
+              ),
+            )
+            .data,
+        contains('関1'),
+      );
+      // panelは1つだけ（Aの内容が残っていない）。
+      expect(find.byKey(nameKey), findsOneWidget);
+    });
+
+    testWidgets('選択中のカードを再tapすると選択解除され、panelが閉じる', (tester) async {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        human: _fiveCardHumanStatus(),
+        legalActions: const [
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'a'),
+          CombatV1EndTurnAction(actorPlayerIndex: 0),
+        ],
+      );
+      await tester.pumpWidget(
+        _wrap(_screen(FakePlayableMatchSession(snapshot))),
+      );
+      await tester.pump();
+
+      final cardFinder = find.byKey(const Key('combat_v1_playable_hand_card_a'));
+      await tester.tap(cardFinder);
+      await tester.pump();
+      expect(
+        find.byKey(const Key('combat_v1_playable_selected_technique_panel')),
+        findsOneWidget,
+      );
+
+      await tester.tap(cardFinder);
+      await tester.pump();
+      expect(
+        find.byKey(const Key('combat_v1_playable_selected_technique_panel')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('combat_v1_playable_action_technique')),
+        findsNothing,
+      );
+    });
+  });
+
+  group('D/E. usable ⇄ unusable selection change（8章）', () {
+    testWidgets('usable（A）→unusable（C）でbuttonがdisabledへ切り替わる', (
+      tester,
+    ) async {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        human: _fiveCardHumanStatus(),
+        legalActions: const [
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'a'),
+          CombatV1EndTurnAction(actorPlayerIndex: 0),
+        ],
+      );
+      await tester.pumpWidget(
+        _wrap(_screen(FakePlayableMatchSession(snapshot))),
+      );
+      await tester.pump();
+
+      const techniqueKey = Key('combat_v1_playable_action_technique');
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_a')));
+      await tester.pump();
+      expect(_isEnabled(tester, techniqueKey), isTrue);
+
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_c')));
+      await tester.pump();
+      expect(_isEnabled(tester, techniqueKey), isFalse);
+    });
+
+    testWidgets('unusable（C）→usable（A）へ切り替えると、正しいLegalActionだけ'
+        'submit可能になる', (tester) async {
+      final snapshot = testSnapshot(
+        revision: 3,
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        human: _fiveCardHumanStatus(),
+        legalActions: const [
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'a'),
+          CombatV1EndTurnAction(actorPlayerIndex: 0),
+        ],
+      );
+      final session = FakePlayableMatchSession(snapshot);
+      await tester.pumpWidget(_wrap(_screen(session)));
+      await tester.pump();
+
+      const techniqueKey = Key('combat_v1_playable_action_technique');
+
+      // Cを選択 → button disabled、tapしても何も起きない。
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_c')));
+      await tester.pump();
+      expect(_isEnabled(tester, techniqueKey), isFalse);
+
+      // Aへ切り替え → button enabled。
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_a')));
+      await tester.pump();
+      expect(_isEnabled(tester, techniqueKey), isTrue);
+
+      await tester.ensureVisible(find.byKey(techniqueKey));
+      await tester.tap(find.byKey(techniqueKey));
+      await tester.pump();
+
+      expect(session.submitCalls, hasLength(1));
+      expect(
+        session.submitCalls.single.action,
+        const CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'a'),
+      );
+    });
+  });
+
+  group('Energy Exact Boundary（9章）', () {
+    testWidgets('required Energy == available Energy: usable・button enabled・'
+        '正しいLegalActionがsubmitされる', (tester) async {
+      const technique = CombatV1Technique(
+        id: 'test_boundary_exact',
+        name: 'テスト境界技',
+        category: CombatV1CardCategory.normal,
+        attribute: CombatV1EnergyAttribute.strike,
+        energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 3}),
+        damage: 20,
+        heatGain: 10,
+        family: CombatV1TechniqueFamily.elbow,
+      );
+      final snapshot = testSnapshot(
+        revision: 11,
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        human: testHumanStatus(
+          hand: [
+            testTechniqueCard(
+              instanceId: 'h1',
+              technique: technique,
+              isUsable: true,
+            ),
+          ],
+          energyPool: const CombatV1EnergyPool({
+            CombatV1EnergyAttribute.strike: 3,
+          }),
+          availableEnergy: const {CombatV1EnergyAttribute.strike: 3},
+        ),
+        legalActions: const [
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
+          CombatV1EndTurnAction(actorPlayerIndex: 0),
+        ],
+      );
+      final session = FakePlayableMatchSession(snapshot);
+      await tester.pumpWidget(_wrap(_screen(session)));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_h1')));
+      await tester.pump();
+
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(
+                const Key(
+                  'combat_v1_playable_selected_technique_usable_status',
+                ),
+              ),
+            )
+            .data,
+        '使用可能',
+      );
+      expect(find.textContaining('Energy不足'), findsNothing);
+
+      const techniqueKey = Key('combat_v1_playable_action_technique');
+      expect(_isEnabled(tester, techniqueKey), isTrue);
+
+      await tester.ensureVisible(find.byKey(techniqueKey));
+      await tester.tap(find.byKey(techniqueKey));
+      await tester.pump();
+
+      expect(session.submitCalls, hasLength(1));
+      expect(session.submitCalls.single.expectedRevision, 11);
+      expect(
+        session.submitCalls.single.action,
+        const CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
+      );
+    });
+
+    testWidgets('required Energy > available Energy（1超過）: unusable・Energy不足'
+        '表示・button disabled・submitされない', (tester) async {
+      const technique = CombatV1Technique(
+        id: 'test_boundary_over',
+        name: 'テスト境界超過技',
+        category: CombatV1CardCategory.normal,
+        attribute: CombatV1EnergyAttribute.strike,
+        energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.strike: 4}),
+        damage: 20,
+        heatGain: 10,
+        family: CombatV1TechniqueFamily.elbow,
+      );
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        human: testHumanStatus(
+          hand: [
+            testTechniqueCard(
+              instanceId: 'h1',
+              technique: technique,
+              isUsable: false,
+            ),
+          ],
+          energyPool: const CombatV1EnergyPool({
+            CombatV1EnergyAttribute.strike: 3,
+          }),
+          availableEnergy: const {CombatV1EnergyAttribute.strike: 3},
+        ),
+        legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: 0)],
+      );
+      final session = FakePlayableMatchSession(snapshot);
+      await tester.pumpWidget(_wrap(_screen(session)));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_h1')));
+      await tester.pump();
+
+      expect(find.textContaining('Energy不足: 打4 / 3'), findsOneWidget);
+
+      const techniqueKey = Key('combat_v1_playable_action_technique');
+      expect(_isEnabled(tester, techniqueKey), isFalse);
+
+      await tester.ensureVisible(find.byKey(techniqueKey));
+      await tester.tap(find.byKey(techniqueKey));
+      await tester.pump();
+
+      expect(session.submitCalls, isEmpty);
+    });
+  });
+
+  group('Large Hand Mobile — 5枚scroll無し比較（10章）', () {
+    for (final width in [320.0, 360.0, 390.0]) {
+      final size = Size(width, 844);
+
+      testWidgets(
+        '${width.toInt()}px: 5枚全ての識別名・required Energy・usable/unusableが'
+        'scroll前に実座標でviewport内にある',
+        (tester) async {
+          await _withViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              human: _fiveCardHumanStatus(),
+              legalActions: const [
+                CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'a'),
+                CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'b'),
+                CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'd'),
+                CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'e'),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(_screen(FakePlayableMatchSession(snapshot))),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+
+            final viewportRect = tester.getRect(
+              find.byKey(
+                const Key('combat_v1_playable_technique_area_scroll'),
+              ),
+            );
+
+            for (final entry in const [
+              ('a', _techA),
+              ('b', _techB),
+              ('c', _techC),
+              ('d', _techD),
+              ('e', _techE),
+            ]) {
+              final (instanceId, technique) = entry;
+              final cardFinder = find.byKey(
+                Key('combat_v1_playable_hand_card_$instanceId'),
+              );
+              expect(cardFinder, findsOneWidget, reason: '$instanceIdが見つからない');
+              final cardRect = tester.getRect(cardFinder);
+              expect(
+                cardRect.overlaps(viewportRect),
+                isTrue,
+                reason:
+                    'カード$instanceId（${technique.name}）がscroll前に'
+                    'viewport内にない: card=$cardRect, viewport=$viewportRect',
+              );
+
+              // 名前・required Energyが実際にtap targetの矩形内にある
+              // ことも合わせて確認する（compact card自体の情報、3章A）。
+              final nameFinder = find.descendant(
+                of: cardFinder,
+                matching: find.text(technique.name),
+              );
+              expect(nameFinder, findsOneWidget);
+              expect(
+                tester.getRect(nameFinder).overlaps(viewportRect),
+                isTrue,
+              );
+            }
+          }, size: size);
+        },
+      );
+
+      testWidgets(
+        '${width.toInt()}px: 5枚それぞれのcompact card tap targetへ実際に'
+        'hit-testでき、選択状態が切り替わる',
+        (tester) async {
+          await _withViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              human: _fiveCardHumanStatus(),
+              legalActions: const [
+                CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'a'),
+                CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'b'),
+                CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'd'),
+                CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'e'),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(_screen(FakePlayableMatchSession(snapshot))),
+            );
+            await tester.pump();
+
+            final viewportRect = tester.getRect(
+              find.byKey(
+                const Key('combat_v1_playable_technique_area_scroll'),
+              ),
+            );
+
+            const expectedNames = {
+              'a': _techA,
+              'b': _techB,
+              'd': _techD,
+              'e': _techE,
+            };
+            for (final instanceId in const ['a', 'b', 'd', 'e']) {
+              final cardFinder = find.byKey(
+                Key('combat_v1_playable_hand_card_$instanceId'),
+              );
+              final cardRect = tester.getRect(cardFinder);
+              final visibleRect = cardRect.intersect(viewportRect);
+              expect(visibleRect.width, greaterThan(0));
+              expect(visibleRect.height, greaterThan(0));
+              await tester.tapAt(visibleRect.center);
+              await tester.pump();
+              expect(tester.takeException(), isNull);
+
+              // 実際にtapしたcardが選択状態になり、detail panelの名前が
+              // 一致することを確認する（widget存在だけで判定しない）。
+              expect(
+                tester
+                    .widget<Text>(
+                      find.byKey(
+                        const Key(
+                          'combat_v1_playable_selected_technique_name',
+                        ),
+                      ),
+                    )
+                    .data,
+                expectedNames[instanceId]!.name,
+              );
+            }
+          }, size: size);
+        },
+      );
+    }
+  });
+
+  group('Selected Detail Reachability（11章）', () {
+    for (final width in [320.0, 360.0, 390.0]) {
+      final size = Size(width, 780);
+
+      testWidgets(
+        '${width.toInt()}px: compact cardをtapした後、選択detail（name/DMG/HEAT/'
+        'Energy/traits/unusable reason/技を使う）へ縦scroll込みで到達できる',
+        (tester) async {
+          await _withViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              sharedHeat: 0,
+              finisherHeatThreshold: 200,
+              human: testHumanStatus(
+                hand: [
+                  testTechniqueCard(
+                    instanceId: 'h1',
+                    technique: _techE,
+                    isUsable: false,
+                  ),
+                ],
+              ),
+              legalActions: const [],
+            );
+            await tester.pumpWidget(
+              _wrap(_screen(FakePlayableMatchSession(snapshot))),
+            );
+            await tester.pump();
+
+            final cardFinder = find.byKey(
+              const Key('combat_v1_playable_hand_card_h1'),
+            );
+            await tester.ensureVisible(cardFinder);
+            await tester.pumpAndSettle();
+            await tester.tap(cardFinder);
+            await tester.pump();
+
+            final scrollAreaFinder = find.byKey(
+              const Key('combat_v1_playable_technique_area_scroll'),
+            );
+            final scrollableFinder = find
+                .descendant(
+                  of: scrollAreaFinder,
+                  matching: find.byType(Scrollable),
+                )
+                .first;
+
+            Future<void> expectReachable(Finder finder, String label) async {
+              expect(finder, findsOneWidget, reason: '$labelが見つからない');
+              var viewportRect = tester.getRect(scrollAreaFinder);
+              var rect = tester.getRect(finder);
+              if (!rect.overlaps(viewportRect)) {
+                await tester.scrollUntilVisible(
+                  finder,
+                  50,
+                  scrollable: scrollableFinder,
+                );
+                await tester.pumpAndSettle();
+                viewportRect = tester.getRect(scrollAreaFinder);
+                rect = tester.getRect(finder);
+              }
+              expect(
+                rect.overlaps(viewportRect),
+                isTrue,
+                reason: '$labelへ到達できない: rect=$rect, viewport=$viewportRect',
+              );
+            }
+
+            final panelFinder = find.byKey(
+              const Key('combat_v1_playable_selected_technique_panel'),
+            );
+            expect(panelFinder, findsOneWidget);
+
+            await expectReachable(
+              find.byKey(
+                const Key('combat_v1_playable_selected_technique_name'),
+              ),
+              'Technique name',
+            );
+            await expectReachable(
+              find.descendant(
+                of: panelFinder,
+                matching: find.textContaining('DMG ${_techE.damage}'),
+              ),
+              'DMG/HEAT line',
+            );
+            await expectReachable(
+              find.byKey(
+                const Key(
+                  'combat_v1_playable_selected_technique_required_energy',
+                ),
+              ),
+              '必要Energy',
+            );
+            await expectReachable(
+              find.byKey(
+                const Key(
+                  'combat_v1_playable_selected_technique_current_energy',
+                ),
+              ),
+              '現在Energy',
+            );
+            await expectReachable(
+              find.byKey(
+                const Key('combat_v1_playable_card_finisher_resolution_badge'),
+              ),
+              'FINISHER trait badge',
+            );
+            await expectReachable(
+              find.byKey(
+                const Key(
+                  'combat_v1_playable_selected_technique_usable_status',
+                ),
+              ),
+              'unusable reason',
+            );
+            await expectReachable(
+              find.byKey(const Key('combat_v1_playable_action_technique')),
+              '技を使うbutton',
+            );
+          }, size: size);
+        },
+      );
+    }
+  });
+
+  group('Compact Hand → Detail → 技を使う（12章 Action Hit-Test）', () {
+    testWidgets('compact Technique Bをtap→selected detail=B→技を使うtap→'
+        'submitted LegalAction==B', (tester) async {
+      final snapshot = testSnapshot(
+        revision: 21,
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        human: _fiveCardHumanStatus(),
+        legalActions: const [
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'a'),
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'b'),
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'd'),
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'e'),
+          CombatV1EndTurnAction(actorPlayerIndex: 0),
+        ],
+      );
+      final session = FakePlayableMatchSession(snapshot);
+      await tester.pumpWidget(_wrap(_screen(session)));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_b')));
+      await tester.pump();
+
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(
+                const Key('combat_v1_playable_selected_technique_name'),
+              ),
+            )
+            .data,
+        _techB.name,
+      );
+
+      final techniqueButton = find.byKey(
+        const Key('combat_v1_playable_action_technique'),
+      );
+      await tester.ensureVisible(techniqueButton);
+      await tester.tap(techniqueButton);
+      await tester.pump();
+
+      expect(session.submitCalls, hasLength(1));
+      expect(session.submitCalls.single.expectedRevision, 21);
+      expect(
+        session.submitCalls.single.action,
+        const CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'b'),
+      );
+    });
+  });
+}
