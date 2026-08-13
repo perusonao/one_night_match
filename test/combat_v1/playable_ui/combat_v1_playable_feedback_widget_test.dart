@@ -26,6 +26,16 @@ Widget _wrap(Widget child) => MaterialApp(
   home: child,
 );
 
+/// Playable 2A-5「9章 Guidance / Direction / Result / Logの圧縮」——
+/// Match Direction／Latest Result banner／Recent Logは既定で折りたたむ
+/// ため、これらの内容を検証するtestは明示的にtoggleをtapして展開する
+/// （design doc「70.10章」の到達可能性原則、collapse後も明示操作で
+/// 到達できることの確認を兼ねる）。
+Future<void> _expandDetail(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('combat_v1_playable_detail_toggle')));
+  await tester.pump();
+}
+
 void main() {
   group('Action Result Feedback banner（MUST）', () {
     testWidgets('Human technique feedbackが表示される（技名・damage・HP変化・HEAT変化）', (
@@ -60,6 +70,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await _expandDetail(tester);
 
       expect(
         find.byKey(const Key('combat_v1_playable_latest_feedback_banner')),
@@ -103,6 +114,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await _expandDetail(tester);
 
       expect(find.textContaining('CPU'), findsWidgets);
       expect(find.textContaining('ラリアット'), findsWidgets);
@@ -139,6 +151,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await _expandDetail(tester);
 
       final primaryText = tester
           .widget<Text>(
@@ -177,6 +190,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await _expandDetail(tester);
 
       final secondaryText = tester
           .widget<Text>(
@@ -231,6 +245,7 @@ void main() {
           ),
         );
         await tester.pump();
+        await _expandDetail(tester);
 
         final secondaryText = tester
             .widget<Text>(
@@ -271,6 +286,7 @@ void main() {
           ),
         );
         await tester.pump();
+        await _expandDetail(tester);
 
         final secondaryText = tester
             .widget<Text>(
@@ -310,6 +326,7 @@ void main() {
           ),
         );
         await tester.pump();
+        await _expandDetail(tester);
 
         final secondaryText = tester
             .widget<Text>(
@@ -350,6 +367,7 @@ void main() {
           ),
         );
         await tester.pump();
+        await _expandDetail(tester);
 
         final secondaryText = tester
             .widget<Text>(
@@ -428,6 +446,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await _expandDetail(tester);
 
       // GuidanceパネルとLatest Result primaryが両方存在し、別々の文字列
       // であること（同じ内容の二重表示ではない）。

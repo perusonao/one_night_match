@@ -106,9 +106,14 @@ void main() {
       expect(find.byKey(const Key('combat_v1_playable_action_technique')), findsNothing);
       expect(find.byKey(const Key('combat_v1_playable_action_end_turn')), findsNothing);
 
+      // Playable 2A-5「7章」——discardの確定操作は、カードを選ぶまで
+      // 存在しない（hand直下のinline confirm panelとして選択後に現れる）。
       const discardKey = Key('combat_v1_playable_action_discard');
-      final discardButtonFinder = find.byKey(discardKey);
-      expect(_isButtonEnabled(tester, discardKey), isFalse);
+      expect(find.byKey(discardKey), findsNothing);
+      expect(
+        find.byKey(const Key('combat_v1_playable_discard_confirm_panel')),
+        findsNothing,
+      );
 
       // Playable 2A-3: Technique decision trait badge行の追加でhand card
       // 高さが232px→268pxへ拡張されたため、既定のtest viewport（800×600）
@@ -121,8 +126,21 @@ void main() {
       await tester.ensureVisible(handCardFinder);
       await tester.tap(handCardFinder);
       await tester.pump();
+
+      // Playable 2A-5「7章」——選択後、「捨てるカード」を明示した
+      // confirm panelがhand直下に現れる。
+      expect(
+        find.byKey(const Key('combat_v1_playable_discard_confirm_panel')),
+        findsOneWidget,
+      );
+      final discardButtonFinder = find.byKey(discardKey);
+      expect(discardButtonFinder, findsOneWidget);
       expect(_isButtonEnabled(tester, discardKey), isTrue);
 
+      // Playable 2A-5「5・7章」——確認buttonはhand直下（selection panel
+      // 内）にあり、既定のtest viewport（800×600）では画面外になりうる
+      // ため、実機のscroll操作と同じくensureVisibleしてからtapする。
+      await tester.ensureVisible(discardButtonFinder);
       await tester.tap(discardButtonFinder);
       await tester.pump();
 
@@ -153,14 +171,31 @@ void main() {
       await tester.pumpWidget(_wrap(_screen(session)));
       await tester.pump();
 
+      // Playable 2A-5「5章」——Technique使用buttonは、カードを選ぶまで
+      // 存在しない（hand直下のinline`_SelectedTechniquePanel`として
+      // 選択後に現れる）。
       const techniqueKey = Key('combat_v1_playable_action_technique');
-      final techniqueButtonFinder = find.byKey(techniqueKey);
-      expect(_isButtonEnabled(tester, techniqueKey), isFalse);
+      expect(find.byKey(techniqueKey), findsNothing);
+      expect(
+        find.byKey(const Key('combat_v1_playable_selected_technique_panel')),
+        findsNothing,
+      );
 
       await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_h1')));
       await tester.pump();
+
+      expect(
+        find.byKey(const Key('combat_v1_playable_selected_technique_panel')),
+        findsOneWidget,
+      );
+      final techniqueButtonFinder = find.byKey(techniqueKey);
+      expect(techniqueButtonFinder, findsOneWidget);
       expect(_isButtonEnabled(tester, techniqueKey), isTrue);
 
+      // Playable 2A-5「5章」——確認buttonはhand直下（selection panel
+      // 内）にあり、既定のtest viewport（800×600）では画面外になりうる
+      // ため、実機のscroll操作と同じくensureVisibleしてからtapする。
+      await tester.ensureVisible(techniqueButtonFinder);
       await tester.tap(techniqueButtonFinder);
       await tester.pump();
 

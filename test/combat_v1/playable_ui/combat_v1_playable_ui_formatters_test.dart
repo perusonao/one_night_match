@@ -152,6 +152,44 @@ void main() {
         expect(combatV1PlayableActionKindLabel(kind), isNotEmpty);
       }
     });
+
+    // Playable 2A-5「8章 Japanese Primary Actions」——プレイヤーが直接
+    // 触るbuttonは日本語を基本にする。PINはゲーム内用語として定着して
+    // いるため例外的に維持する。
+    test('主要操作buttonは日本語、PINはゲーム用語として維持する', () {
+      expect(
+        combatV1PlayableActionKindLabel(CombatV1LegalActionKind.technique),
+        '技を使う',
+      );
+      expect(
+        combatV1PlayableActionKindLabel(CombatV1LegalActionKind.discard),
+        '手札を捨てる',
+      );
+      expect(
+        combatV1PlayableActionKindLabel(CombatV1LegalActionKind.counter),
+        '返し技を使う',
+      );
+      expect(
+        combatV1PlayableActionKindLabel(CombatV1LegalActionKind.declineCounter),
+        '返し技を使わない',
+      );
+      expect(
+        combatV1PlayableActionKindLabel(CombatV1LegalActionKind.rest),
+        '休む',
+      );
+      expect(
+        combatV1PlayableActionKindLabel(CombatV1LegalActionKind.standUp),
+        '立ち上がる',
+      );
+      expect(
+        combatV1PlayableActionKindLabel(CombatV1LegalActionKind.endTurn),
+        'ターン終了',
+      );
+      expect(
+        combatV1PlayableActionKindLabel(CombatV1LegalActionKind.pin),
+        'PIN',
+      );
+    });
   });
 
   group('combatV1PlayableObservationLabel', () {

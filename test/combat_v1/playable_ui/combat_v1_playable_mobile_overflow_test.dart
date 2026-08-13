@@ -94,6 +94,16 @@ Future<void> _withNarrowViewport(
   await body();
 }
 
+/// Playable 2A-5「9章 Guidance / Direction / Result / Logの圧縮」——Match
+/// Direction／Latest Result banner／Recent Logは既定で折りたたむため、
+/// これらの内容を検証するtestは明示的にtoggleをtapして展開する（design
+/// doc「70.10章」の到達可能性原則——折りたたんだ場合もユーザーの明示
+/// 操作で到達できることの確認を兼ねる）。
+Future<void> _expandDetail(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('combat_v1_playable_detail_toggle')));
+  await tester.pump();
+}
+
 void main() {
   testWidgets('Setup screen: 320px幅でoverflowしない', (tester) async {
     await _withNarrowViewport(tester, () async {
@@ -731,6 +741,7 @@ void main() {
           );
           await tester.pump();
           expect(tester.takeException(), isNull);
+          await _expandDetail(tester);
 
           // Direction primary/secondaryが実際に描画されていることを
           // 前提として確認する（到達可否テストの土台）。
@@ -1468,6 +1479,7 @@ void main() {
             );
             await tester.pump();
             expect(tester.takeException(), isNull);
+            await _expandDetail(tester);
 
             expect(
               find.byKey(
@@ -1565,6 +1577,7 @@ void main() {
             );
             await tester.pump();
             expect(tester.takeException(), isNull);
+            await _expandDetail(tester);
 
             // Review Findings Fix（Minor、13章）: widgetの存在確認だけでは
             // なく、実際のclip viewport（Latest Result primary/secondaryが
