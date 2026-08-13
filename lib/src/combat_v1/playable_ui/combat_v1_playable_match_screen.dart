@@ -998,10 +998,19 @@ class _MatchDirectionPanel extends StatelessWidget {
 }
 
 /// 直近1件のaction feedbackを表示する大きめbanner（Playable 1C「Action
-/// Result Feedback」「Feedback Display Duration」）。次のactionのfeedbackが
-/// 届くまで表示され続ける——CPUが400ms間隔で連続行動しても、直前の結果を
-/// 読み逃さないようにする（大幅なCPU delay増加ではなく、feedback
+/// Result Feedback」「Feedback Display Duration」、Playable 2A-4「Latest
+/// Result — Primary / Secondary」）。次のactionのfeedbackが届くまで
+/// 表示され続ける——CPUが400ms間隔で連続行動しても、直前の結果を読み
+/// 逃さないようにする（大幅なCPU delay増加ではなく、feedback
 /// persistenceで解決する方針）。
+///
+/// Match Guidance/Match Directionと同じ「primary（何が起きたか）+
+/// secondary（その結果どう状態が変わったか）」の2段階構成
+/// （`combatV1PlayableDeriveMatchFeedback`）。加えて、Tier 1/2
+/// （試合結果に直結・大きな状態変化）は枠線・背景を強調し、情報階層
+/// （design doc「Result Feedbackの情報階層」）を視覚的にも区別する
+/// ——ただし色だけに依存しない（文言自体が既に事実を明示している、
+/// 18章「Accessibility Semantics」）。
 class _LatestFeedbackBanner extends StatelessWidget {
   const _LatestFeedbackBanner({
     super.key,
@@ -1014,57 +1023,48 @@ class _LatestFeedbackBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = combatV1PlayableFeedbackTitle(
-      feedback,
-      humanPlayerIndex: humanPlayerIndex,
-    );
-    final details = combatV1PlayableFeedbackDetailLines(
+    final result = combatV1PlayableDeriveMatchFeedback(
       feedback,
       humanPlayerIndex: humanPlayerIndex,
     );
     final isHuman = feedback.actorPlayerIndex == humanPlayerIndex;
+    final color = isHuman ? _pink : _gold;
+    final emphasized =
+        result.severity == CombatV1PlayableFeedbackSeverity.matchDecisive ||
+        result.severity == CombatV1PlayableFeedbackSeverity.majorStateChange;
     return Container(
       key: const Key('combat_v1_playable_latest_feedback_banner'),
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: (isHuman ? _pink : _gold).withValues(alpha: 0.12),
+        color: color.withValues(alpha: emphasized ? 0.18 : 0.12),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: (isHuman ? _pink : _gold).withValues(alpha: 0.6),
+          color: color.withValues(alpha: emphasized ? 0.85 : 0.6),
+          width: emphasized ? 1.5 : 1,
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
-            title,
-            key: const Key('combat_v1_playable_latest_feedback_title'),
+            result.primary,
+            key: const Key('combat_v1_playable_latest_feedback_primary'),
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
-              color: isHuman ? _pink : _gold,
+              color: color,
             ),
           ),
-          if (details.isNotEmpty)
+          if (result.secondary != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Wrap(
-                key: const Key('combat_v1_playable_latest_feedback_details'),
-                alignment: WrapAlignment.center,
-                spacing: 10,
-                runSpacing: 2,
-                children: [
-                  for (final line in details)
-                    Text(
-                      line,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.white70,
-                      ),
-                    ),
-                ],
+              child: Text(
+                result.secondary!,
+                key: const Key('combat_v1_playable_latest_feedback_secondary'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: Colors.white70),
               ),
             ),
         ],

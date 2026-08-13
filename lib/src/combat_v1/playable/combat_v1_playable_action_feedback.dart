@@ -104,6 +104,10 @@ class CombatV1PlayableActionFeedback {
     this.kocAfter,
     this.pinOutcome,
     this.submissionOutcome,
+    this.isFinisher = false,
+    this.preventedDirectPin = false,
+    this.preventedSubmissionHold = false,
+    this.preventedIsRough = false,
   });
 
   /// [CombatV1PlayableObservation.actionIndex]と同じ通し番号（1:1で対応）。
@@ -152,4 +156,44 @@ class CombatV1PlayableActionFeedback {
 
   final CombatV1PlayablePinFeedbackOutcome? pinOutcome;
   final CombatV1PlayableSubmissionFeedbackOutcome? submissionOutcome;
+
+  /// Playable 2A-4「Result Feedback — Finisher Distinction」——`kind ==
+  /// techniqueResolved`の場合のみ意味を持つ。宣言済みTECHNIQUEの静的
+  /// metadata（`CombatV1PendingAttack.category == finisher`、既に両者へ
+  /// 公開済みの情報）をそのまま複製するだけで、新しいCombat rule判定
+  /// ではない。
+  final bool isFinisher;
+
+  /// Playable 2A-4「Result Feedback — Counter Prevents」（Review Findings
+  /// Fix、Major）——`kind == counterPlayed`の場合のみ意味を持つ。
+  ///
+  /// **`true`が意味するもの**: 無効化された攻撃側TECHNIQUEが「DIRECT
+  /// PIN/SUBMISSION traitを持っていた」ことではなく、「Counterしなければ
+  /// `combat_v1_engine.dart` `_resolvePendingAttack`が実際にその自動
+  /// 移行（DIRECT PIN/SUBMISSION resolutionへの遷移）へ進んでいた」
+  /// ことを表す
+  /// （`combat_v1_playable_counter_prevention.dart`
+  /// `combatV1PlayableWouldTransitionToDirectPin`/
+  /// `combatV1PlayableWouldTransitionToSubmission`が、Coreと同じDOWN
+  /// posture/HP閾値条件までprojectionした結果）。traitを持つだけでは`true`にならない
+  /// ——例えばDIRECT PIN traitがあっても解決後postureがDOWNにならない
+  /// 場合、SUBMISSION traitがあってもdamage適用後HPが閾値を超える場合は
+  /// 自動移行自体が起きないため、`false`のままになる（Counterが成立した
+  /// ことで技自体が不成立になった事実——DMG/HEAT/state変化を防いだ
+  /// こと自体——は、これらのfieldとは無関係に常に成立する）。
+  ///
+  /// `preventedSubmissionHold`はあくまで「SUBMISSION resolutionへの
+  /// 移行」を防いだことだけを表し、「GIVE UPを防いだ」ことは意味しない
+  /// ——SUBMISSION FINISHERのHP0特殊処理（GIVE UP即決着、
+  /// `combat_v1_finisher_rules.dart`
+  /// `determineFinisherSubmissionOutcome`）はSUBMISSION resolutionへ
+  /// 突入した後のESCAPE/GIVE UP判定であり、突入条件自体
+  /// （`submissionEligible`）はNORMAL/FINISHERで同一。
+  final bool preventedDirectPin;
+  final bool preventedSubmissionHold;
+
+  /// Playable 2A-4「Result Feedback — ROUGH Counter Asymmetry」——`kind ==
+  /// counterPlayed`の場合のみ意味を持つ。無効化された攻撃がROUGH属性
+  /// だったかどうか（design doc「86章」の非対称性説明に使う）。
+  final bool preventedIsRough;
 }

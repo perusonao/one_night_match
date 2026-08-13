@@ -112,6 +112,256 @@ void main() {
       expect(find.textContaining('HEAT +0'), findsNothing);
     });
 
+    testWidgets('FINISHER成立feedbackは primaryに"FINISHER"を明示する'
+        '（Playable 2A-4）', (tester) async {
+      final feedback = testActionFeedback(
+        actorPlayerIndex: 0,
+        actionDisplayName: 'テストフィニッシャー',
+        damage: 60,
+        hpOwnerPlayerIndex: 1,
+        hpBefore: 60,
+        hpAfter: 0,
+        isFinisher: true,
+      );
+      final snapshot = testSnapshot(
+        legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: 0)],
+        latestFeedback: feedback,
+        recentFeedback: [feedback],
+      );
+      await tester.pumpWidget(
+        _wrap(
+          CombatV1PlayableMatchScreen(
+            humanWrestlerId: 'akari',
+            cpuWrestlerId: 'reina',
+            cpuDelay: Duration.zero,
+            sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final primaryText = tester
+          .widget<Text>(
+            find.byKey(
+              const Key('combat_v1_playable_latest_feedback_primary'),
+            ),
+          )
+          .data;
+      expect(primaryText, contains('FINISHER'));
+      expect(find.textContaining('テストフィニッシャー'), findsWidgets);
+      expect(find.textContaining('60 DAMAGE'), findsOneWidget);
+    });
+
+    testWidgets('ROUGH技へのCounter成立feedbackは非対称性の説明をsecondaryへ表示する'
+        '（Playable 2A-4、86章と同じ事実）', (tester) async {
+      final feedback = testActionFeedback(
+        kind: CombatV1PlayableFeedbackKind.counterPlayed,
+        actorPlayerIndex: 0,
+        actionDisplayName: 'テストカウンター',
+        relatedActionDisplayName: 'テストラフ技',
+        preventedIsRough: true,
+      );
+      final snapshot = testSnapshot(
+        legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: 0)],
+        latestFeedback: feedback,
+        recentFeedback: [feedback],
+      );
+      await tester.pumpWidget(
+        _wrap(
+          CombatV1PlayableMatchScreen(
+            humanWrestlerId: 'akari',
+            cpuWrestlerId: 'reina',
+            cpuDelay: Duration.zero,
+            sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final secondaryText = tester
+          .widget<Text>(
+            find.byKey(
+              const Key('combat_v1_playable_latest_feedback_secondary'),
+            ),
+          )
+          .data;
+      expect(secondaryText, contains('cannot PIN this turn'));
+      expect(secondaryText, contains('next-turn TECHNIQUE limit'));
+    });
+
+    // Playable 2A-4 Review Findings Fix（Major、Integration/Widget test）
+    // ——`preventedDirectPin`/`preventedSubmissionHold`が実際に「Counterが
+    // DIRECT PIN/SUBMISSION自動移行を防いだ」ことを意味する場合のみUI上に
+    // 断定文言を出し、`false`（trait はあったがCore条件〈DOWN posture/
+    // HP閾値〉を満たさなかったケースを含む）では出さないことを、
+    // formatter単体テストだけでなくwidget tree（実際にrenderされる
+    // Latest Result banner）まで通して確認する。production catalogには
+    // DIRECT PIN traitを持つ技（FINISHER限定）のresultOpponentStateが
+    // 全てDOWN固定のものしか存在しない
+    // （`combat_v1_technique_catalog.dart`）ため、「traitはあるが
+    // DOWNにならない」ケースは実データでは再現できない——controller側の
+    // 判定自体は`combat_v1_playable_counter_prevention_test.dart`の
+    // 純粋関数testで既にCore条件と直接照合済みなので、ここでは
+    // controllerが実際にその判定結果（`preventedDirectPin == false`）を
+    // 返した場合を想定したfeedbackで、formatterからwidget treeまでの
+    // 経路が安全表現を保つことを確認する。
+    testWidgets(
+      'preventedDirectPin == true: Latest Resultに自動PIN移行を防いだ旨を表示する',
+      (tester) async {
+        final feedback = testActionFeedback(
+          kind: CombatV1PlayableFeedbackKind.counterPlayed,
+          actorPlayerIndex: 0,
+          actionDisplayName: 'テストカウンター',
+          relatedActionDisplayName: 'テストダイレクトピン技',
+          preventedDirectPin: true,
+        );
+        final snapshot = testSnapshot(
+          legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: 0)],
+          latestFeedback: feedback,
+          recentFeedback: [feedback],
+        );
+        await tester.pumpWidget(
+          _wrap(
+            CombatV1PlayableMatchScreen(
+              humanWrestlerId: 'akari',
+              cpuWrestlerId: 'reina',
+              cpuDelay: Duration.zero,
+              sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        final secondaryText = tester
+            .widget<Text>(
+              find.byKey(
+                const Key('combat_v1_playable_latest_feedback_secondary'),
+              ),
+            )
+            .data;
+        expect(secondaryText, contains('automatic PIN transition'));
+      },
+    );
+
+    testWidgets(
+      'preventedDirectPin == false: DIRECT PIN traitを持つ技へのCounterでも'
+      '「自動PIN移行を防いだ」とはLatest Resultに表示しない'
+      '（trait単独ではDOWN transitionを保証しないため）',
+      (tester) async {
+        final feedback = testActionFeedback(
+          kind: CombatV1PlayableFeedbackKind.counterPlayed,
+          actorPlayerIndex: 0,
+          actionDisplayName: 'テストカウンター',
+          relatedActionDisplayName: 'テストダイレクトピン技',
+          preventedDirectPin: false,
+        );
+        final snapshot = testSnapshot(
+          legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: 0)],
+          latestFeedback: feedback,
+          recentFeedback: [feedback],
+        );
+        await tester.pumpWidget(
+          _wrap(
+            CombatV1PlayableMatchScreen(
+              humanWrestlerId: 'akari',
+              cpuWrestlerId: 'reina',
+              cpuDelay: Duration.zero,
+              sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        final secondaryText = tester
+            .widget<Text>(
+              find.byKey(
+                const Key('combat_v1_playable_latest_feedback_secondary'),
+              ),
+            )
+            .data;
+        expect(secondaryText, isNot(contains('PIN')));
+      },
+    );
+
+    testWidgets(
+      'preventedSubmissionHold == true: Latest ResultにSUBMISSION移行条件を'
+      '防いだ旨を表示する',
+      (tester) async {
+        final feedback = testActionFeedback(
+          kind: CombatV1PlayableFeedbackKind.counterPlayed,
+          actorPlayerIndex: 0,
+          actionDisplayName: 'テストカウンター',
+          relatedActionDisplayName: 'テストアームキャッチ',
+          preventedSubmissionHold: true,
+        );
+        final snapshot = testSnapshot(
+          legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: 0)],
+          latestFeedback: feedback,
+          recentFeedback: [feedback],
+        );
+        await tester.pumpWidget(
+          _wrap(
+            CombatV1PlayableMatchScreen(
+              humanWrestlerId: 'akari',
+              cpuWrestlerId: 'reina',
+              cpuDelay: Duration.zero,
+              sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        final secondaryText = tester
+            .widget<Text>(
+              find.byKey(
+                const Key('combat_v1_playable_latest_feedback_secondary'),
+              ),
+            )
+            .data;
+        expect(secondaryText, contains('SUBMISSION transition condition'));
+      },
+    );
+
+    testWidgets(
+      'preventedSubmissionHold == false: SUBMISSION traitを持つ技への'
+      'Counterでも「SUBMISSION移行条件を防いだ」とはLatest Resultに表示しない'
+      '（damage適用後HPが閾値を超えるケースを含む）',
+      (tester) async {
+        final feedback = testActionFeedback(
+          kind: CombatV1PlayableFeedbackKind.counterPlayed,
+          actorPlayerIndex: 0,
+          actionDisplayName: 'テストカウンター',
+          relatedActionDisplayName: 'テストアームキャッチ',
+          preventedSubmissionHold: false,
+        );
+        final snapshot = testSnapshot(
+          legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: 0)],
+          latestFeedback: feedback,
+          recentFeedback: [feedback],
+        );
+        await tester.pumpWidget(
+          _wrap(
+            CombatV1PlayableMatchScreen(
+              humanWrestlerId: 'akari',
+              cpuWrestlerId: 'reina',
+              cpuDelay: Duration.zero,
+              sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        final secondaryText = tester
+            .widget<Text>(
+              find.byKey(
+                const Key('combat_v1_playable_latest_feedback_secondary'),
+              ),
+            )
+            .data;
+        expect(secondaryText, isNot(contains('SUBMISSION')));
+      },
+    );
+
     testWidgets('latest feedbackは次のsnapshotが来るまで表示され続ける（persistence）', (
       tester,
     ) async {
@@ -140,6 +390,66 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.textContaining('最初の技'), findsWidgets);
+    });
+  });
+
+  group('Latest Result — Guidance / Direction責務分離（Playable 2A-4）', () {
+    testWidgets('Latest Resultは過去形の事実のみ——Guidanceが担当する'
+        '「次に何をすべきか」の勧誘文言を含めない', (tester) async {
+      // PINがlegalな局面（Guidanceが「PIN可能」を案内する状況）でも、
+      // Latest Resultは直前に起きた事実（DOWNさせた技の結果）のみを
+      // 述べる——「PINしましょう」等の提案はGuidance側の責務。
+      final feedback = testActionFeedback(
+        actorPlayerIndex: 0,
+        actionDisplayName: 'テストスラム',
+        damage: 20,
+        postureOwnerPlayerIndex: 1,
+        postureBefore: CombatV1WrestlerPosture.stand,
+        postureAfter: CombatV1WrestlerPosture.down,
+      );
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.action,
+        cpu: testCpuStatus(posture: CombatV1WrestlerPosture.down),
+        legalActions: [
+          const CombatV1PinAction(actorPlayerIndex: 0),
+          const CombatV1EndTurnAction(actorPlayerIndex: 0),
+        ],
+        latestFeedback: feedback,
+        recentFeedback: [feedback],
+      );
+      await tester.pumpWidget(
+        _wrap(
+          CombatV1PlayableMatchScreen(
+            humanWrestlerId: 'akari',
+            cpuWrestlerId: 'reina',
+            cpuDelay: Duration.zero,
+            sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // GuidanceパネルとLatest Result primaryが両方存在し、別々の文字列
+      // であること（同じ内容の二重表示ではない）。
+      final guidancePrimary = tester
+          .widget<Text>(
+            find.byKey(
+              const Key('combat_v1_playable_match_guidance_primary'),
+            ),
+          )
+          .data;
+      final resultPrimary = tester
+          .widget<Text>(
+            find.byKey(
+              const Key('combat_v1_playable_latest_feedback_primary'),
+            ),
+          )
+          .data;
+      expect(guidancePrimary, isNotNull);
+      expect(resultPrimary, isNotNull);
+      expect(resultPrimary, isNot(equals(guidancePrimary)));
+      // Latest Result側にGuidanceの提案語彙（PIN勧誘の動詞）が漏れていない。
+      expect(resultPrimary!.toLowerCase(), isNot(contains('pin')));
     });
   });
 

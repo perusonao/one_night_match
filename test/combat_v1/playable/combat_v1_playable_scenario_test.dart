@@ -17,6 +17,8 @@ import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_action
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_config.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_controller.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart';
+import 'package:one_night_match/src/combat_v1/playable_ui/combat_v1_playable_feedback_formatters.dart';
+import 'package:one_night_match/src/combat_v1/playable_ui/combat_v1_playable_technique_traits.dart';
 
 import 'combat_v1_playable_test_helpers.dart';
 
@@ -224,6 +226,37 @@ void main() {
         contains(counterAction.cardInstanceId),
       );
 
+      // Playable 2A-4「Result Feedback — Counter Prevents」（Review
+      // Findings Fix、Major）——Counter成立前のpendingAttackについて、
+      // 「DIRECT PIN/SUBMISSION traitを持っていたか」ではなく、Core
+      // （`combat_v1_engine.dart` `_resolvePendingAttack`）と同じDOWN
+      // posture/HP閾値条件まで含めて「Counterしなければ実際にその
+      // 自動移行へ進んでいたか」を、公開済みsnapshotの値だけから
+      // projectionし、実際に構築されるfeedbackの`preventedDirectPin`/
+      // `preventedSubmissionHold`と突き合わせる（`preventedIsRough`は
+      // trait複製のままでよい、86章の非対称性）。
+      final pendingBefore = snap.pendingAttack!;
+      // 攻撃側はCPU・防御側はHuman（`_isCpuAttackWithHumanCounterAvailable`
+      // 前提）——宣言からCounter応答までposture/HPは変化しないため、
+      // 現在のsnap.humanがCoreの`state.opponent`（declineCounter視点）と
+      // 同じ値になる。
+      final resolvedPosture =
+          pendingBefore.resultOpponentState ?? snap.human.posture;
+      final expectedPreventedDirectPin =
+          combatV1PlayablePendingAttackHasEffectiveDirectPin(pendingBefore) &&
+          resolvedPosture == CombatV1WrestlerPosture.down;
+      final wouldBeHumanHp = (snap.human.hp - pendingBefore.damage).clamp(
+        0,
+        snap.human.maxHp,
+      );
+      final expectedPreventedSubmissionHold =
+          combatV1PlayablePendingAttackHasEffectiveSubmissionHold(
+            pendingBefore,
+          ) &&
+          wouldBeHumanHp <= snap.submissionHpThreshold;
+      final expectedPreventedIsRough =
+          combatV1PlayablePendingAttackIsRough(pendingBefore);
+
       final result = controller.submitHumanAction(
         expectedRevision: snap.revision,
         action: counterAction,
@@ -232,7 +265,133 @@ void main() {
       expect(controller.snapshot.revision, snap.revision + 1);
       expect(controller.snapshot.actionCount, snap.actionCount + 1);
       expect(controller.snapshot.pendingAttack, isNull);
+
+      final feedback = controller.snapshot.latestFeedback;
+      expect(feedback, isNotNull);
+      expect(feedback!.kind, CombatV1PlayableFeedbackKind.counterPlayed);
+      expect(feedback.preventedDirectPin, expectedPreventedDirectPin);
+      expect(feedback.preventedSubmissionHold, expectedPreventedSubmissionHold);
+      expect(feedback.preventedIsRough, expectedPreventedIsRough);
     });
+  });
+
+  group('72. Counter Prevents accuracy（Playable 2A-4 Review Findings Fix、'
+      'Major、Integration test）', () {
+    test(
+      'SUBMISSION Hold traitを持つ攻撃でも、damage適用後HPが閾値を超えるなら'
+      'preventedSubmissionHold==false・formatter出力にも断定文言を含めない'
+      '（実Core Engine resolutionを通した確認、pending attack → Counter '
+      'action → feedback生成 → formatterまで一気通貫）',
+      () {
+        // production catalogでSUBMISSION Hold技をCounterできるのは、白銀
+        // クロスフェイス（reinaのcrossface family）を狙う
+        // `counter_reina_silver_lock_reversal`のみ（`combat_v1_counter_catalog.dart`
+        // ——armbar familyを対象とするCounterはgame data上一切存在しない、
+        // Phase 10C-0.5 A7で明示的に許容された仕様）。そのCounterもreina
+        // 自身のdeckにしかないため、reina同士のmirror matchでのみ実際に
+        // 発生しうる。試合開始直後（HPがまだ高い）に白銀クロスフェイスを
+        // 宣言させ、CPU（reina、FirstLegal policy、Counter最優先）が
+        // Counterした局面を探す——「72. CPU counter」と同じ、turn 1宣言→
+        // CPU応答という見つけやすいパターンを使う。
+        CombatV1PlayableMatchController? found;
+        CombatV1PlayableActionFeedback? foundFeedback;
+
+        outer:
+        for (final humanWrestlerId in const ['reina']) {
+          for (var seed = 0; seed < 60; seed++) {
+            final controller = CombatV1PlayableMatchController(
+              _config(
+                humanWrestlerId: humanWrestlerId,
+                cpuWrestlerId: 'reina',
+                engineSeed: seed,
+              ),
+            );
+            final discardSnap = controller.snapshot;
+            final discardResult = controller.submitHumanAction(
+              expectedRevision: discardSnap.revision,
+              action: discardSnap.legalActions
+                  .whereType<CombatV1DiscardAction>()
+                  .first,
+            );
+            if (!discardResult.isAccepted) continue;
+
+            final actionSnap = controller.snapshot;
+            final submissionTechniqueActions = actionSnap.legalActions
+                .whereType<CombatV1TechniqueAction>()
+                .where((a) {
+                  final card = actionSnap.human.hand.firstWhere(
+                    (c) => c.instanceId == a.cardInstanceId,
+                  );
+                  return card.technique?.submissionHold == true;
+                })
+                .toList();
+            if (submissionTechniqueActions.isEmpty) continue;
+            final chosen = submissionTechniqueActions.first;
+            final chosenCard = actionSnap.human.hand.firstWhere(
+              (c) => c.instanceId == chosen.cardInstanceId,
+            );
+            final damage = chosenCard.technique!.damage;
+            // turn 1・CPUはまだdamageを受けていないため、この時点のCPU HPを
+            // そのまま「damage適用前HP」として使える。
+            final wouldBeCpuHp = (actionSnap.cpu.hp - damage).clamp(
+              0,
+              actionSnap.cpu.maxHp,
+            );
+            if (wouldBeCpuHp <= actionSnap.submissionHpThreshold) {
+              // このtechniqueは閾値内へ入ってしまう（真にSUBMISSIONへ移行
+              // する側のケース）——今回検証したいのは「traitはあるが
+              // 移行しない」側なので対象外。
+              continue;
+            }
+
+            final declareResult = controller.submitHumanAction(
+              expectedRevision: actionSnap.revision,
+              action: chosen,
+            );
+            if (!declareResult.isAccepted) continue;
+
+            controller.advanceCpuUntilHumanInput();
+
+            final cpuCountered = controller.snapshot.recentObservations.any(
+              (o) =>
+                  o.actorPlayerIndex ==
+                      CombatV1PlayableMatchController.cpuPlayerIndex &&
+                  o.action.kind == CombatV1LegalActionKind.counter,
+            );
+            if (!cpuCountered) continue;
+
+            final feedback = controller.snapshot.latestFeedback;
+            if (feedback == null ||
+                feedback.kind != CombatV1PlayableFeedbackKind.counterPlayed) {
+              continue;
+            }
+            found = controller;
+            foundFeedback = feedback;
+            break outer;
+          }
+        }
+
+        expect(
+          found,
+          isNotNull,
+          reason: '探索範囲内でSUBMISSION trait技をCPUがCounterする'
+              '（damage適用後HPが閾値を超える）局面が見つかりませんでした',
+        );
+        final feedback = foundFeedback!;
+        // trait自体は持っているが、Core条件（damage適用後HPが閾値以下）を
+        // 満たさないため、実際にはSUBMISSION resolutionへ移行しない
+        // ——preventedSubmissionHoldはfalseのままであるべき。
+        expect(feedback.preventedSubmissionHold, isFalse);
+
+        // formatterまで通し、Latest Result UIの文言にも「SUBMISSION移行
+        // 条件を防いだ」という断定表現が一切現れないことを確認する。
+        final matchFeedback = combatV1PlayableDeriveMatchFeedback(
+          feedback,
+          humanPlayerIndex: CombatV1PlayableMatchController.humanPlayerIndex,
+        );
+        expect(matchFeedback.secondary, isNot(contains('SUBMISSION')));
+      },
+    );
   });
 
   group('72. CPU counter', () {

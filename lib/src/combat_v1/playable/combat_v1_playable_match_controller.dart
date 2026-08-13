@@ -21,10 +21,12 @@ import '../combat_v1_legal_action.dart';
 import '../combat_v1_legal_action_enumerator.dart';
 import '../combat_v1_match_lifecycle.dart';
 import '../combat_v1_match_state.dart';
+import '../combat_v1_pending_attack.dart';
 import '../combat_v1_production_catalog.dart';
 import '../combat_v1_production_match_setup.dart';
 import '../combat_v1_rules_config.dart';
 import 'combat_v1_playable_action_feedback.dart';
+import 'combat_v1_playable_counter_prevention.dart';
 import 'combat_v1_playable_match_config.dart';
 import 'combat_v1_playable_match_result.dart';
 import 'combat_v1_playable_match_snapshot.dart';
@@ -628,6 +630,40 @@ class CombatV1PlayableMatchController {
           relatedActionDisplayName: pendingBefore == null
               ? null
               : _techniqueName(pendingBefore.attackCardId),
+          // Playable 2A-4「Result Feedback — Counter Prevents」
+          // （Review Findings Fix、Major）——`preventedDirectPin`/
+          // `preventedSubmissionHold`は「無効化された攻撃側TECHNIQUEが
+          // DIRECT PIN/SUBMISSION traitを持っていた」ことではなく、
+          // 「Counterしなければ`combat_v1_engine.dart`
+          // `_resolvePendingAttack`が実際にその自動移行へ進んでいた」
+          // ことを意味する
+          // （`combat_v1_playable_counter_prevention.dart`
+          // `combatV1PlayableWouldTransitionToDirectPin`/
+          // `combatV1PlayableWouldTransitionToSubmission`——Coreと同じ
+          // DOWN posture/HP閾値条件を、`pendingBefore`+防御側before
+          // stateから安全にprojectionする純粋関数、新しいCombat rule
+          // 判定はここでは行わない）。DIRECT PIN/SUBMISSION traitを
+          // 持っていても、解決後postureがDOWNにならない・damage適用後
+          // HPが閾値を超える場合は自動移行自体が起きないため、trait
+          // 単独では`true`にしない。
+          preventedDirectPin: pendingBefore != null &&
+              combatV1PlayableWouldTransitionToDirectPin(
+                effectiveDirectPin: _effectiveDirectPin(pendingBefore),
+                resultOpponentState: pendingBefore.resultOpponentState,
+                defenderPostureBeforeResolution:
+                    _playerAt(stateBefore, defender).posture,
+              ),
+          preventedSubmissionHold: pendingBefore != null &&
+              combatV1PlayableWouldTransitionToSubmission(
+                effectiveSubmissionHold: _effectiveSubmissionHold(pendingBefore),
+                defenderHpBeforeResolution:
+                    _playerAt(stateBefore, defender).hp,
+                defenderMaxHp: _playerAt(stateBefore, defender).maxHp,
+                damage: pendingBefore.damage,
+                rules: _rules,
+              ),
+          preventedIsRough:
+              pendingBefore?.attribute == CombatV1EnergyAttribute.rough,
         );
 
       case CombatV1LegalActionKind.declineCounter:
@@ -669,12 +705,8 @@ class CombatV1PlayableMatchController {
     final actualDamage = defenderBefore.hp - defenderAfter.hp;
 
     final isFinisher = pending.category == CombatV1CardCategory.finisher;
-    final likelyDirectPin = isFinisher
-        ? pending.finisherType == CombatV1FinisherType.directPin
-        : pending.directPin;
-    final likelySubmissionHold = isFinisher
-        ? pending.finisherType == CombatV1FinisherType.submission
-        : pending.submissionHold;
+    final likelyDirectPin = _effectiveDirectPin(pending);
+    final likelySubmissionHold = _effectiveSubmissionHold(pending);
 
     final kocDelta = defenderAfter.koc - defenderBefore.koc;
     final matchEndedByAttacker =
@@ -716,8 +748,28 @@ class CombatV1PlayableMatchController {
       kocAfter: secondaryResolved ? defenderAfter.koc : null,
       pinOutcome: pinOutcome,
       submissionOutcome: submissionOutcome,
+      // Playable 2A-4「Result Feedback — Finisher Distinction」——
+      // 宣言済み（＝公開済み）TECHNIQUEのcategoryをそのまま複製する。
+      isFinisher: isFinisher,
     );
   }
+
+  /// [pending]（宣言済みTECHNIQUE、既に両者へ公開済みの静的metadata）が
+  /// 成立時にDIRECT PINを持つか。`combat_v1_engine.dart`
+  /// `_resolvePendingAttack`のeffectiveDirectPinと同じFINISHER優先順位
+  /// ルールを、feedback構築専用にそのまま複製する（新しい判定の追加
+  /// ではない、`playable_ui/combat_v1_playable_technique_traits.dart`の
+  /// `_effectiveDirectPin`と同じロジック）。
+  static bool _effectiveDirectPin(CombatV1PendingAttack pending) =>
+      pending.category == CombatV1CardCategory.finisher
+      ? pending.finisherType == CombatV1FinisherType.directPin
+      : pending.directPin;
+
+  /// [_effectiveDirectPin]と同じ、SUBMISSION Hold版。
+  static bool _effectiveSubmissionHold(CombatV1PendingAttack pending) =>
+      pending.category == CombatV1CardCategory.finisher
+      ? pending.finisherType == CombatV1FinisherType.submission
+      : pending.submissionHold;
 
   void _enterInvariantViolation(String message) {
     _diagnosticMessage = message;

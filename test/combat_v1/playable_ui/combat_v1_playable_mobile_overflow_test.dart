@@ -9,6 +9,7 @@ import 'package:one_night_match/src/combat_v1/combat_v1_counter.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_energy.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_enums.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
+import 'package:one_night_match/src/combat_v1/combat_v1_match_lifecycle.dart';
 import 'package:one_night_match/src/combat_v1/combat_v1_technique.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_action_feedback.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart';
@@ -896,7 +897,8 @@ void main() {
       testWidgets(
         'D. Counter response（HEAT・trait badge・prevents hint込みの長い'
         'incoming attack summary）: ${width.toInt()}px幅でoverflowせず、'
-        'decline buttonへ到達できる',
+        'decline buttonへ実際にhit-testできる（Review Findings Fix、Minor、'
+        '16章）',
         (tester) async {
           await _withNarrowViewport(tester, () async {
             final snapshot = testSnapshot(
@@ -919,13 +921,14 @@ void main() {
                 CombatV1DeclineCounterAction(actorPlayerIndex: 0),
               ],
             );
+            final session = FakePlayableMatchSession(snapshot);
             await tester.pumpWidget(
               _wrap(
                 CombatV1PlayableMatchScreen(
                   humanWrestlerId: 'akari',
                   cpuWrestlerId: 'reina',
                   cpuDelay: Duration.zero,
-                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                  sessionFactory: (_) => session,
                 ),
               ),
             );
@@ -940,6 +943,19 @@ void main() {
             expect(
               screenRect.contains(tester.getRect(declineFinder).center),
               isTrue,
+            );
+
+            // Review Findings Fix（Minor、16章）: centerがscreen内である
+            // ことの確認だけでなく、実際にdeclineをtapし、期待するstate
+            // 変化（実際にsubmitHumanActionへdeclineCounter actionが渡る
+            // こと）までassertする。
+            await tester.tap(declineFinder);
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+            expect(session.submitCalls, isNotEmpty);
+            expect(
+              session.submitCalls.last.action.kind,
+              CombatV1LegalActionKind.declineCounter,
             );
           }, size: size);
         },
@@ -1364,6 +1380,440 @@ void main() {
                 const Key('combat_v1_playable_counter_play_button'),
               ),
               'Play Counter button',
+            );
+          }, size: size);
+        },
+      );
+    }
+  });
+
+  // Playable 2A-4「Match Flow / Result Feedback Readability」——Latest
+  // Result（primary/secondary）の再設計により表示内容量が変わったため、
+  // 代表ケース3種（15章 Mobile test strategy）で320/360/390px幅の
+  // overflowと実際のreachabilityを確認する。
+  group('Latest Result Reachability（Playable 2A-4 追加）', () {
+    for (final width in [320.0, 360.0, 390.0]) {
+      final size = Size(width, 780);
+
+      testWidgets(
+        '1. long Technique result（FINISHER） + Direction secondary + '
+        'recent logs: ${width.toInt()}px幅でoverflowせず、末尾のrecent logへ'
+        '到達できる',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            // Direction primary+secondaryとも表示される代表状態（相手KOC0
+            // ＝decisiveKoc、既存「Match Direction Reachability」groupと
+            // 同じ方針）。postureはstandのまま——CPU DOWNにするとGuidance
+            // panel（capped scroll領域の外、固定領域）の補足文言が伸び、
+            // このシナリオが検証したいLatest Result側の内容量とは無関係な
+            // 既存レイアウトの余白不足を誘発してしまうため、既存の
+            // 検証済み構成に揃える。
+            final cpu = testCpuStatus(
+              hp: 20,
+              koc: 0,
+              posture: CombatV1WrestlerPosture.stand,
+            );
+            // 複数行になる（damage/HP/posture/HEAT全て変化する）長い
+            // FINISHER feedback。
+            final latest = testActionFeedback(
+              actionIndex: 4,
+              actorPlayerIndex: 0,
+              actionDisplayName: 'テスト最大情報量ダイレクトピンフィニッシャー・ドライバー',
+              damage: 60,
+              isFinisher: true,
+              hpOwnerPlayerIndex: 1,
+              hpBefore: 80,
+              hpAfter: 20,
+              postureOwnerPlayerIndex: 1,
+              postureBefore: CombatV1WrestlerPosture.stand,
+              postureAfter: CombatV1WrestlerPosture.down,
+              heatBefore: 150,
+              heatAfter: 200,
+            );
+            final older = [
+              for (var i = 0; i < 5; i++)
+                testActionFeedback(
+                  actionIndex: i,
+                  actorPlayerIndex: i.isEven ? 0 : 1,
+                  actionDisplayName: 'テスト技目録その$i番',
+                  damage: 10 + i,
+                ),
+            ];
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              cpu: cpu,
+              human: testHumanStatus(
+                hand: [testTechniqueCard(instanceId: 'h1')],
+              ),
+              legalActions: const [
+                CombatV1TechniqueAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'h1',
+                ),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+              latestFeedback: latest,
+              recentFeedback: [...older, latest],
+            );
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+
+            expect(
+              find.byKey(
+                const Key('combat_v1_playable_latest_feedback_primary'),
+              ),
+              findsOneWidget,
+            );
+            expect(
+              find.byKey(
+                const Key('combat_v1_playable_latest_feedback_secondary'),
+              ),
+              findsOneWidget,
+            );
+            expect(
+              find.byKey(
+                const Key('combat_v1_playable_match_direction_primary'),
+              ),
+              findsOneWidget,
+            );
+            expect(
+              find.byKey(
+                const Key('combat_v1_playable_match_direction_secondary'),
+              ),
+              findsOneWidget,
+            );
+
+            const scrollKey = Key('combat_v1_playable_actor_recent_scroll');
+            const lastLogItemKey = Key(
+              'combat_v1_playable_recent_log_item_3',
+            );
+            expect(find.byKey(lastLogItemKey), findsOneWidget);
+
+            var viewportRect = tester.getRect(find.byKey(scrollKey));
+            var itemRect = tester.getRect(find.byKey(lastLogItemKey));
+            if (!itemRect.overlaps(viewportRect)) {
+              await tester.drag(find.byKey(scrollKey), const Offset(0, -400));
+              await tester.pumpAndSettle();
+            }
+            viewportRect = tester.getRect(find.byKey(scrollKey));
+            itemRect = tester.getRect(find.byKey(lastLogItemKey));
+            expect(
+              itemRect.overlaps(viewportRect),
+              isTrue,
+              reason:
+                  '末尾のrecent logへ到達できない: item=$itemRect, '
+                  'viewport=$viewportRect',
+            );
+          }, size: size);
+        },
+      );
+
+      testWidgets(
+        '2. Counter result（DirectPin/Submission/ROUGH全部防いだ長い'
+        'secondary） + Technique/EndTurn control: ${width.toInt()}px幅で'
+        'overflowせず、Latest Result primary/secondaryへ実際に到達でき、'
+        'End Turnが実際にhit-testできる（Review Findings Fix、Minor）',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final latest = testActionFeedback(
+              kind: CombatV1PlayableFeedbackKind.counterPlayed,
+              actorPlayerIndex: 0,
+              actionDisplayName: 'テスト投げ技カウンター',
+              relatedActionDisplayName:
+                  'テスト最大情報量ダイレクトピンフィニッシャー・ドライバー',
+              preventedDirectPin: true,
+              preventedSubmissionHold: true,
+              preventedIsRough: true,
+            );
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.action,
+              isHumanInputRequired: true,
+              human: testHumanStatus(
+                hand: [testTechniqueCard(instanceId: 'h1')],
+              ),
+              legalActions: const [
+                CombatV1TechniqueAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'h1',
+                ),
+                CombatV1EndTurnAction(actorPlayerIndex: 0),
+              ],
+              latestFeedback: latest,
+              recentFeedback: [latest],
+            );
+            final session = FakePlayableMatchSession(snapshot);
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) => session,
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+
+            // Review Findings Fix（Minor、13章）: widgetの存在確認だけでは
+            // なく、実際のclip viewport（Latest Result primary/secondaryが
+            // 属する`combat_v1_playable_actor_recent_scroll`、高さ上限
+            // 132pxのSingleChildScrollView）とのintersectionを検証する
+            // ——`findsOneWidget`だけでは、実際にはscroll clipで見えない
+            // 状態でもgreenになってしまう（14章）。
+            const scrollKey = Key('combat_v1_playable_actor_recent_scroll');
+            const primaryKey = Key(
+              'combat_v1_playable_latest_feedback_primary',
+            );
+            const secondaryKey = Key(
+              'combat_v1_playable_latest_feedback_secondary',
+            );
+            expect(find.byKey(primaryKey), findsOneWidget);
+            expect(find.byKey(secondaryKey), findsOneWidget);
+
+            Future<void> expectReachableInScroll(Key key, String label) async {
+              final finder = find.byKey(key);
+              var viewportRect = tester.getRect(find.byKey(scrollKey));
+              var rect = tester.getRect(finder);
+              if (!rect.overlaps(viewportRect)) {
+                // 初期scroll位置では見えない場合、実際にdragしてから
+                // 再検証する（14章「1. scroll前はviewport外 2. drag 3.
+                // scroll後にintersection」）。
+                await tester.drag(
+                  find.byKey(scrollKey),
+                  const Offset(0, -400),
+                );
+                await tester.pumpAndSettle();
+                viewportRect = tester.getRect(find.byKey(scrollKey));
+                rect = tester.getRect(finder);
+              }
+              expect(
+                rect.overlaps(viewportRect),
+                isTrue,
+                reason:
+                    '$labelへ実際に到達できない: rect=$rect, '
+                    'viewport=$viewportRect',
+              );
+            }
+
+            await expectReachableInScroll(primaryKey, 'Latest Result primary');
+            await expectReachableInScroll(
+              secondaryKey,
+              'Latest Result secondary',
+            );
+
+            // Primary control（End Turn button）とTechnique hand cardが
+            // viewport内にあり、hit-testableであることを確認する
+            // ——Latest Resultの内容量が増えても、下部固定領域
+            // （Human status panel/Primary actions bar）は常にscroll不要で
+            // 画面内へ収まる既存レイアウトを維持する（design doc「17章」）。
+            final screenRect = Offset.zero & size;
+            final endTurnFinder = find.byKey(
+              const Key('combat_v1_playable_action_end_turn'),
+            );
+            expect(endTurnFinder, findsOneWidget);
+            expect(
+              screenRect.contains(tester.getRect(endTurnFinder).center),
+              isTrue,
+            );
+
+            // Review Findings Fix（Minor、15章）: Technique cardは画面全体
+            // ではなく、実際のTechnique scroll viewport
+            // （`combat_v1_playable_technique_area_scroll`、2A-3で確立した
+            // observability）と比較する。
+            final handCardFinder = find.byKey(
+              const Key('combat_v1_playable_hand_card_h1'),
+            );
+            expect(handCardFinder, findsOneWidget);
+            final techniqueViewportRect = tester.getRect(
+              find.byKey(
+                const Key('combat_v1_playable_technique_area_scroll'),
+              ),
+            );
+            expect(
+              tester.getRect(handCardFinder).overlaps(techniqueViewportRect),
+              isTrue,
+            );
+
+            // Review Findings Fix（Minor、16章）: centerがscreen内である
+            // ことの確認だけでなく、実際にEnd Turnをtapし、期待する
+            // state変化（実際にsubmitHumanActionへendTurn actionが渡る
+            // こと）までassertする。
+            await tester.tap(endTurnFinder);
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+            expect(session.submitCalls, isNotEmpty);
+            expect(
+              session.submitCalls.last.action.kind,
+              CombatV1LegalActionKind.endTurn,
+            );
+          }, size: size);
+        },
+      );
+
+      testWidgets(
+        '3. PIN/SUBMISSION result（Result overlay内）: ${width.toInt()}px幅で'
+        'overflowせず、Rematch/Backへ到達できる',
+        (tester) async {
+          await _withNarrowViewport(tester, () async {
+            final terminalFeedback = testActionFeedback(
+              kind: CombatV1PlayableFeedbackKind.pinResolved,
+              actorPlayerIndex: 0,
+              actionDisplayName: null,
+              kocOwnerPlayerIndex: 1,
+              kocBefore: 0,
+              kocAfter: 0,
+              pinOutcome: CombatV1PlayablePinFeedbackOutcome.matchOver,
+            );
+            final snapshot = testSnapshot(
+              status: CombatV1PlayableControllerStatus.matchOver,
+              isHumanInputRequired: false,
+              currentActorPlayerIndex: null,
+              legalActions: const [],
+              latestFeedback: terminalFeedback,
+            );
+            final terminalSession = FakePlayableMatchSession(
+              snapshot,
+              result: testResult(
+                status: CombatV1PlayableControllerStatus.matchOver,
+                terminalCause: CombatV1MatchTerminalCause.normalPin,
+                winnerPlayerIndex: 0,
+              ),
+            );
+            // Review Findings Fix（Minor、16章）: Rematchを実際にtapした際、
+            // `_startNewMatch`が`sessionFactory`を再度呼び出す
+            // ——2回目以降の呼び出しでは非terminalなsessionを返すように
+            // scriptedし、「Rematchをtapすると実際に新しい試合へ遷移する
+            // （Result overlayが消える）」という期待state変化を検証できる
+            // ようにする。
+            final rematchSession = FakePlayableMatchSession(testSnapshot());
+            var sessionFactoryCallCount = 0;
+            await tester.pumpWidget(
+              _wrap(
+                CombatV1PlayableMatchScreen(
+                  humanWrestlerId: 'akari',
+                  cpuWrestlerId: 'reina',
+                  cpuDelay: Duration.zero,
+                  sessionFactory: (_) {
+                    sessionFactoryCallCount += 1;
+                    return sessionFactoryCallCount == 1
+                        ? terminalSession
+                        : rematchSession;
+                  },
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+
+            final overlayFinder = find.byKey(
+              const Key('combat_v1_playable_result_overlay'),
+            );
+            expect(overlayFinder, findsOneWidget);
+            final terminalFeedbackFinder = find.descendant(
+              of: overlayFinder,
+              matching: find.byKey(
+                const Key('combat_v1_playable_result_terminal_feedback'),
+              ),
+            );
+            expect(terminalFeedbackFinder, findsOneWidget);
+
+            // Review Findings Fix（Minor、17章）: overlay内のLatest Result
+            // primary/secondaryについても、overlay自身の実viewport
+            // （`Positioned.fill`によりoverlay containerは画面全体を覆う）
+            // とのintersectionを検証する——findsOneWidgetだけで済ませない。
+            final overlayViewportRect = tester.getRect(overlayFinder);
+            final overlayScrollableFinder = find
+                .descendant(of: overlayFinder, matching: find.byType(Scrollable))
+                .first;
+
+            Future<void> expectReachableInOverlay(Finder finder, String label) async {
+              expect(finder, findsOneWidget, reason: '$labelが見つからない');
+              var rect = tester.getRect(finder);
+              if (!rect.overlaps(overlayViewportRect)) {
+                // 長文で初期position外の場合、overlay内をscrollしてから
+                // 再検証する（17章「scroll前→drag→scroll後」）。
+                await tester.scrollUntilVisible(
+                  finder,
+                  50,
+                  scrollable: overlayScrollableFinder,
+                );
+                await tester.pumpAndSettle();
+                rect = tester.getRect(finder);
+              }
+              expect(
+                rect.overlaps(overlayViewportRect),
+                isTrue,
+                reason:
+                    '$labelへ実際に到達できない: rect=$rect, '
+                    'viewport=$overlayViewportRect',
+              );
+            }
+
+            await expectReachableInOverlay(
+              find.descendant(
+                of: terminalFeedbackFinder,
+                matching: find.byKey(
+                  const Key('combat_v1_playable_latest_feedback_primary'),
+                ),
+              ),
+              'terminal Latest Result primary',
+            );
+            final terminalSecondaryFinder = find.descendant(
+              of: terminalFeedbackFinder,
+              matching: find.byKey(
+                const Key('combat_v1_playable_latest_feedback_secondary'),
+              ),
+            );
+            if (terminalSecondaryFinder.evaluate().isNotEmpty) {
+              await expectReachableInOverlay(
+                terminalSecondaryFinder,
+                'terminal Latest Result secondary',
+              );
+            }
+
+            final screenRect = Offset.zero & size;
+            final rematchFinder = find.byKey(
+              const Key('combat_v1_playable_result_rematch_button'),
+            );
+            final backFinder = find.byKey(
+              const Key('combat_v1_playable_result_back_button'),
+            );
+            expect(rematchFinder, findsOneWidget);
+            expect(backFinder, findsOneWidget);
+            expect(
+              screenRect.contains(tester.getRect(rematchFinder).center),
+              isTrue,
+            );
+            expect(
+              screenRect.contains(tester.getRect(backFinder).center),
+              isTrue,
+            );
+
+            // Review Findings Fix（Minor、16章）: centerがscreen内である
+            // ことの確認だけでなく、実際にRematchをtapし、期待するUI
+            // 変化（terminal状態が解消されResult overlayが消えること）
+            // までassertする。
+            await tester.tap(rematchFinder);
+            await tester.pump();
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull);
+            expect(
+              find.byKey(const Key('combat_v1_playable_result_overlay')),
+              findsNothing,
+              reason: 'Rematchをtapしても新しい試合へ遷移しなかった'
+                  '（Result overlayが消えない）',
             );
           }, size: size);
         },
