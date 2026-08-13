@@ -178,6 +178,10 @@ class CombatV1PlayablePendingAttackView {
     required this.damage,
     required this.resultOpponentState,
     required this.energyCostTotal,
+    required this.heatGain,
+    required this.directPin,
+    required this.submissionHold,
+    this.finisherType,
   });
 
   final int attackerPlayerIndex;
@@ -197,6 +201,29 @@ class CombatV1PlayablePendingAttackView {
   /// 静的metadataなので、既に両者へ公開された情報（hidden information
   /// 違反にならない）。
   final int energyCostTotal;
+
+  /// Playable 2A-3「Counter Response — Incoming Attack Summary」——
+  /// この攻撃が成立した場合に加算されるShared HEAT（`CombatV1PendingAttack.heatGain`
+  /// をそのまま公開する）。宣言済みTECHNIQUEの静的metadataであり、
+  /// [energyCostTotal]と同じ理由でhidden information違反にならない。
+  final int heatGain;
+
+  /// この攻撃技自体のPIN/SUBMISSION関連フラグ（`CombatV1PendingAttack.directPin`/
+  /// `submissionHold`をそのまま複製）。`category == finisher`の場合は、
+  /// この値ではなく[finisherType]が実際の決着方式を決める——
+  /// `CombatV1Technique.directPin`/`submissionHold`と同じ優先順位ルール
+  /// （combat_v1_engine.dart `_resolvePendingAttack`のeffectiveDirectPin/
+  /// effectiveSubmissionHoldと同じ、docs/design/combat_v1_phase1_design.md
+  /// 2.4章）。呼び出し側は`combatV1PlayablePendingAttackHasEffectiveDirectPin`/
+  /// `combatV1PlayablePendingAttackHasEffectiveSubmissionHold`
+  /// （`combat_v1_playable_technique_traits.dart`）経由でこの優先順位を
+  /// 安全に解決すること——[directPin]/[submissionHold]を単独で読まない。
+  final bool directPin;
+  final bool submissionHold;
+
+  /// FINISHERの決着方式（`CombatV1PendingAttack.finisherType`をそのまま
+  /// 公開）。`category == finisher`の場合のみ非null。
+  final CombatV1FinisherType? finisherType;
 }
 
 /// 過去に成功実行された1件のpublic actionの、bounded recent

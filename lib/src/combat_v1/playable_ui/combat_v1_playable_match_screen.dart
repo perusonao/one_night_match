@@ -24,6 +24,7 @@ import 'combat_v1_playable_feedback_formatters.dart';
 import 'combat_v1_playable_match_direction.dart';
 import 'combat_v1_playable_match_guidance.dart';
 import 'combat_v1_playable_match_session.dart';
+import 'combat_v1_playable_technique_traits.dart';
 import 'combat_v1_playable_ui_formatters.dart';
 
 const _pink = Color(0xffff477e);
@@ -31,6 +32,13 @@ const _gold = Color(0xffffc857);
 const _teal = Color(0xff5fd9c6);
 const _cardSurface = Color(0xff211527);
 const _healthError = Color(0xffff5c5c);
+// Playable 2A-3「Technique Card — Decision Traits」——SUBMISSION/ROUGH
+// badge専用の色。既存の_pink（YOU/FINISHER/DIRECT PIN）・_gold（CPU/
+// COUNTER/HEAT）と視覚的に区別できるものを新規に割り当てる（18章
+// 「Accessibility / Semantics」——色だけでtraitを区別しない前提のうえで、
+// 追加の視覚区別として使う。文字labelは全badge共通で必須）。
+const _submissionBadge = _teal;
+const _roughBadge = Color(0xffb388ff);
 
 /// CPU 1手ごとのpresentation delay既定値（design doc「17章 CPU
 /// Delay」）。widget testでは`Duration.zero`等へ差し替える
@@ -369,6 +377,17 @@ class _CombatV1PlayableMatchScreenState
                         child: IgnorePointer(
                           ignoring: _cpuBusy,
                           child: SingleChildScrollView(
+                            // Review Findings Fix（Minor、4.1章）——mobile
+                            // visibility testが、この領域の実際のclip
+                            // viewport（Expandedへ割り当てられた高さ）を
+                            // 正確に取得できるようにするためのkey。この
+                            // Viewport矩形こそが「実際に見えている範囲」
+                            // であり、画面全体のサイズをそのまま使うと
+                            // AppBar/他panelの分だけ広く見積もってしまう
+                            // （実際にはこの範囲外はscroll clipで見えない）。
+                            key: const Key(
+                              'combat_v1_playable_technique_area_scroll',
+                            ),
                             child: _MatchBody(
                               snapshot: snapshot,
                               selectedCardInstanceId: _selectedCardInstanceId,
@@ -1136,6 +1155,7 @@ class _MatchBody extends StatelessWidget {
               // null`）ため、COUNTERの動的必要量は表示しない
               // （`pendingEnergyCostTotal`は既定null）。
               availableEnergy: snapshot.human.availableEnergy,
+              submissionHpThreshold: snapshot.submissionHpThreshold,
             ),
         ],
       ),
@@ -1253,6 +1273,7 @@ class _HandRow extends StatelessWidget {
     this.sharedHeat,
     this.finisherHeatThreshold,
     this.availableEnergy,
+    this.submissionHpThreshold,
   });
 
   final List<CombatV1PlayableHandCard> hand;
@@ -1267,6 +1288,10 @@ class _HandRow extends StatelessWidget {
   /// Playable 1C.1「Card Cost Comparison」——Technique cardのCostと並べる、
   /// 現在Humanが使用可能なENERGY（属性別）。
   final Map<CombatV1EnergyAttribute, int>? availableEnergy;
+
+  /// Playable 2A-3「SUBMISSION Wording」——SUBMISSION trait badgeの
+  /// Tooltip文言に使う、公開済みのrule定数（`snapshot.submissionHpThreshold`）。
+  final int? submissionHpThreshold;
 
   @override
   Widget build(BuildContext context) {
@@ -1291,10 +1316,11 @@ class _HandRow extends StatelessWidget {
             ),
           ),
         SizedBox(
-          // Playable 1C.1: Energy比較・required/result posture行が追加
-          // されたため232pxへ拡張（`_CounterPromptSheet`のcounter hand
-          // 専用SizedBoxは対象外——counter cardはposture行を持たないため）。
-          height: 232,
+          // Playable 2A-3: Technique decision trait badges（DIRECT PIN/
+          // SUBMISSION/ROUGH/FINISHER resolution）が追加されたため
+          // 232px→268pxへ拡張（`_CounterPromptSheet`のcounter hand専用
+          // SizedBoxは対象外——counter cardはこのbadge行を持たないため）。
+          height: 268,
           child: ListView.separated(
             key: const Key('combat_v1_playable_human_hand'),
             scrollDirection: Axis.horizontal,
@@ -1312,6 +1338,7 @@ class _HandRow extends StatelessWidget {
                 sharedHeat: sharedHeat,
                 finisherHeatThreshold: finisherHeatThreshold,
                 availableEnergy: availableEnergy,
+                submissionHpThreshold: submissionHpThreshold,
               );
             },
           ),
@@ -1331,6 +1358,8 @@ class _HandCardTile extends StatelessWidget {
     this.finisherHeatThreshold,
     this.availableEnergy,
     this.pendingEnergyCostTotal,
+    this.submissionHpThreshold,
+    this.pendingAttackFamily,
   });
 
   final CombatV1PlayableHandCard card;
@@ -1347,6 +1376,18 @@ class _HandCardTile extends StatelessWidget {
   /// pending攻撃のENERGY COST合計（`CombatV1EnergyCost.total`）。Counter
   /// cardのCostはこの値を、Counter自身の単一属性で支払う（docs 7章）。
   final int? pendingEnergyCostTotal;
+
+  /// Playable 2A-3「SUBMISSION Wording」——SUBMISSION trait badgeの
+  /// Tooltip文言用（`snapshot.submissionHpThreshold`をそのまま渡す）。
+  /// この文脈が無い呼び出し元では`null`のままにする（Tooltip自体は
+  /// 表示しても具体的な閾値行を出さない安全側フォールバック）。
+  final int? submissionHpThreshold;
+
+  /// Playable 2A-3「Counter Card Information」——`counterResponsePending`
+  /// 中のpending攻撃のtechnique family（`CombatV1PlayablePendingAttackView.family`）。
+  /// Counter card分岐でのみ使う——このCounterが現在のpending攻撃を
+  /// family一致／group一致のどちらで返せるかを表示する。
+  final CombatV1TechniqueFamily? pendingAttackFamily;
 
   /// Playable 1C.1「Energy Insufficient — Safe Diagnosis」——`resolveEnergyPayment`
   /// （Core Engineの支払い解決ロジックそのもの、`combat_v1_energy.dart`）を
@@ -1452,6 +1493,13 @@ class _HandCardTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   if (technique != null) ...[
+                    // Playable 2A-3「Technique Card — Decision Traits」
+                    // （Tier 1: 勝敗ルート）——DMG/HEAT等の即時結果（Tier
+                    // 2）より先に、成立後の勝敗ルート（DIRECT PIN/
+                    // SUBMISSION/ROUGH/FINISHER決着方式）を示す。「今
+                    // 使用可能か」（LegalAction）とは別概念であることは
+                    // 各Tooltipの文言側で明示する（7〜11章）。
+                    _TechniqueTraitBadges(technique: technique, submissionHpThreshold: submissionHpThreshold),
                     Text(
                       '${technique.attribute.displayLabel} DMG ${technique.damage} '
                       'HEAT ${technique.heatGain}',
@@ -1521,17 +1569,38 @@ class _HandCardTile extends StatelessWidget {
                         '必要量は返す技によって変わります',
                         style: TextStyle(fontSize: 10, color: Colors.white38),
                       ),
+                    // Playable 2A-3「Counter Card Information」（Tier 4:
+                    // advanced）——このCounterが現在のpending攻撃をどう
+                    // 返せるか（family一致／group一致）。表示専用の
+                    // 言い換えであり、legality判定自体はCore（既にこの
+                    // Counterがusableとして表示されている前提）のまま。
+                    if (pendingAttackFamily != null)
+                      Builder(
+                        builder: (context) {
+                          final label = combatV1PlayableCounterFamilyMatchLabel(
+                            counter,
+                            pendingAttackFamily!,
+                          );
+                          if (label == null) return const SizedBox.shrink();
+                          return Text(
+                            '対応: $label',
+                            key: const Key(
+                              'combat_v1_playable_counter_family_match',
+                            ),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.white54,
+                            ),
+                          );
+                        },
+                      ),
                   ],
                   const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 4,
-                    children: [
-                      if (card.category == CombatV1CardCategory.finisher)
-                        const _MiniBadge(label: 'FINISHER', color: _pink),
-                      if (card.category == CombatV1CardCategory.counter)
-                        const _MiniBadge(label: 'COUNTER', color: _gold),
-                    ],
-                  ),
+                  if (card.category == CombatV1CardCategory.counter)
+                    const Wrap(
+                      spacing: 4,
+                      children: [_MiniBadge(label: 'COUNTER', color: _gold)],
+                    ),
                   // finisher要件hintとdisabledメッセージは、どちらもHEAT
                   // 要件について述べる内容が重複しうるため同時には出さない
                   // （disabled時は`_disabledMessage()`側がHEAT要件を含む）。
@@ -1571,6 +1640,109 @@ class _HandCardTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Playable 2A-3「Technique Card — Decision Traits」（5・6章）——
+/// FINISHER決着方式・DIRECT PIN・SUBMISSION・ROUGHという、勝敗判断上
+/// 重要なtraitを短いbadgeで示す。Combat rule判定は一切行わない——
+/// `combat_v1_playable_technique_traits.dart`（pure derivation）が
+/// 既に確定した値をbadge/Tooltipへ機械的にmapするだけ。
+///
+/// 色だけでtraitを区別しない（18章「Accessibility / Semantics」）——
+/// 各badgeは常に文字labelを持つ。`Tooltip`で detail 文言（9〜11章の
+/// 安全な言い回し）を補足する。
+class _TechniqueTraitBadges extends StatelessWidget {
+  const _TechniqueTraitBadges({
+    required this.technique,
+    this.submissionHpThreshold,
+  });
+
+  final CombatV1Technique technique;
+  final int? submissionHpThreshold;
+
+  @override
+  Widget build(BuildContext context) {
+    final isFinisher = technique.category == CombatV1CardCategory.finisher;
+    final directPin = combatV1PlayableTechniqueHasEffectiveDirectPin(
+      technique,
+    );
+    final submissionHold = combatV1PlayableTechniqueHasEffectiveSubmissionHold(
+      technique,
+    );
+    final rough = combatV1PlayableTechniqueIsRough(technique);
+
+    final badges = <Widget>[
+      if (isFinisher)
+        _TraitBadge(
+          key: const Key('combat_v1_playable_card_finisher_resolution_badge'),
+          label: combatV1PlayableFinisherResolutionBadgeLabel(
+            technique.finisherType!,
+          ),
+          color: _pink,
+          detail: switch (technique.finisherType!) {
+            CombatV1FinisherType.normal =>
+              'Shared HEAT解禁後に使用できるFINISHERです（成功後、決着方式は'
+                  '固定されていません）',
+            CombatV1FinisherType.directPin => combatV1PlayableDirectPinTraitDetail(),
+            CombatV1FinisherType.submission => submissionHpThreshold == null
+                ? '成立後、条件を満たすとSubmission判定に自動移行します'
+                : combatV1PlayableSubmissionTraitDetail(submissionHpThreshold!),
+          },
+        )
+      else ...[
+        if (directPin)
+          _TraitBadge(
+            key: const Key('combat_v1_playable_card_direct_pin_badge'),
+            label: 'DIRECT PIN',
+            color: _pink,
+            detail: combatV1PlayableDirectPinTraitDetail(),
+          ),
+        if (submissionHold)
+          _TraitBadge(
+            key: const Key('combat_v1_playable_card_submission_badge'),
+            label: 'SUBMISSION',
+            color: _submissionBadge,
+            detail: submissionHpThreshold == null
+                ? '成立後、条件を満たすとSubmission判定に自動移行します'
+                : combatV1PlayableSubmissionTraitDetail(submissionHpThreshold!),
+          ),
+      ],
+      if (rough)
+        _TraitBadge(
+          key: const Key('combat_v1_playable_card_rough_badge'),
+          label: 'ROUGH',
+          color: _roughBadge,
+          detail: combatV1PlayableRoughTraitDetail(),
+        ),
+    ];
+    if (badges.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Wrap(
+        key: const Key('combat_v1_playable_card_trait_badges'),
+        spacing: 4,
+        runSpacing: 4,
+        children: badges,
+      ),
+    );
+  }
+}
+
+class _TraitBadge extends StatelessWidget {
+  const _TraitBadge({
+    super.key,
+    required this.label,
+    required this.color,
+    required this.detail,
+  });
+
+  final String label;
+  final Color color;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) =>
+      Tooltip(message: detail, child: _MiniBadge(label: label, color: color));
 }
 
 class _MiniBadge extends StatelessWidget {
@@ -1772,11 +1944,63 @@ class _PrimaryActionsBar extends StatelessWidget {
 }
 
 class _PendingAttackSummary extends StatelessWidget {
-  const _PendingAttackSummary({required this.pending});
+  const _PendingAttackSummary({required this.pending, this.submissionHpThreshold});
   final CombatV1PlayablePendingAttackView pending;
+
+  /// Playable 2A-3「SUBMISSION Wording」——SUBMISSION trait detailの
+  /// Tooltip文言用（`snapshot.submissionHpThreshold`をそのまま渡す）。
+  final int? submissionHpThreshold;
 
   @override
   Widget build(BuildContext context) {
+    final directPin = combatV1PlayablePendingAttackHasEffectiveDirectPin(
+      pending,
+    );
+    final submissionHold =
+        combatV1PlayablePendingAttackHasEffectiveSubmissionHold(pending);
+    final rough = combatV1PlayablePendingAttackIsRough(pending);
+    final finisherType = pending.finisherType;
+    final badges = <Widget>[
+      if (finisherType != null)
+        _TraitBadge(
+          key: const Key('combat_v1_playable_pending_finisher_resolution_badge'),
+          label: combatV1PlayableFinisherResolutionBadgeLabel(finisherType),
+          color: _pink,
+          detail: switch (finisherType) {
+            CombatV1FinisherType.normal =>
+              'Shared HEAT解禁後に使用できるFINISHERです',
+            CombatV1FinisherType.directPin => combatV1PlayableDirectPinTraitDetail(),
+            CombatV1FinisherType.submission => submissionHpThreshold == null
+                ? '成立後、条件を満たすとSubmission判定に自動移行します'
+                : combatV1PlayableSubmissionTraitDetail(submissionHpThreshold!),
+          },
+        )
+      else ...[
+        if (directPin)
+          _TraitBadge(
+            key: const Key('combat_v1_playable_pending_direct_pin_badge'),
+            label: 'DIRECT PIN',
+            color: _pink,
+            detail: combatV1PlayableDirectPinTraitDetail(),
+          ),
+        if (submissionHold)
+          _TraitBadge(
+            key: const Key('combat_v1_playable_pending_submission_badge'),
+            label: 'SUBMISSION',
+            color: _submissionBadge,
+            detail: submissionHpThreshold == null
+                ? '成立後、条件を満たすとSubmission判定に自動移行します'
+                : combatV1PlayableSubmissionTraitDetail(submissionHpThreshold!),
+          ),
+      ],
+      if (rough)
+        _TraitBadge(
+          key: const Key('combat_v1_playable_pending_rough_badge'),
+          label: 'ROUGH',
+          color: _roughBadge,
+          detail: combatV1PlayableRoughTraitDetail(),
+        ),
+    ];
     return Container(
       key: const Key('combat_v1_playable_pending_attack_summary'),
       width: double.infinity,
@@ -1798,10 +2022,52 @@ class _PendingAttackSummary extends StatelessWidget {
             // が使用したものなので、resultOpponentStateの対象は防御側＝
             // Human自身になる（`combatV1PlayablePendingResultStateLabel`
             // 参照）。カード面（自分の技）とは向きが逆であることに注意。
+            // Playable 2A-3「Counter Response — Incoming Attack Summary」
+            // ——DMG/posture結果に加えてHEAT gainも公開する
+            // （`pending.heatGain`は宣言時点の静的metadataなので、
+            // hidden information違反にならない）。
             '${pending.attribute.displayLabel} ・ DMG ${pending.damage} ・ '
+            'HEAT ${pending.heatGain} ・ '
             '${combatV1PlayablePendingResultStateLabel(pending.resultOpponentState)}',
+            key: const Key('combat_v1_playable_pending_effect_line'),
             style: const TextStyle(fontSize: 12, color: Colors.white70),
           ),
+          if (badges.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Wrap(
+              key: const Key('combat_v1_playable_pending_trait_badges'),
+              spacing: 4,
+              runSpacing: 4,
+              children: badges,
+            ),
+          ],
+          const SizedBox(height: 4),
+          Text(
+            // Playable 2A-3「Counter Success Meaning」——Counterが成立
+            // すると何を防げるかを明示する（`playCounter`実装コメントが
+            // 確定させている「攻撃効果は無効、DMG/HEAT/posture変更なし」
+            // semanticsと一致する文言、7.1章）。
+            combatV1PlayableCounterPreventsSummary(
+              directPin: directPin,
+              submissionHold: submissionHold,
+            ),
+            key: const Key('combat_v1_playable_pending_counter_prevents_hint'),
+            style: const TextStyle(fontSize: 11, color: Colors.white54),
+          ),
+          if (rough) ...[
+            const SizedBox(height: 2),
+            Text(
+              // Playable 2A-3 Review Findings Fix（Minor）——ROUGHの
+              // 2つの効果（宣言時点で確定するこのターンPIN不可／成立
+              // ベースの次ターンTECHNIQUE制限）は判定基準が異なり、
+              // Counterで防げるものと防げないものが混在する。「ROUGHの
+              // 全効果を防げる」という誤解を避けるため、prevents hintとは
+              // 別行で明示する（15.1章）。
+              combatV1PlayableRoughCounterAsymmetryNote(),
+              key: const Key('combat_v1_playable_pending_rough_counter_note'),
+              style: const TextStyle(fontSize: 11, color: Colors.white54),
+            ),
+          ],
           const SizedBox(height: 2),
           Text(
             // Playable 1C.1「COUNTER Semantics」——COUNTERの必要ENERGYは
@@ -1878,7 +2144,11 @@ class _CounterPromptSheetState extends State<_CounterPromptSheet> {
               ),
             ),
             const SizedBox(height: 8),
-            if (pending != null) _PendingAttackSummary(pending: pending),
+            if (pending != null)
+              _PendingAttackSummary(
+                pending: pending,
+                submissionHpThreshold: widget.snapshot.submissionHpThreshold,
+              ),
             const SizedBox(height: 12),
             if (usableCounterCards.isEmpty)
               const Padding(
@@ -1914,6 +2184,10 @@ class _CounterPromptSheetState extends State<_CounterPromptSheet> {
                       // ではpending攻撃が確定しているため、具体的な必要
                       // ENERGY合計を示せる。
                       pendingEnergyCostTotal: pending?.energyCostTotal,
+                      // Playable 2A-3「Counter Card Information」——
+                      // このCounterがpending攻撃をどう返せるか
+                      // （family/group一致）を表示する。
+                      pendingAttackFamily: pending?.family,
                     );
                   },
                 ),

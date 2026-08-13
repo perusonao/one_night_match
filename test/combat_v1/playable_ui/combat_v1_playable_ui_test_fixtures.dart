@@ -175,6 +175,13 @@ CombatV1PlayablePendingAttackView testPendingAttack({
   damage: technique.damage,
   resultOpponentState: resultOpponentState,
   energyCostTotal: energyCostTotal ?? technique.energyCost.total,
+  // Playable 2A-3「Counter Response — Incoming Attack Summary」——他の
+  // fieldと同じく、[technique]（宣言時点でCombatV1PendingAttackへ複製
+  // される元データ）からそのまま導出する。
+  heatGain: technique.heatGain,
+  directPin: technique.directPin,
+  submissionHold: technique.submissionHold,
+  finisherType: technique.finisherType,
 );
 
 CombatV1PlayableObservation testObservation({
