@@ -17,6 +17,7 @@ import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_action
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_config.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_controller.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart';
+import 'package:one_night_match/src/combat_v1/playable_ui/combat_v1_playable_technique_traits.dart';
 
 import 'combat_v1_playable_test_helpers.dart';
 
@@ -224,6 +225,19 @@ void main() {
         contains(counterAction.cardInstanceId),
       );
 
+      // Playable 2A-4「Result Feedback — Counter Prevents」——Counter成立
+      // 前のpendingAttackが持つ、宣言済み（＝公開済み）DIRECT PIN/
+      // SUBMISSION Hold/ROUGHの静的性質を、実際に構築されるfeedbackの
+      // `preventedDirectPin`/`preventedSubmissionHold`/`preventedIsRough`
+      // と突き合わせる。
+      final pendingBefore = snap.pendingAttack!;
+      final expectedPreventedDirectPin =
+          combatV1PlayablePendingAttackHasEffectiveDirectPin(pendingBefore);
+      final expectedPreventedSubmissionHold =
+          combatV1PlayablePendingAttackHasEffectiveSubmissionHold(pendingBefore);
+      final expectedPreventedIsRough =
+          combatV1PlayablePendingAttackIsRough(pendingBefore);
+
       final result = controller.submitHumanAction(
         expectedRevision: snap.revision,
         action: counterAction,
@@ -232,6 +246,13 @@ void main() {
       expect(controller.snapshot.revision, snap.revision + 1);
       expect(controller.snapshot.actionCount, snap.actionCount + 1);
       expect(controller.snapshot.pendingAttack, isNull);
+
+      final feedback = controller.snapshot.latestFeedback;
+      expect(feedback, isNotNull);
+      expect(feedback!.kind, CombatV1PlayableFeedbackKind.counterPlayed);
+      expect(feedback.preventedDirectPin, expectedPreventedDirectPin);
+      expect(feedback.preventedSubmissionHold, expectedPreventedSubmissionHold);
+      expect(feedback.preventedIsRough, expectedPreventedIsRough);
     });
   });
 

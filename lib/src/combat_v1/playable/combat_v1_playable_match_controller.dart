@@ -21,6 +21,7 @@ import '../combat_v1_legal_action.dart';
 import '../combat_v1_legal_action_enumerator.dart';
 import '../combat_v1_match_lifecycle.dart';
 import '../combat_v1_match_state.dart';
+import '../combat_v1_pending_attack.dart';
 import '../combat_v1_production_catalog.dart';
 import '../combat_v1_production_match_setup.dart';
 import '../combat_v1_rules_config.dart';
@@ -628,6 +629,19 @@ class CombatV1PlayableMatchController {
           relatedActionDisplayName: pendingBefore == null
               ? null
               : _techniqueName(pendingBefore.attackCardId),
+          // Playable 2A-4「Result Feedback — Counter Prevents」——
+          // Counterが成立したことで、無効化された攻撃側TECHNIQUEが
+          // 本来持っていたDIRECT PIN/SUBMISSION自動移行・ROUGH属性も
+          // 一切発動しなかったことを説明するための、宣言済み
+          // （＝公開済み）静的metadataの複製。`_buildTechniqueResolvedFeedback`
+          // と同じFINISHER優先順位ルールをそのまま適用する（新しい
+          // Combat rule判定ではない）。
+          preventedDirectPin: pendingBefore != null &&
+              _effectiveDirectPin(pendingBefore),
+          preventedSubmissionHold: pendingBefore != null &&
+              _effectiveSubmissionHold(pendingBefore),
+          preventedIsRough:
+              pendingBefore?.attribute == CombatV1EnergyAttribute.rough,
         );
 
       case CombatV1LegalActionKind.declineCounter:
@@ -669,12 +683,8 @@ class CombatV1PlayableMatchController {
     final actualDamage = defenderBefore.hp - defenderAfter.hp;
 
     final isFinisher = pending.category == CombatV1CardCategory.finisher;
-    final likelyDirectPin = isFinisher
-        ? pending.finisherType == CombatV1FinisherType.directPin
-        : pending.directPin;
-    final likelySubmissionHold = isFinisher
-        ? pending.finisherType == CombatV1FinisherType.submission
-        : pending.submissionHold;
+    final likelyDirectPin = _effectiveDirectPin(pending);
+    final likelySubmissionHold = _effectiveSubmissionHold(pending);
 
     final kocDelta = defenderAfter.koc - defenderBefore.koc;
     final matchEndedByAttacker =
@@ -716,8 +726,28 @@ class CombatV1PlayableMatchController {
       kocAfter: secondaryResolved ? defenderAfter.koc : null,
       pinOutcome: pinOutcome,
       submissionOutcome: submissionOutcome,
+      // Playable 2A-4「Result Feedback — Finisher Distinction」——
+      // 宣言済み（＝公開済み）TECHNIQUEのcategoryをそのまま複製する。
+      isFinisher: isFinisher,
     );
   }
+
+  /// [pending]（宣言済みTECHNIQUE、既に両者へ公開済みの静的metadata）が
+  /// 成立時にDIRECT PINを持つか。`combat_v1_engine.dart`
+  /// `_resolvePendingAttack`のeffectiveDirectPinと同じFINISHER優先順位
+  /// ルールを、feedback構築専用にそのまま複製する（新しい判定の追加
+  /// ではない、`playable_ui/combat_v1_playable_technique_traits.dart`の
+  /// `_effectiveDirectPin`と同じロジック）。
+  static bool _effectiveDirectPin(CombatV1PendingAttack pending) =>
+      pending.category == CombatV1CardCategory.finisher
+      ? pending.finisherType == CombatV1FinisherType.directPin
+      : pending.directPin;
+
+  /// [_effectiveDirectPin]と同じ、SUBMISSION Hold版。
+  static bool _effectiveSubmissionHold(CombatV1PendingAttack pending) =>
+      pending.category == CombatV1CardCategory.finisher
+      ? pending.finisherType == CombatV1FinisherType.submission
+      : pending.submissionHold;
 
   void _enterInvariantViolation(String message) {
     _diagnosticMessage = message;

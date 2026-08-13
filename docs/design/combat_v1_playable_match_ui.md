@@ -2557,3 +2557,216 @@ Combat rule変更: NO / Core resolution変更: NO / LegalAction
 semantics変更: NO / CPU AI変更: NO / wrestler data変更: NO /
 technique data変更: NO / dependency追加: NO / hidden information
 exposure変更: NO。
+
+# Playable 2A-4 — Match Flow / Result Feedback Readability（実装追記）
+
+## 91. Purpose
+
+Playable 2A-1（Match Guidance＝今何をするか）・2A-2（Match Direction＝
+何を目指すか）・2A-3（Technique Readability＝技が何をするか）に続き、
+2A-4は「直前に何が起きたか」→「状態がどう変化したか」→「次の判断へ
+どうつながるか」という因果関係を、ログを解析しなくても読めるように
+する。新しいCombat ruleは追加しない、presentation/playability
+改善のみのフェーズ。
+
+## 92. Existing Architecture Audit（実装前調査結果）
+
+着手前に、Playable 1Cで既に構築済みのfeedback基盤を調査した。
+
+- `lib/src/combat_v1/playable/combat_v1_playable_action_feedback.dart`
+  （`CombatV1PlayableActionFeedback`）: controllerが各actionのbefore/
+  after `CombatV1MatchState`差分から構築する、pure presentation-only
+  value object（36章）。damage・HP/posture/HEAT/KOC変化・PIN/
+  SUBMISSION結果を実測値として保持し、Technique metadataの宣言値を
+  そのまま「実際の結果」として扱わない（37章「Do Not Fabricate
+  Deltas」）。
+- `lib/src/combat_v1/playable_ui/combat_v1_playable_feedback_formatters.dart`:
+  上記value objectをUI文字列へ変換する、pure formatter層。
+- `combat_v1_playable_match_screen.dart`の`_LatestFeedbackBanner`: 直近
+  1件を大きめbannerとして表示し、次のactionまで表示を持続する
+  （40章「Feedback Display Duration」）。
+
+この基盤は「1段階（title＋flat detail line群）」の表示であり、5〜7章
+（本追記の要求仕様）が求める「Primary result / Secondary consequence
+の2段階」「情報階層Tier」「FINISHER/ROUGH Counterの明示」を満たして
+いなかった。11章の方針（「既存feedback derivationがある場合は無意味
+に別系統を作らず拡張する」）に従い、新しいderivation fileを新設せず、
+既存の2ファイルを拡張する方針を採った——別名の並行しくみ
+（`combat_v1_playable_match_feedback.dart`のような新規file）は作成
+していない。
+
+## 93. Snapshot Projection 拡張（Public情報のみ）
+
+`CombatV1PlayableActionFeedback`へ、以下4つのbool field（既定
+`false`）を追加した:
+
+- `isFinisher`（`techniqueResolved`用）: 宣言済み（＝両者へ公開済み）
+  TECHNIQUEの`category == finisher`をそのまま複製する。Primary文言へ
+  「(FINISHER)」を明示するために使う。
+- `preventedDirectPin`/`preventedSubmissionHold`/`preventedIsRough`
+  （`counterPlayed`用）: Counterで無効化された攻撃側TECHNIQUEが持って
+  いた、宣言済み・公開済みの静的性質（DIRECT PIN/SUBMISSION Hold/
+  ROUGH属性）をそのまま複製する。Counterが成立した時点でこれらの
+  TECHNIQUEは不成立になるため、「防いだ」ことの説明に使う。
+
+いずれも`combat_v1_playable_match_controller.dart`の
+`_buildTechniqueResolvedFeedback`/`_buildFeedback`（counter case）が、
+既に保持している`stateBefore.pendingAttack`（宣言済みTECHNIQUEの静的
+metadata）から導出する——CPU未使用の手札・CPU counter候補・draw
+order・非公開deck内容はいずれも参照しない（16章のhidden information
+境界を維持）。DIRECT PIN/SUBMISSION Holdの優先順位判定（FINISHER
+category時は`finisherType`が優先）は、`_buildTechniqueResolvedFeedback`
+が既に持っていたロジックと同一のものを`_effectiveDirectPin`/
+`_effectiveSubmissionHold`という2つのprivate static helperへ集約し、
+重複実装を避けた。
+
+## 94. Result Feedback Model — Primary / Secondary / Severity
+
+`combat_v1_playable_feedback_formatters.dart`へ以下を追加した:
+
+- `CombatV1PlayableFeedbackSeverity`（4値のTier enum: `matchDecisive`
+  ／`majorStateChange`／`techniqueResult`／`minorEvent`）と、それを
+  [feedback]だけから導出する`combatV1PlayableFeedbackSeverity`。
+- `CombatV1PlayableMatchFeedback`（`severity`／`primary`／`secondary`）
+  ——Match Guidance/Match Directionと同じ「primary 1文＋必要時のみ
+  secondary 1文」構成のUI-oriented value object。
+- `combatV1PlayableDeriveMatchFeedback`——`CombatV1PlayableActionFeedback`
+  1件からこのmodelを導出するpure function。kind別に
+  `_derivePinResolvedFeedback`/`_deriveTechniqueResolvedFeedback`/
+  `_deriveCounterFeedback`へ分岐する。
+
+値の意味づけ（実装時に実際のCore semanticsと照合済み、6章の例文を
+そのまま仕様化していない）:
+
+- **Technique成立**: primaryに「actor — 技名（＋FINISHERならその旨）
+  — N DAMAGE」、secondaryに「HP変化・posture変化・HEAT変化」を
+  `·`区切りでまとめる。同一action内でDIRECT PIN/SUBMISSIONへ自動
+  移行した場合は、secondaryへ「PIN ATTEMPT — 結果」/「SUBMISSION —
+  結果」と、防御側KOC変化を追記する。PIN countの具体的な数値
+  （1/2/2.9）は39章の方針どおり一切含めない。
+  - DIRECT PINだがEngineが実際にはDOWN条件を満たさず自動移行しな
+    かった境界（`pinOutcome == null`）では、PIN関連の文言を一切
+    出さない——「成立時、条件を満たすと」という宣言済みTECHNIQUEの
+    可能性と、実際に起きた事実を混同しない（37章と同じ方針）。
+- **COUNTER成立**: primaryに「actor countered with 技名」、secondaryに
+  「防いだ内容」（DMG・HEAT・状態変化、＋DIRECT PIN/SUBMISSION Hold
+  なら追加でその旨）。ROUGH技を防いだ場合は、2A-3
+  86章で確定した非対称性（宣言時点で確定するPIN不可はCounterされて
+  も取り消されない／成立ベースの次ターンTECHNIQUE制限はCounterで
+  防げる）を、過去形のLatest Result向けに言い換えて追記する——同じ
+  事実の言い換えであり、新しいCombat ruleではない。
+- **通常PIN宣言**: primaryに「actor — PIN ATTEMPT — 結果」、secondary
+  に防御側KOC変化。
+- **Rest/Stand Up/discard/end turn/technique宣言**: Tier 4の補助
+  イベントとして、primaryのみ（rest時のみsecondaryにHP変化）。
+
+## 95. Result Feedbackの情報階層（Tier、実装）
+
+`combatV1PlayableFeedbackSeverity`が導出するTier:
+
+- **Tier 1（matchDecisive）**: PIN 3-count／SUBMISSION GIVE UP
+  （`pinOutcome`/`submissionOutcome == matchOver`）、またはFINISHER
+  成立（`isFinisher`）。
+- **Tier 2（majorStateChange）**: PIN宣言・COUNTER成立、または
+  Technique成立でPIN/SUBMISSIONへ自動移行した場合・相手をDOWNさせた
+  場合。
+- **Tier 3（techniqueResult）**: 上記に該当しない通常のTechnique成立
+  （DMG・HEAT・posture変化）。
+- **Tier 4（minorEvent）**: discard・turn transition・Stand Up・
+  Rest・Technique宣言。
+
+`_LatestFeedbackBanner`（match_screen.dart）は、Tier 1/2の場合のみ
+背景・枠線を強調する（alpha/widthを上げる）。ただし色・強調度だけに
+依存しない——文言自体が既に「PIN ATTEMPT — 3 COUNT — MATCH OVER」の
+ように事実を明示しているため、Tier表示は補助的な視覚強調に留める
+（18章「Accessibility Semantics」）。
+
+## 96. Guidance / Direction / Latest Result / Recent Logの責務分離
+
+重複表示を避けるため、4つのpanelの責務を再確認した（8〜9章）:
+
+- **Match Guidance**（2A-1）: 今できること。legal actionのSSOTに基づく
+  提案（例:「PIN可能」）。
+- **Match Direction**（2A-2）: 勝利までの道筋（例:「相手のKOCを削る
+  チャンスです」）。
+- **Latest Result**（本追記）: 直前に実際に起きた事実のみ、過去形。
+  「〜しましょう」「〜が可能です」のような提案・評価語彙は一切
+  含めない——widget test（`combat_v1_playable_feedback_widget_test.dart`
+  「Latest Result — Guidance / Direction責務分離」）で、Guidance
+  primaryとLatest Result primaryが異なる文字列であり、Latest Result
+  側にGuidanceの提案語彙（`pin`等）が漏れていないことを確認した。
+- **Recent Log**: 時系列確認用の簡潔な履歴（`combatV1PlayableFeedbackCompactLabel`、
+  既存のまま無変更）。内部ID・enum名・instance IDは含めない
+  （9章「デバッグログ化しない」方針を維持）。
+
+## 97. Hidden Information Boundary（維持）
+
+新規参照fieldはすべて「宣言済み（＝両者へ公開済み）TECHNIQUEの静的
+metadata」（93章）であり、CPU hand contents／CPU Energy／CPU Counter
+possession／CPU Finisher possession／deck order／next draw／CPU AI
+decision／internal evaluation／random rollの非公開値／future legal
+action predictionはいずれも一切参照していない
+（`CombatV1PlayableOpponentStatus`は無変更）。
+
+## 98. Mobile Strategy
+
+既存の`ConstrainedBox(maxHeight: 132)` + `Scrollbar`/
+`SingleChildScrollView`（70.10章のscroll reachability機構、Playable
+2A-2）をそのまま活用した——Latest Resultのprimary/secondary化は表示
+内容の再構成のみで、この安全弁のレイアウト自体は変更していない。
+
+`combat_v1_playable_mobile_overflow_test.dart`へ新設した「Latest
+Result Reachability（Playable 2A-4 追加）」groupで、320/360/390px幅
+の代表ケース3種を検証した:
+
+1. 長いFINISHER技結果 + Match Direction secondary + recent log 5件
+   ——overflowせず、実際にscrollして末尾のrecent log entryへ到達
+   できる。
+2. DIRECT PIN/SUBMISSION Hold/ROUGHすべてを防いだ長いCounter
+   secondary + Technique/End Turn control——overflowせず、下部固定
+   領域（primary action bar・hand card）が常にscroll不要でviewport内
+   へ収まり、hit-testableである。
+3. PIN 3-count（Result overlay内のterminal feedback）——overflowせず、
+   Rematch/Backボタンへ到達できる。
+
+## 99. Test Strategy
+
+- **Pure test**（新設
+  `test/combat_v1/playable_ui/combat_v1_playable_feedback_formatters_test.dart`、
+  25件）: `combatV1PlayableFeedbackSeverity`の全kind分岐・
+  `combatV1PlayableDeriveMatchFeedback`のPrimary/Secondary内容
+  （Technique成功・damage・HEAT・DOWN・FINISHER・Direct PIN自動移行・
+  DOWN条件を満たさない境界・SUBMISSION ESCAPE/GIVE UP・PIN kick out/
+  3-count・COUNTER成立＋DIRECT PIN/SUBMISSION/ROUGH・Rest・Stand Up・
+  discard・end turn）を、実Engineを経由せずsynthetic feedbackで検証
+  した。
+- **Real controller test**（`combat_v1_playable_scenario_test.dart`
+  「72. Human counter」拡張）: 実際にCounterが成立するシナリオを
+  seed探索で見つけ、`preventedDirectPin`/`preventedSubmissionHold`/
+  `preventedIsRough`が、Counter前の`pendingAttack`（宣言済み・
+  公開済み情報）から`playable_ui`側の`combatV1PlayablePendingAttackHasEffectiveDirectPin`
+  等と一致する値になることを確認した。
+- **Widget test**（`combat_v1_playable_feedback_widget_test.dart`
+  拡張）: FINISHER成立時のprimary表示・ROUGH Counterの非対称性
+  secondary表示・Guidanceとの責務重複が無いことを追加検証した。既存
+  15件（PIN/SUBMISSION/HEAT/discard/accessibility等）はkey名変更
+  （`_title`/`_details` → `_primary`/`_secondary`、他fileから参照
+  されていないことを確認済み）以外は無変更で全green。
+- **Mobile test**: 98章参照。
+
+## 100. Non-Goals（今回は実装しない）
+
+- Combat Core rule・damage/HP/KOC/PIN/Submission/Finisher/Counter/
+  DOWN/Shared HEAT/Energy計算の変更。
+- LegalAction semanticsの変更、UI側での操作可能性の独自再計算。
+- PIN countの具体的な数値（1/2/2.9）表示（39章の方針を継続）。
+- Draw/Discard詳細のTier引き上げ（Tier 4のまま、情報過多を避ける）。
+- CPU AI・wrestler/technique data・deck構成・random挙動・依存関係の
+  変更。
+
+## 101. Scope Verification（Playable 2A-4）
+
+Combat rule変更: NO / Core resolution変更: NO / LegalAction
+semantics変更: NO / CPU AI変更: NO / wrestler data変更: NO /
+technique data変更: NO / dependency変更: NO / hidden information
+exposure: NO。

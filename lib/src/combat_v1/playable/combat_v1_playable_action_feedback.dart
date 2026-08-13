@@ -104,6 +104,10 @@ class CombatV1PlayableActionFeedback {
     this.kocAfter,
     this.pinOutcome,
     this.submissionOutcome,
+    this.isFinisher = false,
+    this.preventedDirectPin = false,
+    this.preventedSubmissionHold = false,
+    this.preventedIsRough = false,
   });
 
   /// [CombatV1PlayableObservation.actionIndex]と同じ通し番号（1:1で対応）。
@@ -152,4 +156,26 @@ class CombatV1PlayableActionFeedback {
 
   final CombatV1PlayablePinFeedbackOutcome? pinOutcome;
   final CombatV1PlayableSubmissionFeedbackOutcome? submissionOutcome;
+
+  /// Playable 2A-4「Result Feedback — Finisher Distinction」——`kind ==
+  /// techniqueResolved`の場合のみ意味を持つ。宣言済みTECHNIQUEの静的
+  /// metadata（`CombatV1PendingAttack.category == finisher`、既に両者へ
+  /// 公開済みの情報）をそのまま複製するだけで、新しいCombat rule判定
+  /// ではない。
+  final bool isFinisher;
+
+  /// Playable 2A-4「Result Feedback — Counter Prevents」——`kind ==
+  /// counterPlayed`の場合のみ意味を持つ。無効化された攻撃側TECHNIQUEが
+  /// 持っていたDIRECT PIN/SUBMISSION自動移行の性質（宣言済み・公開済み
+  /// のTechnique metadata）をそのまま複製する——Counterが成立した
+  /// ことで技自体が不成立になり、これらの自動遷移も防がれたことを
+  /// 表す（`combat_v1_engine.dart` `playCounter`のsemantics、design doc
+  /// 「76章」と同じ判定）。
+  final bool preventedDirectPin;
+  final bool preventedSubmissionHold;
+
+  /// Playable 2A-4「Result Feedback — ROUGH Counter Asymmetry」——`kind ==
+  /// counterPlayed`の場合のみ意味を持つ。無効化された攻撃がROUGH属性
+  /// だったかどうか（design doc「86章」の非対称性説明に使う）。
+  final bool preventedIsRough;
 }

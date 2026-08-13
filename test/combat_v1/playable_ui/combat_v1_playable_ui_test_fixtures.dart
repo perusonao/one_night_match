@@ -218,6 +218,10 @@ CombatV1PlayableActionFeedback testActionFeedback({
   int? kocAfter,
   CombatV1PlayablePinFeedbackOutcome? pinOutcome,
   CombatV1PlayableSubmissionFeedbackOutcome? submissionOutcome,
+  bool isFinisher = false,
+  bool preventedDirectPin = false,
+  bool preventedSubmissionHold = false,
+  bool preventedIsRough = false,
 }) => CombatV1PlayableActionFeedback(
   actionIndex: actionIndex,
   turnNumber: turnNumber,
@@ -240,6 +244,10 @@ CombatV1PlayableActionFeedback testActionFeedback({
   kocAfter: kocAfter,
   pinOutcome: pinOutcome,
   submissionOutcome: submissionOutcome,
+  isFinisher: isFinisher,
+  preventedDirectPin: preventedDirectPin,
+  preventedSubmissionHold: preventedSubmissionHold,
+  preventedIsRough: preventedIsRough,
 );
 
 CombatV1PlayableMatchSnapshot testSnapshot({
