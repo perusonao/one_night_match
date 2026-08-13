@@ -94,6 +94,16 @@ Future<void> _withNarrowViewport(
   await body();
 }
 
+/// Playable 2A-5「9章 Guidance / Direction / Result / Logの圧縮」——Match
+/// Direction／Latest Result banner／Recent Logは既定で折りたたむため、
+/// これらの内容を検証するtestは明示的にtoggleをtapして展開する（design
+/// doc「70.10章」の到達可能性原則——折りたたんだ場合もユーザーの明示
+/// 操作で到達できることの確認を兼ねる）。
+Future<void> _expandDetail(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('combat_v1_playable_detail_toggle')));
+  await tester.pump();
+}
+
 void main() {
   testWidgets('Setup screen: 320px幅でoverflowしない', (tester) async {
     await _withNarrowViewport(tester, () async {
@@ -731,6 +741,7 @@ void main() {
           );
           await tester.pump();
           expect(tester.takeException(), isNull);
+          await _expandDetail(tester);
 
           // Direction primary/secondaryが実際に描画されていることを
           // 前提として確認する（到達可否テストの土台）。
@@ -835,6 +846,13 @@ void main() {
             await tester.pump();
             expect(tester.takeException(), isNull);
 
+            // Playable 2A-5 Review Findings Fix「3章」——完全なtrait
+            // badge（合成label込み）は選択後の`_SelectedTechniquePanel`
+            // が担当する。
+            await tester.tap(
+              find.byKey(const Key('combat_v1_playable_hand_card_h1')),
+            );
+            await tester.pump();
             expect(find.text('FINISHER · PIN'), findsOneWidget);
             expect(find.text('ROUGH'), findsOneWidget);
 
@@ -889,6 +907,13 @@ void main() {
             );
             await tester.pump();
             expect(tester.takeException(), isNull);
+            // Playable 2A-5 Review Findings Fix「3章」——完全なtrait
+            // badge（合成label込み）は選択後の`_SelectedTechniquePanel`
+            // が担当する。
+            await tester.tap(
+              find.byKey(const Key('combat_v1_playable_hand_card_h2')),
+            );
+            await tester.pump();
             expect(find.text('FINISHER · SUBMISSION'), findsOneWidget);
           }, size: size);
         },
@@ -1100,13 +1125,40 @@ void main() {
               );
             }
 
-            // Technique name（ellipsisで折り返されても、Text自体の
-            // 実座標が画面内にあれば読める＝視認性の代理指標として使う）。
+            // Playable 2A-5 Review Findings Fix「3章 Compact Hand」——
+            // 一覧段階（compact hand card自体）で読める最低限の情報：
+            // 識別できる名前・required Energy（ellipsisで折り返されても
+            // Text自体の実座標が画面内にあれば読める＝視認性の代理指標
+            // として使う）。
             await expectReachableInViewport(
               find.text(_maxInfoTechnique.name),
-              'Technique name',
+              'Technique name（compact hand card）',
             );
-            // trait badge（FINISHER · PINとROUGHの両方）。
+            await expectReachableInViewport(
+              find.byKey(const Key('combat_v1_playable_card_energy_line')),
+              'Energy line（compact hand card）',
+            );
+
+            // 詳細（trait badge・DMG/HEAT・posture・使用不可理由）は
+            // 選択後の`_SelectedTechniquePanel`（hand直下）が担当する。
+            // 縦scrollは許容する（「一覧＝比較はscroll不要、詳細閲覧は
+            // 必要に応じてscroll可能」という役割分離、design doc
+            // Playable 2A-5 Review Findings Fix追記「11章」）。
+            final cardFinder = find.byKey(
+              const Key('combat_v1_playable_hand_card_h1'),
+            );
+            await tester.ensureVisible(cardFinder);
+            await tester.pumpAndSettle();
+            await tester.tap(cardFinder);
+            await tester.pump();
+
+            final panelFinder = find.byKey(
+              const Key('combat_v1_playable_selected_technique_panel'),
+            );
+            expect(panelFinder, findsOneWidget);
+
+            // trait badge（FINISHER · PINとROUGHの両方）——panel専用key
+            // のため、compact hand cardのmajor trait chipとは衝突しない。
             await expectReachableInViewport(
               find.byKey(
                 const Key('combat_v1_playable_card_finisher_resolution_badge'),
@@ -1117,15 +1169,16 @@ void main() {
               find.byKey(const Key('combat_v1_playable_card_rough_badge')),
               'ROUGH badge',
             );
-            // DMG/HEAT行（keyが無いため内容で特定する）。
+            // DMG/HEAT行——compact hand card側にも短い"DMG NN"表示がある
+            // ため、panelへscopeして一意に特定する。
             await expectReachableInViewport(
-              find.textContaining('DMG ${_maxInfoTechnique.damage}'),
-              'DMG/HEAT line',
-            );
-            // Energy行。
-            await expectReachableInViewport(
-              find.byKey(const Key('combat_v1_playable_card_energy_line')),
-              'Energy line',
+              find.descendant(
+                of: panelFinder,
+                matching: find.textContaining(
+                  'DMG ${_maxInfoTechnique.damage}',
+                ),
+              ),
+              'DMG/HEAT line（panel）',
             );
             // required/result posture行。
             await expectReachableInViewport(
@@ -1138,10 +1191,12 @@ void main() {
               find.byKey(const Key('combat_v1_playable_card_result_posture')),
               'result posture line',
             );
-            // unusable reason。
+            // unusable reason（selected panelのusable status行）。
             await expectReachableInViewport(
               find.byKey(
-                const Key('combat_v1_playable_card_disabled_message'),
+                const Key(
+                  'combat_v1_playable_selected_technique_usable_status',
+                ),
               ),
               'unusable reason',
             );
@@ -1468,6 +1523,7 @@ void main() {
             );
             await tester.pump();
             expect(tester.takeException(), isNull);
+            await _expandDetail(tester);
 
             expect(
               find.byKey(
@@ -1565,6 +1621,7 @@ void main() {
             );
             await tester.pump();
             expect(tester.takeException(), isNull);
+            await _expandDetail(tester);
 
             // Review Findings Fix（Minor、13章）: widgetの存在確認だけでは
             // なく、実際のclip viewport（Latest Result primary/secondaryが

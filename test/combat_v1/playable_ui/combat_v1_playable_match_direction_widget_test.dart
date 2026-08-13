@@ -34,6 +34,14 @@ CombatV1PlayableMatchScreen _screen(FakePlayableMatchSession session) =>
       sessionFactory: (_) => session,
     );
 
+/// Playable 2A-5「9章 Guidance / Direction / Result / Logの圧縮」——Match
+/// Directionは既定で折りたたむため、明示的にtoggleをtapして展開する
+/// （design doc「70.10章」の到達可能性原則の確認を兼ねる）。
+Future<void> _expandDetail(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('combat_v1_playable_detail_toggle')));
+  await tester.pump();
+}
+
 void main() {
   testWidgets('通常action phase: primaryを表示する', (tester) async {
     final snapshot = testSnapshot(
@@ -44,6 +52,7 @@ void main() {
     );
     await tester.pumpWidget(_wrap(_screen(FakePlayableMatchSession(snapshot))));
     await tester.pump();
+    await _expandDetail(tester);
 
     expect(find.byKey(_primaryKey), findsOneWidget);
     expect(
@@ -62,6 +71,7 @@ void main() {
     );
     await tester.pumpWidget(_wrap(_screen(FakePlayableMatchSession(snapshot))));
     await tester.pump();
+    await _expandDetail(tester);
 
     expect(
       tester.widget<Text>(find.byKey(_primaryKey)).data,
@@ -80,6 +90,7 @@ void main() {
     );
     await tester.pumpWidget(_wrap(_screen(FakePlayableMatchSession(snapshot))));
     await tester.pump();
+    await _expandDetail(tester);
 
     expect(
       tester.widget<Text>(find.byKey(_primaryKey)).data,
@@ -119,6 +130,7 @@ void main() {
       ),
     );
     await tester.pump();
+    await _expandDetail(tester);
     // CPU turn中でも（Match Guidanceとは違い）Direction panelは表示
     // され続ける——「今何をするか」ではなく「試合がどこへ向かって
     // いるか」を示す情報のため。

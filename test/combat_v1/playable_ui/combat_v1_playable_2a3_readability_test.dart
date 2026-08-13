@@ -31,6 +31,22 @@ CombatV1PlayableMatchScreen _screen(
   sessionFactory: (_) => session,
 );
 
+/// Playable 2A-5 Review Findings Fix「3章 Compact Hand」——完全なtrait
+/// badge（`_TechniqueTraitBadges`、合成labelやTooltip込み）は選択後の
+/// `_SelectedTechniquePanel`（hand直下）へ移動した。compact hand card
+/// 自体（一覧段階）は最大1つのmajor trait（FINISHER/PIN/SUBMISSION/
+/// ROUGHのいずれか）だけを短く示す。
+Future<void> _selectHandCard(WidgetTester tester, String instanceId) async {
+  await tester.tap(
+    find.byKey(Key('combat_v1_playable_hand_card_$instanceId')),
+  );
+  await tester.pump();
+}
+
+final _selectedTechniquePanelFinder = find.byKey(
+  const Key('combat_v1_playable_selected_technique_panel'),
+);
+
 const CombatV1Technique _directPinTechnique = CombatV1Technique(
   id: 'test_2a3_direct_pin',
   name: 'テストダイレクトピン技',
@@ -107,6 +123,7 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      await _selectHandCard(tester, 'h1');
 
       expect(
         find.byKey(const Key('combat_v1_playable_card_direct_pin_badge')),
@@ -137,12 +154,22 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      await _selectHandCard(tester, 'h1');
 
       expect(
         find.byKey(const Key('combat_v1_playable_card_submission_badge')),
         findsOneWidget,
       );
-      expect(find.text('SUBMISSION'), findsOneWidget);
+      // compact hand card自体もmajor trait chip（同じ"SUBMISSION"文言）を
+      // 表示するため（3章A）、完全なbadge（Tooltip付き）は選択後panelへ
+      // scopeして一意に検証する。
+      expect(
+        find.descendant(
+          of: _selectedTechniquePanelFinder,
+          matching: find.text('SUBMISSION'),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('ROUGH技はROUGH badgeを表示する', (tester) async {
@@ -158,12 +185,22 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      await _selectHandCard(tester, 'h1');
 
       expect(
         find.byKey(const Key('combat_v1_playable_card_rough_badge')),
         findsOneWidget,
       );
-      expect(find.text('ROUGH'), findsOneWidget);
+      // compact hand card自体もmajor trait chip（同じ"ROUGH"文言）を
+      // 表示するため（3章A）、完全なbadge（Tooltip付き）は選択後panelへ
+      // scopeして一意に検証する。
+      expect(
+        find.descendant(
+          of: _selectedTechniquePanelFinder,
+          matching: find.text('ROUGH'),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('Direct PIN FINISHERは"FINISHER · PIN"合成badgeを表示する（単独の'
@@ -184,6 +221,7 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      await _selectHandCard(tester, 'h1');
 
       expect(
         find.byKey(
@@ -220,6 +258,7 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      await _selectHandCard(tester, 'h1');
 
       expect(find.text('FINISHER · SUBMISSION'), findsOneWidget);
     });
@@ -248,16 +287,24 @@ void main() {
           _wrap(_screen(FakePlayableMatchSession(snapshot))),
         );
         await tester.pump();
+        // isUsable:falseでも選択自体は常に可能（`_onSelectCard`は
+        // legalityを見ない、client-side toggle）。
+        await _selectHandCard(tester, 'h1');
 
         // HEAT未到達で使用不可でも、trait badge自体は成立後の性質を
         // 示すものなので表示され続ける。
         expect(find.text('FINISHER · SUBMISSION'), findsOneWidget);
-        // 一方、使用不可の理由（HEAT要件）は別途disabledメッセージ側で
-        // 説明される。
+        // 一方、使用不可の理由（HEAT要件）は選択後panelのusable status行
+        // （`_handCardDisabledMessage`）で説明される。
         expect(
-          find.byKey(const Key('combat_v1_playable_card_disabled_message')),
+          find.byKey(
+            const Key(
+              'combat_v1_playable_selected_technique_usable_status',
+            ),
+          ),
           findsOneWidget,
         );
+        expect(find.textContaining('HEATが不足しています'), findsOneWidget);
       },
     );
 
@@ -272,6 +319,7 @@ void main() {
         _wrap(_screen(FakePlayableMatchSession(snapshot))),
       );
       await tester.pump();
+      await _selectHandCard(tester, 'h1');
 
       expect(
         find.byKey(const Key('combat_v1_playable_card_trait_badges')),

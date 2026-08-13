@@ -2939,3 +2939,448 @@ Reachability（Playable 2A-4 追加）」groupを、`findsOneWidget`だけの
 readability・trait badges・Counter family/group・ROUGH説明・
 Technique card hit-testability・320/360/390px coverage）の既存
 regression testはすべて無変更のまま全green。
+
+# Playable 2A-5 — Card Interaction / Hand Readability（実装追記）
+
+## 103. Purpose / User Observation
+
+Playable 2A-1〜2A-4は「今何をすべきか」（Guidance）「なぜそれが勝利に
+つながるか」（Direction）「直前に何が起きたか」（Result）という
+*説明*の情報階層を整備してきた。実プレイで観測された問題は、その説明
+そのものではなく、最も頻繁に行う操作——「Technique handを見て、
+理解して、選んで、使用する」——の周りにある:
+
+1. Technique使用時にEnergyをほとんど見ずにプレイしていた（Energyが
+   Technique cardの小さな1行にしか出ておらず、判断の中心に無かった）。
+2. 「技として出すカード」と「discardとして捨てるカード」の見た目が
+   同じで、区別がつきにくかった。
+3. 手札を確認するのにscrollが必要だった。
+4. Technique使用buttonが画面下部（Primary actions bar）にあり、カード
+   選択後に視線・指を大きく移動する必要があった。
+5. PLAY TECHNIQUE等の主要操作が英語で直感的でなかった。
+6. Guidance/Direction/Latest Result/Recent Logの追加により、最も頻繁に
+   操作するTechnique handの表示領域が圧迫されてきていた。
+
+2A-5は新しいCombat ruleを追加しない。2A-2〜2A-4で追加した情報を削除
+するのでもない——「カードを選び、必要コストを理解し、技を出す」ことを
+画面の中心へ戻すため、既存の情報階層を整理する presentation-only の
+フェーズ。
+
+## 104. 実装前 Investigation — なぜscrollが必要だったか
+
+`combat_v1_playable_match_screen.dart`の旧`build()`は次の順でColumnを
+構築していた（上から）:
+
+CPU status panel → Shared status panel → Actor label + Match Guidance +
+（既定展開の）Match Direction/Latest Result banner/Recent Log（最大
+132px scroll box）→ Error banner → `Expanded`（Technique handの縦
+scroll領域）→ Human status panel → Energy panel → Primary actions bar
+（Stand Up/Rest/Technique/PIN/End Turn）。
+
+Technique hand card自体は1枚268px（Playable 2A-3でtrait badge行が
+追加されて232px→268pxへ拡張済み）。`Expanded`より上の固定panel群
+（CPU status・actor label・Guidance・132px scroll box）と、`Expanded`
+より下の固定panel群（Human status・Energy panel・Primary actions
+bar）を合算すると、320〜390px幅・600〜850px高の一般的なモバイル
+viewportでは、`Expanded`へ実際に割り当てられる高さがしばしば
+268pxを下回っていた——つまり**1枚の手札card全体を表示するだけでも
+scrollが必要**な構造だった。単純に既存panelの高さを増やす／削る
+のではなく、次の3点で高さの使い方そのものを変えた:
+
+- 両wrestlerの背景status（CPU/Human status panel）を隣接させて画面
+  上部へ集約する（Tier優先度が相対的に低い情報を1箇所にまとめる）。
+- Guidance（Tier 3）は常時表示のまま、Direction/Latest Result banner/
+  Recent Log（Tier 4）を既定で折りたたむ（106章）。
+- Energy panel（Tier 2）をTechnique handの直上へ移動し、`Expanded`の
+  外の固定領域からは完全に取り除く。
+
+## 105. Hand-First Hierarchy（優先順位）
+
+Tier 1: 現在選択・操作するTechnique hand。
+Tier 2: Technique使用に必要な情報（DMG/HEAT/必要Energy/現在Energy/
+使用可能・不可能/posture/important trait/discard先の区別）。
+Tier 3: 現在必要なGuidance。
+Tier 4: Match Direction / Latest Result / Recent Log。
+
+Tier 1・2は常に画面内（scroll不要な想定範囲）に収まるよう最優先で
+扱い、Tier 4は既定で折りたたんで縦方向の空間をTier 1・2へ譲る
+（106章）。Tier 3（Guidance）は「今何ができるか」という短い1〜2行
+情報のため、常時表示のままでもTier 1・2を圧迫しない。
+
+## 106. Guidance / Direction / Result / Logの圧縮
+
+`_ActorAndRecentPanel`をStateful化し、`_detailExpanded`（既定
+`false`）を追加した:
+
+- 常時表示: actor label（あなたのターン/CPU行動中等）＋ Match
+  Guidance（primary + secondary、Tier 3）。
+- 既定で折りたたみ（Tier 4）: Match Direction・Latest Result banner・
+  Recent Log。折りたたみ中は、widget自体を`SizedBox.shrink()`にする
+  （高さ0の`ConstrainedBox`ではなく完全に取り除く）ことで、
+  `Expanded`（Technique hand領域）へ渡る高さを実際に増やす。
+- ただしLatest Result（「直前に実際に起きたこと」）だけは、折りたたみ
+  中も1行のcompact要約（`combat_v1_playable_latest_feedback_compact_
+  summary`）を出す——既存`combatV1PlayableDeriveMatchFeedback`が
+  導出したprimary文言をそのまま小さく表示するだけで、新しい
+  derivationは行わない。
+- `combat_v1_playable_detail_toggle`（TextButton、「▼ 試合の詳細
+  （勝利へのヒント・直前の結果・履歴）」/「▲ 閉じる」）をtapすると
+  展開・再度tapで折りたたむ。展開後の中身（Match Direction panel・
+  Latest Result banner・Recent Logの`Scrollbar`付き`SingleChildScrollView`）
+  は2A-2で確立した「実際にscroll可能」実装をそのまま再利用する
+  ——widgetもkeyも変更していない。
+
+Playable 2A-2で修正した「情報が存在するがclipされて到達不能」という
+regressionを再発させないため、折りたたみは「表示しない」ではなく
+「ユーザーの明示操作（toggle tap）で必ず元の内容へ到達できる」構造に
+した——widget tree自体には残さないが、同じkey・同じ中身が常に1tapで
+出現する。
+
+## 107. Energy Presentation（技選択時の中心情報）
+
+Technique hand card自体の表示（Playable 1C.1以来の「Cost + 使用可能
+Energyの比較」）は変更していない。加えて、カードを選択すると
+hand直下に現れる`_SelectedTechniquePanel`内に、「必要 Energy」
+「現在 Energy」を縦に並べた`_SelectedTechniqueEnergyBlock`を設けた:
+
+- 「必要 Energy」: `combatV1PlayableEnergyCostLabel`（既存formatter）。
+- 「現在 Energy」: 新設`combatV1PlayableEnergyAvailableLabel`
+  （`combat_v1_playable_ui_formatters.dart`）。ワイルド(＊)込みの実効
+  使用可能量を返す共通helper`combatV1PlayableEffectiveAvailableEnergy`
+  を新設し、既存`combatV1PlayableEnergyComparisonLabel`もこのhelperを
+  使うようリファクタリングした（同じ値を2箇所で別々に計算しない、
+  出力の矛盾を構造的に防ぐ）。
+
+「使用可能／不可能」の断定は`card.isUsable`（`CombatV1PlayableHand
+Card`、controller側で`legalActions`から機械的に導出済み——LegalAction
+がSSOT）をそのまま使う。不可能な場合の理由文言は、Playable 1C.1で
+導入済みの`_disabledMessage`ロジックを`_handCardDisabledMessage`
+（module-level pure function）へ抽出し、`_HandCardTile`と
+`_SelectedTechniquePanel`の両方が同じ関数を呼ぶ——理由の断定ロジック
+を2箇所に重複実装しない。新しいlegality判定・新しいunusable reasonは
+一切追加していない。
+
+## 108. Technique Selection → Direct Execution（近接した操作）
+
+カードを選択すると、`_TechniqueSelectionArea`内でhand（`_HandRow`）の
+直下に`_SelectedTechniquePanel`が現れる:
+
+技名 → trait badges（Playable 2A-3の`_TechniqueTraitBadges`をそのまま
+再利用）→ DMG/HEAT → required/result posture → Energy比較block
+（107章）→ 使用可能／不可能status行 → 「技を使う」button。
+
+「技を使う」buttonは`combat_v1_playable_action_technique`という既存
+keyをそのまま維持し、以前`_PrimaryActionsBar`（画面下部）にあった
+ものをこのpanelへ移設した——`findAction(CombatV1LegalActionKind.
+technique, cardInstanceId: ...)`/`onSubmit`という既存の
+`_findLegalAction`/`_submitAction`経路をそのまま使う（新しいsubmit
+経路は作らない）。カード未選択時はbutton自体が存在しない（以前の
+「常に表示されるが disabled」から「選択して初めて現れる」へ変更）。
+
+COUNTERカードを通常Action phase中に選択した場合（COUNTERは相手の
+技への応答専用で、この文脈では常にunusable）、Technique buttonは
+出さず、既存の安全な用途説明（「相手の技を受ける時に使用」）を
+panel内へそのまま表示する——新しいlegality判定は行わない。
+
+`_PrimaryActionsBar`は、カード選択と無関係な行動（Stand Up/Rest/PIN/
+End Turn）専用に縮小した。discard確定buttonも同様にbarから削除した
+（109章）。
+
+## 109. Technique使用とDiscardを明確に分離
+
+Core semanticsを先に調査した結果、discardは「Techniqueの追加コスト」
+ではなく、`phase == discard`という独立したフェーズであり
+（`combat_v1_legal_action_enumerator.dart` `_enumerateDiscard`）、
+このフェーズでは**手札の全カードが常に`CombatV1DiscardAction`として
+legal**（技としての使用可否＝`isUsable`とは無関係）であることを
+確認した。したがって「STEP 1 技を選ぶ → STEP 2 追加コストのdiscard
+カードを選ぶ」という2段階選択フローは実際のCore semanticsに存在せず、
+実装しない（依頼文中の例をそのままルール化しない）。
+
+代わりに、discard phase専用の`discardMode`を`_HandRow`/`_HandCardTile`
+へ追加した:
+
+- discard modeのcard tile（`_buildDiscardMode`）は、DMG/HEAT/Energy行/
+  trait badge/使用可否messageを一切出さない——技として使えるかどうか
+  はdiscard判断と無関係であり、見せると「技を選んでいる」ように
+  誤解させるため。名前・category・（選択中なら）「捨てるカードとして
+  選択中」の3行だけの簡潔なtileにし、高さも108px（technique modeの
+  268pxより低い）に縮めた。
+- 選択すると`_DiscardConfirmPanel`がhand直下へ現れる:「捨てるカード」
+  ラベル＋カード名＋「別のカードをタップすると変更できます」＋
+  「手札を捨てる」button。「変更する」専用buttonは追加していない——
+  既存`_onSelectCard`のtoggle/switch挙動（別カードをtapすると選択が
+  切り替わる、同じカードを再tapすると選択解除）をそのまま使う。
+- 確定buttonのkey（`combat_v1_playable_action_discard`）・submit経路
+  （`findAction(CombatV1LegalActionKind.discard, cardInstanceId:
+  ...)`/`onSubmit`）は変更していない。
+
+この結果、「技として出すカード」（DMG/HEAT/Energy/trait付きの大きめ
+tile）と「discard対象のカード」（名前とcategoryだけの簡潔なtile）は
+見た目が明確に異なり、mental modelを混同しない。
+
+## 110. Japanese Primary Actions
+
+`combatV1PlayableActionKindLabel`（`combat_v1_playable_ui_formatters.dart`）
+を日本語化した:
+
+| kind | 旧 | 新 |
+| --- | --- | --- |
+| technique | Use Technique | 技を使う |
+| discard | Discard | 手札を捨てる |
+| counter | Play Counter | 返し技を使う |
+| declineCounter | 技を受ける | 返し技を使わない |
+| standUp | Stand Up | 立ち上がる |
+| rest | Rest | 休む |
+| endTurn | End Turn | ターン終了 |
+| pin | PIN | PIN（変更なし） |
+
+`_CounterPromptSheet`のPlay Counter/Decline buttonも、独自の英語
+literalを廃してこのformatterを直接参照するよう変更した（文言のSSOTを
+1箇所へ集約）。DOWN状態の`_ActionHint`（Stand Up/Restの短い説明）も
+同じformatterを参照し、button文言とhint文言が食い違わないようにした。
+Result overlayのRematch/Backボタンも「再戦」/「戻る」へ日本語化した。
+
+DMG/HEAT/ENERGY/PIN/SUBMISSION/COUNTER/FINISHERは、ゲーム内用語として
+既に定着しているため機械的な日本語化の対象から除外した——「操作
+button」と「ゲーム用語」を区別する方針どおり。
+
+## 111. Counter Interaction
+
+Counter promptシート（`_CounterPromptSheet`）は、Playable 2A-3までに
+確立した構造（incoming Technique summary → 使用可能なCounter hand →
+Play/Decline button）を維持している。2A-5ではbutton文言の日本語化
+（110章）のみを行った——incoming attack summaryとCounter選択・
+確定操作は元々同じbottom sheet内で近接しており、Direct PIN条件・
+Submission threshold・ROUGH Counter非対称性・family/group一致・
+Counter prevention facts・hidden information境界・LegalAction SSOTは
+一切変更していない。
+
+## 112. Mobile Strategy
+
+320/360/390px幅で以下を検証した（`combat_v1_playable_2a5_card_
+interaction_test.dart`「Hand Visibility」「320/360/390px — 実座標
+hit-testability」group）:
+
+- 通常の1枚hand選択時、scroll前から技名・DMG/HEAT行・Energy行が
+  実際にTechnique area viewport（`combat_v1_playable_technique_area_
+  scroll`）内へ届いていること（card全体の矩形一致ではなく、実際に
+  読む必要がある行単位で確認する——card下部のtrait detail等まで
+  無条件に見えている必要はない）。
+- hand cardの選択→Technique buttonのtap、hand cardの選択→discard
+  確定buttonのtapを、`getRect`によるclip viewportとのintersectionで
+  実座標を求めたうえで`tapAt`し、実際に期待する`CombatV1LegalAction`
+  が`submitHumanAction`へ渡ることまで確認する（widget中心座標だけの
+  確認や、widget treeに存在するだけの確認はしない、Playable 2A-3
+  Review Findings Fixで確立した方針を踏襲）。
+
+既存2A-2〜2A-4のmobile reachability test（Match Direction Reachability・
+Latest Result Reachability・Technique/Counter Decision Traits等）は、
+106章の折りたたみ変更に合わせて「`combat_v1_playable_detail_toggle`を
+tapしてから展開後の内容を検証する」よう更新した——検証している内容
+（到達可能性・overflow無し・hit-testability）自体は変更していない。
+
+## 113. LegalAction SSOT / Hidden Information Boundary（維持）
+
+2A-5はpresentation-onlyであり、以下は一切変更していない:
+
+- `card.isUsable`・`snapshot.legalActions`が唯一のSSOT。新しい
+  `_SelectedTechniquePanel`/`_DiscardConfirmPanel`のbuttonは、いずれも
+  既存`_findLegalAction`が返す`CombatV1LegalAction`が`null`でない
+  場合のみ有効化される——UI側でlegalityを再計算・再実装していない。
+- unusable reasonの断定（Energy不足／HEAT要件／COUNTER用途）は、
+  Playable 1C.1で確立した安全な診断ロジック（`resolveEnergyPayment`を
+  公開snapshot値へ再適用するだけ）を抽出・再利用しただけで、新しい
+  断定は追加していない。
+- CPU hand・CPU Energyの非公開値・CPU Counter/Finisher所持・deck
+  order・next draw・CPU AI evaluation・future CPU actionは、2A-5でも
+  一切表示・推測していない（既存`CombatV1PlayableOpponentStatus`が
+  構造的にこれらを保持しないため、Widget側で表示しようがない）。
+
+## 114. Non-Goals（今回は実装しない）
+
+- Combat Core semantics（damage/PIN/Submission/Finisher/ROUGH/Energy/
+  discard rule）の変更。
+- LegalAction semantics・CPU AI・wrestler/technique data・deck
+  compositionの変更。
+- 依頼文中の「STEP 1 技を選ぶ → STEP 2 discardカードを選ぶ →
+  STEP 3 確認」という2段階discard flow（109章の調査結果どおり、
+  実際のCore semanticsに存在しない架空のフローのため実装しない）。
+- Guidance/Direction/Result/Logの内容そのものの変更（責務・derivation
+  logicは無変更、表示タイミング・折りたたみのみ変更）。
+- Counterの新しいUI構造（button文言の日本語化のみ）。
+- Playable 2A-6以降のスコープ（新しい画面・新しいCore機能等）。
+
+## 115. Test Strategy（2A-5）
+
+- 既存2A-1〜2A-4のwidget/mobile testは、削除せず106章の折りたたみへ
+  合わせて更新した（`combat_v1_playable_feedback_widget_test.dart`・
+  `combat_v1_playable_match_direction_widget_test.dart`・
+  `combat_v1_playable_mobile_overflow_test.dart`の該当group）。
+- `combat_v1_playable_match_screen_test.dart`のTechnique/Discard flow
+  testを、「buttonは選択後にのみ現れ、hand直下から直接submitされる」
+  という新しい操作モデルに合わせて更新した。
+- 新設`combat_v1_playable_2a5_card_interaction_test.dart`で、Energy
+  readability・Technique選択→直接実行・discard modeの視覚的分離・
+  discard確認/変更・日本語主要操作・Guidance/Direction/Result/Logの
+  既定折りたたみと明示展開・Counter日本語操作・320/360/390pxでの
+  hand visibility・実座標hit-testabilityを新規に検証した。
+- `combat_v1_playable_ui_formatters_test.dart`へ、主要操作button
+  labelが日本語（PINのみ例外）であることを固定するtestを追加した。
+
+# Playable 2A-5 Review Findings Fix — Hand Comparison / Mobile
+# Readability（実装追記）
+
+## 116. Purpose
+
+独立レビュー結果は「CHANGES REQUIRED」だったが、2A-5全体が不合格
+だったわけではない。Energy visibility・Energy不足理由・Technique/
+discardの意味分離・Technique選択後のinline action・日本語化・
+LegalAction SSOT・hidden information boundary・Counter flow・2A-4
+feedback pipeline・mobile reachabilityはいずれも良好と評価された。
+
+唯一かつ最大のMajor問題は、初期手札5枚を比較するために横scrollが
+必要だったこと——134px幅×268px高のcard 1枚をhorizontal `ListView`で
+並べる実装のままだったため、320px幅では同時に2枚程度しか見えず、
+実プレイfeedback「スクロールしないと手札が見れないのは不便」が本質的に
+未解消のままだった。
+
+今回の修正目的は「5枚すべての詳細カードを画面内へ押し込むこと」では
+ない。目的は「5枚の候補をscrollせず比較し、使うカードを決められる」
+状態にすることであり、詳細確認そのものは選択後のinteraction（縦scroll
+を含む）を許容する。
+
+## 117. Compact Hand — 一覧＝比較、詳細＝判断確認
+
+`_HandRow`（technique選択時、`discardMode == false`）を、固定高さの
+horizontal `ListView`から`Wrap`ベースのcompact hand cardへ置き換えた
+（`_HandCardTile.compactMode`）。
+
+- compact card（92px幅、可変高さ、`Wrap(spacing: 6, runSpacing: 6)`）
+  には最低限、識別できる名前・required Energy
+  （`combatV1PlayableEnergyCostLabel`）・使用可能／不可能（アイコン＋
+  不透明度）・selected state（border色）を表示する。加えて、DMG
+  （短い1行）と、major trait 1つ（FINISHER/PIN/SUBMISSION/ROUGHの
+  いずれか、優先度は`_compactPrimaryTrait`——`_TechniqueTraitBadges`と
+  同じ優先度だが、FINISHERの場合は合成label・ROUGH併記をせず単独の
+  `FINISHER`のみ）を追加する。
+- 320/360/390pxいずれでも、92px幅カード＋6pxスペーシングで1行3枚
+  折り返しになる（3×90+2×6=282〜288px、320px幅の利用可能幅296pxに
+  収まる）。5枚なら2行——横scroll無しで同時に視認できる。
+- Technique detail（DMG/HEAT/required・result posture/trait badge
+  合成label/使用不可の具体理由）は、既存2A-5の`_SelectedTechniquePanel`
+  （選択後にhand直下へ現れる）へ集約した。「詳細をすべてcompact card
+  へ詰め込む」のではなく「一覧＝比較（compact）」「詳細＝判断確認
+  （選択後panel）」「実行＝選択カードの近く（同じpanel内の『技を
+  使う』）」という3段階に責務を分離した。
+- discard phase（`discardMode == true`）は元々108px高の簡潔なtileで
+  カード枚数も少なく、横scroll listのまま維持した（6章「Do Not
+  Regress Play vs Discard」——discard UXは流用・変更しない）。横
+  scroll cue（`combat_v1_playable_hand_scroll_hint`）もdiscard phase
+  専用に限定した——technique modeは横scroll自体が不要になったため。
+
+`_CounterPromptSheet`のCounter hand（応答時、通常1〜3枚程度）は
+compactModeを使わず、既存の詳細card表示のまま維持した——Counter候補は
+枚数が少なく、2A-3で確立したreadability（trait badge・family/group
+情報）を壊さないため。
+
+## 118. Selected Technique Panel — 変更なし（既存の良い情報を維持）
+
+`_SelectedTechniquePanel`自体の構造・情報（技名・DMG・HEAT・required/
+current Energy・使用可能／不可能・unusable reason・trait・posture・
+「技を使う」button）は2A-5から変更していない。今回のfixで、
+required/result posture Text（`combatV1PlayableRequiredOpponentState
+Label`/`combatV1PlayableOpponentResultStateLabel`）に、実装時に欠落
+していたkey（`combat_v1_playable_card_required_posture`/
+`_result_posture`）を追加した（既存の`_HandCardTile`旧detailed
+rendering側には元々付与されていたが、選択panel側に付け忘れていた
+——2A-5当時からのbug fix、機能自体は変更していない）。
+
+## 119. Japanese HEAT Unusable Reason（Minor）
+
+`_handCardDisabledMessage`のfinisher HEAT不足分岐が
+`'Requires HEAT $threshold (current $heat)'`という英語のまま残って
+いたのを、`'HEATが不足しています（必要 $threshold / 現在 $heat）'`
+へ日本語化した（HEATというゲーム用語自体は維持）。同じ趣旨で、
+使われていなかった（Counter sheetの`_HandCardTile`旧detailed
+renderingのみに残存し、実際には到達しないdead code状態だった）
+finisher usable時のhint文言も`'HEAT $threshold以上で使用可'`へ
+統一した。他の主要判断領域（compact card・selected panel・Counter
+prompt）を確認したが、DMG/HEAT/ENERGY/PIN/SUBMISSION/COUNTER/
+FINISHERというゲーム内用語以外の不要な英語は見つからなかった。
+
+## 120. Mobile Strategy（320/360/390px）
+
+320/360/390pxいずれも、Wrapによる3列折り返しで統一した——幅ごとに
+列数を変える最適化は行っていない（task指示「必ずしも全幅で完全に
+同じlayoutである必要はない」を踏まえつつ、最小の変更で「5枚を
+scroll無しで比較できる」目標を満たす、最もシンプルな構成を選んだ）。
+
+- `combat_v1_playable_2a5_review_fix_test.dart`「Large Hand Mobile」
+  groupで、5枚（`_techA`〜`_techE`、使用可否混在）のcompact cardが
+  scroll前に実座標で`combat_v1_playable_technique_area_scroll`
+  viewportとintersectしていることを、320/360/390pxそれぞれ確認した
+  （`findsOneWidget`だけでなく`getRect`のintersectionで検証）。
+- 同groupでcompact cardそれぞれのtap targetを`getRect`と
+  `viewport.intersect`から実座標を求めて`tapAt`し、選択panelの名前が
+  期待どおり切り替わることまで確認した。
+- 「Selected Detail Reachability」groupで、選択後panel（DMG/HEAT/
+  Energy/trait/unusable reason/「技を使う」）が320/360/390pxで
+  （必要なら縦scrollを許容して）到達可能であることを確認した——
+  「一覧＝比較はscroll不要、詳細閲覧は必要に応じてscroll可能」という
+  役割分離を実座標で担保する。
+
+## 121. Energy Visibility / LegalAction SSOT（維持）
+
+Energy比較ロジック（`combatV1PlayableEnergyComparisonLabel`/
+`combatV1PlayableEnergyAvailableLabel`/`combatV1PlayableEffective
+AvailableEnergy`）・`_handCardDisabledMessage`・`card.isUsable`
+（controller側で`legalActions`から機械的に導出済み）は一切変更して
+いない。compact card・selected panelのどちらも、これら既存の公開
+関数・fieldをそのまま参照するだけで、新しいlegality判定・新しい
+Energy計算は追加していない。`combat_v1_playable_2a5_review_fix_test.dart`
+「Energy Exact Boundary」groupで、required Energy == available
+Energyの境界（isUsable境界）でusable/unusableとbutton enabled状態が
+正しく切り替わることを、実際のtap→submit経路まで固定した。
+
+## 122. Play vs Discard Distinction（維持）
+
+`_HandRow`のcompactMode追加は`discardMode == false`（technique
+選択時）にのみ適用され、discard phaseの表示・操作（`_buildDiscard
+Mode`、`_DiscardConfirmPanel`）は変更していない。compact hand card
+とdiscard hand card（108px高・DMG/HEAT/Energyを表示しない簡潔な
+tile）は見た目が明確に異なる構成のまま維持されている。
+
+## 123. Regression Verification
+
+以下の既存test群を、削除・skipせず、compact hand導入に伴う構造変化
+（trait badge・posture・disabled messageが選択後panelへ集約された
+こと）に合わせて更新した——検証していた内容自体（trait表示・Energy
+不足理由・posture対象明示・discard用途説明等）は変更していない:
+
+- `combat_v1_playable_1c1_clarity_test.dart`（B. Energy／C. COUNTER／
+  D. TECHNIQUE DOWN/STAND）
+- `combat_v1_playable_2a3_readability_test.dart`（Technique Card —
+  Decision Traits）
+- `combat_v1_playable_feedback_widget_test.dart`（横scroll cue／
+  FINISHER threshold hint）
+- `combat_v1_playable_match_screen_test.dart`（unusable card表示）
+- `combat_v1_playable_mobile_overflow_test.dart`（Mobile Visibility
+  — Technique Card／Technique・Counter Decision Traits B・C）
+
+Playable 2A-2（Guidance/Direction/Recent Log reachability）・2A-3
+（Counter Response — Incoming Attack Summary、`counterResponsePending`
+経由でcompactModeの影響を受けない）・2A-4（Latest Result/Recent Log/
+feedback severity/prevented Direct PIN/prevented Submission/Result
+overlay）・2A-5 approved good behavior（日本語化・discard分離・End
+Turn・Counter flow）のtestは無変更のまま全green。
+
+## 124. Non-Goals（今回は実装しない）
+
+- Combat Core・LegalAction semantics・CPU AI・wrestler/technique
+  data・dependenciesの変更。
+- Counter hand（応答時）へのcompact化——枚数が少なく、既存detail
+  表示で問題ないため対象外。
+- discard handのcompact化——6章の判断どおり、既存UXを維持。
+- 幅ごとの列数最適化（320/360/390で異なるWrap列数にする等）——3列
+  折り返しの統一構成で目標（5枚scroll無し比較）を満たすため対象外。

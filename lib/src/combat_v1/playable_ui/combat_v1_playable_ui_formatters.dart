@@ -106,16 +106,21 @@ String combatV1PlayableCategoryLabel(CombatV1CardCategory category) =>
 
 /// [CombatV1LegalActionKind]のUI表示label（primary action button文言、
 /// design doc「32章 Action Groups」）。
+///
+/// Playable 2A-5「8章 Japanese Primary Actions」——プレイヤーが直接
+/// 触るbuttonは日本語を基本にする。ただしDMG/HEAT/ENERGY/PIN/
+/// SUBMISSION/COUNTER/FINISHERのようなゲーム内用語として定着した語は
+/// 機械的に日本語化しない（`pin`はそのまま`PIN`を維持する）。
 String combatV1PlayableActionKindLabel(CombatV1LegalActionKind kind) =>
     switch (kind) {
-      CombatV1LegalActionKind.discard => 'Discard',
-      CombatV1LegalActionKind.technique => 'Use Technique',
-      CombatV1LegalActionKind.counter => 'Play Counter',
-      CombatV1LegalActionKind.declineCounter => '技を受ける',
+      CombatV1LegalActionKind.discard => '手札を捨てる',
+      CombatV1LegalActionKind.technique => '技を使う',
+      CombatV1LegalActionKind.counter => '返し技を使う',
+      CombatV1LegalActionKind.declineCounter => '返し技を使わない',
       CombatV1LegalActionKind.pin => 'PIN',
-      CombatV1LegalActionKind.rest => 'Rest',
-      CombatV1LegalActionKind.standUp => 'Stand Up',
-      CombatV1LegalActionKind.endTurn => 'End Turn',
+      CombatV1LegalActionKind.rest => '休む',
+      CombatV1LegalActionKind.standUp => '立ち上がる',
+      CombatV1LegalActionKind.endTurn => 'ターン終了',
     };
 
 /// recent action 1件の要約label（design doc「45章 Action Feedback」「46章
@@ -179,12 +184,46 @@ String combatV1PlayableEnergyComparisonLabel(
   CombatV1EnergyCost cost,
   Map<CombatV1EnergyAttribute, int> availableEnergy,
 ) {
-  final wildAvailable = availableEnergy[CombatV1EnergyAttribute.wild] ?? 0;
   final parts = <String>[
     for (final entry in cost.amounts.entries)
       if (entry.value > 0)
         '${entry.key.displayLabel}${entry.value} / '
-            '${(availableEnergy[entry.key] ?? 0) + (entry.key == CombatV1EnergyAttribute.wild ? 0 : wildAvailable)}',
+            '${combatV1PlayableEffectiveAvailableEnergy(entry.key, availableEnergy)}',
+  ];
+  return parts.isEmpty ? '-' : parts.join(' ・ ');
+}
+
+/// Playable 2A-5「6章 Energy Readability」——[attribute]についてTECHNIQUE
+/// 支払いに使える実効ENERGY量（保有分＋＊(wild)分）。TECHNIQUE支払いは
+/// 常にwild補完を許可する（docs/combat_rules_v1.md 5.1章）ため、
+/// [combatV1PlayableEnergyComparisonLabel]と[combatV1PlayableEnergyAvailableLabel]
+/// が共通して使う集計helper（重複実装を避ける）。isUsable自体の判定は
+/// 一切行わない——LegalActionが唯一のSSOTのまま、公開済みの数値を
+/// 集計するだけ。
+int combatV1PlayableEffectiveAvailableEnergy(
+  CombatV1EnergyAttribute attribute,
+  Map<CombatV1EnergyAttribute, int> availableEnergy,
+) {
+  final own = availableEnergy[attribute] ?? 0;
+  if (attribute == CombatV1EnergyAttribute.wild) return own;
+  final wildAvailable = availableEnergy[CombatV1EnergyAttribute.wild] ?? 0;
+  return own + wildAvailable;
+}
+
+/// Playable 2A-5「6章 Energy Readability」——選択中Technique詳細panel用の
+/// 「現在Energy」行専用フォーマット（「必要Energy」行と分けて縦に並べ、
+/// 比較しやすくするため）。[combatV1PlayableEnergyComparisonLabel]と同じ
+/// [combatV1PlayableEffectiveAvailableEnergy]を使うため、2つの表示が
+/// 矛盾しない。
+String combatV1PlayableEnergyAvailableLabel(
+  CombatV1EnergyCost cost,
+  Map<CombatV1EnergyAttribute, int> availableEnergy,
+) {
+  final parts = <String>[
+    for (final entry in cost.amounts.entries)
+      if (entry.value > 0)
+        '${entry.key.displayLabel}'
+            '${combatV1PlayableEffectiveAvailableEnergy(entry.key, availableEnergy)}',
   ];
   return parts.isEmpty ? '-' : parts.join(' ・ ');
 }

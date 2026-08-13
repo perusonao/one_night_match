@@ -26,6 +26,16 @@ Widget _wrap(Widget child) => MaterialApp(
   home: child,
 );
 
+/// Playable 2A-5「9章 Guidance / Direction / Result / Logの圧縮」——
+/// Match Direction／Latest Result banner／Recent Logは既定で折りたたむ
+/// ため、これらの内容を検証するtestは明示的にtoggleをtapして展開する
+/// （design doc「70.10章」の到達可能性原則、collapse後も明示操作で
+/// 到達できることの確認を兼ねる）。
+Future<void> _expandDetail(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('combat_v1_playable_detail_toggle')));
+  await tester.pump();
+}
+
 void main() {
   group('Action Result Feedback banner（MUST）', () {
     testWidgets('Human technique feedbackが表示される（技名・damage・HP変化・HEAT変化）', (
@@ -60,6 +70,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await _expandDetail(tester);
 
       expect(
         find.byKey(const Key('combat_v1_playable_latest_feedback_banner')),
@@ -103,6 +114,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await _expandDetail(tester);
 
       expect(find.textContaining('CPU'), findsWidgets);
       expect(find.textContaining('ラリアット'), findsWidgets);
@@ -139,6 +151,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await _expandDetail(tester);
 
       final primaryText = tester
           .widget<Text>(
@@ -177,6 +190,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await _expandDetail(tester);
 
       final secondaryText = tester
           .widget<Text>(
@@ -231,6 +245,7 @@ void main() {
           ),
         );
         await tester.pump();
+        await _expandDetail(tester);
 
         final secondaryText = tester
             .widget<Text>(
@@ -271,6 +286,7 @@ void main() {
           ),
         );
         await tester.pump();
+        await _expandDetail(tester);
 
         final secondaryText = tester
             .widget<Text>(
@@ -310,6 +326,7 @@ void main() {
           ),
         );
         await tester.pump();
+        await _expandDetail(tester);
 
         final secondaryText = tester
             .widget<Text>(
@@ -350,6 +367,7 @@ void main() {
           ),
         );
         await tester.pump();
+        await _expandDetail(tester);
 
         final secondaryText = tester
             .widget<Text>(
@@ -428,6 +446,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await _expandDetail(tester);
 
       // GuidanceパネルとLatest Result primaryが両方存在し、別々の文字列
       // であること（同じ内容の二重表示ではない）。
@@ -807,9 +826,18 @@ void main() {
         ),
       );
       await tester.pump();
+      // Playable 2A-5 Review Findings Fix「3章」——不足理由（HEAT要件）は
+      // 選択後panelのusable status行が担当する。
+      await tester.tap(
+        find.byKey(const Key('combat_v1_playable_hand_card_f1')),
+      );
+      await tester.pump();
 
-      expect(find.textContaining('Requires HEAT 200'), findsOneWidget);
-      expect(find.textContaining('current 40'), findsOneWidget);
+      // 「7章 Minor — English unusable reason」——HEAT不足の説明は
+      // 日本語化済み（HEAT自体はゲーム用語として維持）。
+      expect(find.textContaining('HEATが不足しています'), findsOneWidget);
+      expect(find.textContaining('必要 200'), findsOneWidget);
+      expect(find.textContaining('現在 40'), findsOneWidget);
     });
   });
 
@@ -873,16 +901,54 @@ void main() {
       );
     });
 
-    testWidgets('handが複数枚ある場合、横スクロールcueを表示する', (tester) async {
+    testWidgets(
+      'Technique hand（compact hand）はPlayable 2A-5 Review Findings Fixで'
+      '横scroll自体が不要になったため、cueを出さない',
+      (tester) async {
+        final snapshot = testSnapshot(
+          phase: CombatV1MatchPhase.action,
+          human: testHumanStatus(
+            hand: [
+              testTechniqueCard(instanceId: 'h1'),
+              testTechniqueCard(instanceId: 'h2'),
+            ],
+          ),
+          legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: 0)],
+        );
+        await tester.pumpWidget(
+          _wrap(
+            CombatV1PlayableMatchScreen(
+              humanWrestlerId: 'akari',
+              cpuWrestlerId: 'reina',
+              cpuDelay: Duration.zero,
+              sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(
+          find.byKey(const Key('combat_v1_playable_hand_scroll_hint')),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets('discard phaseのhandが複数枚ある場合、横スクロールcueを表示する', (
+      tester,
+    ) async {
       final snapshot = testSnapshot(
-        phase: CombatV1MatchPhase.action,
+        phase: CombatV1MatchPhase.discard,
         human: testHumanStatus(
           hand: [
             testTechniqueCard(instanceId: 'h1'),
             testTechniqueCard(instanceId: 'h2'),
           ],
         ),
-        legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: 0)],
+        legalActions: const [
+          CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
+          CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'h2'),
+        ],
       );
       await tester.pumpWidget(
         _wrap(
