@@ -2603,11 +2603,19 @@ Playable 2A-1（Match Guidance＝今何をするか）・2A-2（Match Direction�
 - `isFinisher`（`techniqueResolved`用）: 宣言済み（＝両者へ公開済み）
   TECHNIQUEの`category == finisher`をそのまま複製する。Primary文言へ
   「(FINISHER)」を明示するために使う。
-- `preventedDirectPin`/`preventedSubmissionHold`/`preventedIsRough`
-  （`counterPlayed`用）: Counterで無効化された攻撃側TECHNIQUEが持って
-  いた、宣言済み・公開済みの静的性質（DIRECT PIN/SUBMISSION Hold/
-  ROUGH属性）をそのまま複製する。Counterが成立した時点でこれらの
-  TECHNIQUEは不成立になるため、「防いだ」ことの説明に使う。
+- `preventedDirectPin`/`preventedSubmissionHold`（`counterPlayed`用）:
+  **Review Findings Fix（Major、独立レビュー指摘）**により、当初実装
+  （trait保有＝防いだと断定）から修正済み。102章参照——「無効化された
+  攻撃側TECHNIQUEがDIRECT PIN/SUBMISSION Hold traitを持っていた」
+  ことではなく、「Counterしなければ`combat_v1_engine.dart`
+  `_resolvePendingAttack`が実際にその自動移行（DIRECT PIN/SUBMISSION
+  resolutionへの遷移）へ進んでいた」ことを意味する。
+- `preventedIsRough`（`counterPlayed`用）: Counterで無効化された攻撃
+  側TECHNIQUEが持っていた、宣言済み・公開済みの静的性質（ROUGH属性）
+  をそのまま複製する。ROUGH属性自体はCounterの成否に関わらず変化
+  しない静的な事実であり、DIRECT PIN/SUBMISSIONのような「実際に
+  transitionへ進むか」という追加条件を持たないため、trait複製のまま
+  で正確（86章のROUGH非対称性説明に使う）。
 
 いずれも`combat_v1_playable_match_controller.dart`の
 `_buildTechniqueResolvedFeedback`/`_buildFeedback`（counter case）が、
@@ -2618,7 +2626,12 @@ order・非公開deck内容はいずれも参照しない（16章のhidden infor
 category時は`finisherType`が優先）は、`_buildTechniqueResolvedFeedback`
 が既に持っていたロジックと同一のものを`_effectiveDirectPin`/
 `_effectiveSubmissionHold`という2つのprivate static helperへ集約し、
-重複実装を避けた。
+重複実装を避けた。`preventedDirectPin`/`preventedSubmissionHold`が
+実際にtransition条件（DOWN posture／HP閾値）まで満たすかどうかの
+判定は、102章で追記する
+`combat_v1_playable_counter_prevention.dart`の2つのpure function
+（`combatV1PlayableWouldTransitionToDirectPin`/
+`combatV1PlayableWouldTransitionToSubmission`）が担う。
 
 ## 94. Result Feedback Model — Primary / Secondary / Severity
 
@@ -2742,10 +2755,11 @@ Result Reachability（Playable 2A-4 追加）」groupで、320/360/390px幅
   した。
 - **Real controller test**（`combat_v1_playable_scenario_test.dart`
   「72. Human counter」拡張）: 実際にCounterが成立するシナリオを
-  seed探索で見つけ、`preventedDirectPin`/`preventedSubmissionHold`/
-  `preventedIsRough`が、Counter前の`pendingAttack`（宣言済み・
-  公開済み情報）から`playable_ui`側の`combatV1PlayablePendingAttackHasEffectiveDirectPin`
-  等と一致する値になることを確認した。
+  seed探索で見つけ、`preventedIsRough`がCounter前の`pendingAttack`
+  （宣言済み・公開済み情報）の静的traitと一致することを確認した
+  ——`preventedDirectPin`/`preventedSubmissionHold`については102章
+  「Review Findings Fix」参照（trait一致ではなく、Core条件
+  （DOWN posture／HP閾値）まで満たすかで期待値を計算し直している）。
 - **Widget test**（`combat_v1_playable_feedback_widget_test.dart`
   拡張）: FINISHER成立時のprimary表示・ROUGH Counterの非対称性
   secondary表示・Guidanceとの責務重複が無いことを追加検証した。既存
@@ -2770,3 +2784,158 @@ Combat rule変更: NO / Core resolution変更: NO / LegalAction
 semantics変更: NO / CPU AI変更: NO / wrestler data変更: NO /
 technique data変更: NO / dependency変更: NO / hidden information
 exposure: NO。
+
+## 102. Review Findings Fix（独立レビュー指摘の修正、実装追記）
+
+初回実装（91〜101章）の独立レビューでCHANGES REQUIREDとなり、以下を
+最小差分で修正した。Combat Core・LegalAction semantics・CPU AI・
+wrestler/technique data・依存関係はいずれも無変更（101章のScope
+Verificationは修正後も全てNOのまま）。
+
+### 102.1 Major — preventedDirectPin/preventedSubmissionHoldの意味の訂正
+
+**問題**: 初回実装の`preventedDirectPin`/`preventedSubmissionHold`は、
+無効化された攻撃側TECHNIQUEが持つDIRECT PIN/SUBMISSION Hold trait
+（`_effectiveDirectPin`/`_effectiveSubmissionHold`の戻り値）だけで
+`true`になっていた。しかしCore（`combat_v1_engine.dart`
+`_resolvePendingAttack`）では、traitを持つだけでは自動移行は起きない
+——追加条件を満たす場合のみ実際にDIRECT PIN/SUBMISSION resolutionへ
+進む。「traitを持っていた」ことと「Counterしなければ実際にその
+transitionへ進んでいた」ことを混同していたのがMajor指摘の要旨。
+
+**Coreの実際の条件**（`_resolvePendingAttack`、`combat_v1_engine.dart`
+1017〜1173行）:
+
+- **DIRECT PIN**: `effectiveDirectPin`が真であることに加え、
+  `resolvedOpponentPosture = pending.resultOpponentState ??
+  state.opponent.posture`（`resultOpponentState`が非nullならそちらを
+  優先、nullなら防御側の現在postureをそのまま維持）が
+  `CombatV1WrestlerPosture.down`である場合にのみDIRECT PIN自動移行が
+  発生する（`if (effectiveDirectPin && next.opponent.posture ==
+  down)`）。
+- **SUBMISSION**: `effectiveSubmissionHold`が真であることに加え、
+  damage適用後の防御側HP（`max(0, min(hp - damage, maxHp))`）が
+  `submissionEligible`（`combat_v1_submission_rules.dart`、
+  `opponentHp <= rules.submissionHpThreshold`、既定50）を満たす場合
+  にのみSUBMISSION resolutionへ移行する。
+
+**修正内容**: `lib/src/combat_v1/playable/combat_v1_playable_counter_prevention.dart`
+を新設し、上記2条件をCoreのコードと直接照合した2つのpure function
+として実装した:
+
+- `combatV1PlayableWouldTransitionToDirectPin({effectiveDirectPin,
+  resultOpponentState, defenderPostureBeforeResolution})`
+- `combatV1PlayableWouldTransitionToSubmission({effectiveSubmissionHold,
+  defenderHpBeforeResolution, defenderMaxHp, damage, rules})`
+  ——閾値比較はCore自身の`submissionEligible`をそのまま呼び出し、
+  再実装しない。
+
+`combat_v1_playable_match_controller.dart`の`counter` caseは、この
+2 functionの戻り値を`preventedDirectPin`/`preventedSubmissionHold`
+へそのまま使う（`defenderPostureBeforeResolution`/
+`defenderHpBeforeResolution`は`stateBefore`の防御側status——
+TECHNIQUE宣言からCounter応答までの間、防御側posture/HPは変化しない
+ため、Coreが`declineCounter`へ渡すstateと同じ値になる）。
+
+新しいCombat rule判定は追加していない——Coreが既に持つ2条件を、
+安全にprojectionしただけ。判定はcontroller/projection側
+（`combat_v1_playable_counter_prevention.dart`・
+`combat_v1_playable_match_controller.dart`）で完結し、
+`combat_v1_playable_feedback_formatters.dart`（presentation
+formatter）は確定済みのbool値をそのまま文章化するだけの既存責務を
+維持している（94章のCounter成立secondaryの文言・条件分岐は無変更）。
+
+### 102.2 Submission Finisher Boundary
+
+`combat_v1_finisher_rules.dart`
+`determineFinisherSubmissionOutcome`を確認したところ、通常SUBMISSION
+とSUBMISSION FINISHERの相違点は「SUBMISSION resolutionへの突入条件」
+ではなく「突入後のESCAPE/GIVE UP判定」のみだった——解決後の相手HPが
+0の場合、SUBMISSION FINISHERはKOC保有量に関わらず即GIVE UPになる
+（10.2章の特殊処理）が、この処理は`submissionEligible`による突入
+判定より後段の話であり、`preventedSubmissionHold`が意味する
+「SUBMISSION resolutionへ移行したか」には影響しない。そのため
+`combatV1PlayableWouldTransitionToSubmission`はNORMAL/FINISHERで
+同一の式をそのまま使い、無理な統合や別式は導入していない。
+
+「SUBMISSION trait」（技が持つ性質）・「SUBMISSION transition」
+（resolutionへ実際に移行すること、`preventedSubmissionHold`が指す
+もの）・「GIVE UP」（SUBMISSION resolution突入後の決着結果の1つ）は
+それぞれ別概念であり、`preventedSubmissionHold`は3つ目
+（GIVE UPを防いだ）を一切意味しない——2つ目（transitionへの移行）
+だけを意味する。
+
+### 102.3 ROUGH Counter Semantics（維持確認）
+
+独立レビューでROUGH Counter semantics（86章の非対称性、`preventedIsRough`
+の扱い）はPASS済みだったため、変更していない。`preventedIsRough`は
+引き続き宣言済みtraitの複製のまま——DIRECT PIN/SUBMISSIONと異なり
+「実際にtransitionへ進むか」という追加のCore条件を持たないため
+（ROUGH属性は技の静的な性質であり、Counterされてもされなくても値が
+変わらない）、trait複製のままで正確である。
+
+### 102.4 Test Coverage 追加
+
+- **Pure test**（新設
+  `test/combat_v1/playable/combat_v1_playable_counter_prevention_test.dart`、
+  15件）: `combatV1PlayableWouldTransitionToDirectPin`/
+  `combatV1PlayableWouldTransitionToSubmission`を、production
+  wrestler/catalogに依存しないsynthetic入力で検証した——DOWN
+  posture／HP閾値の境界（ちょうど閾値・閾値+1・damageで閾値内へ入る
+  境界・HPがマイナスになる場合のclamp等）を網羅する。
+- **Real controller test**（`combat_v1_playable_scenario_test.dart`
+  「72. Human counter」拡張・「72. Counter Prevents accuracy」新設）:
+  実際にCounterが成立するシナリオをseed探索で見つけ、
+  `preventedDirectPin`/`preventedSubmissionHold`がtrait一致ではなく
+  Core条件一致になっていることを確認した。SUBMISSION側は、production
+  catalog上SUBMISSION Hold traitを持つ技をCounterできるカードが
+  白銀レイナの`counter_reina_silver_lock_reversal`（crossface family
+  対象）1種のみであること（`combat_v1_counter_catalog.dart`——armbar
+  familyを対象とするCounterはgame data上存在しない、Phase 10C-0.5 A7
+  で明示的に許容された仕様）を確認したうえで、reina同士のmirror
+  matchで実際にCPUがCounterする局面をturn 1宣言→CPU応答パターンで
+  探索し、`preventedSubmissionHold == false`（damage適用後HPが閾値を
+  超える、trait保有のみのケース）を実Core Engine resolutionを通して
+  確認した。
+- **Formatter test**（`combat_v1_playable_feedback_formatters_test.dart`
+  拡張）: `preventedDirectPin`/`preventedSubmissionHold ==
+  false`の場合に、「自動PIN移行を防いだ」/「SUBMISSION移行条件を
+  防いだ」という断定文言を一切出力しないことを、negative assertionで
+  追加検証した。
+- **Widget test**（`combat_v1_playable_feedback_widget_test.dart`
+  拡張）: 同じnegative/positive assertionをwidget tree（実際に
+  renderされるLatest Result banner）まで通して確認した。
+
+### 102.5 Minor — Mobile Visibility / Hit-testability 強化
+
+`combat_v1_playable_mobile_overflow_test.dart`「Latest Result
+Reachability（Playable 2A-4 追加）」groupを、`findsOneWidget`だけの
+存在確認から、実際のclip viewportとのintersection確認へ強化した:
+
+- ケース2（Counter result）: Latest Result primary/secondaryの実座標
+  （`getRect`）を、実際に属するclip viewport
+  （`combat_v1_playable_actor_recent_scroll`）と比較し、scroll前に
+  viewport外なら実際にdragしてからscroll後のintersectionを確認する
+  （既存「Match Direction Reachability」groupと同じ手法）。Technique
+  cardは画面全体ではなく、実際のTechnique scroll viewport
+  （`combat_v1_playable_technique_area_scroll`、2A-3で確立した
+  observabilityを再利用）と比較する。End Turn buttonは中心座標が
+  screen内にあることの確認に加え、実際に`tester.tap`し、
+  `FakePlayableMatchSession.submitCalls`で`endTurn` actionが実際に
+  送信されたことまで確認する。
+- ケース3（Result overlay）: overlay自身の実viewport
+  （`Positioned.fill`により画面全体を覆う）に対する、terminal Latest
+  Result primary/secondaryのintersectionを確認する（長文で収まらない
+  場合はoverlay内をscrollしてから再確認）。Rematchボタンを実際に
+  `tester.tap`し、`sessionFactory`が2回目の呼び出しで非terminalな
+  sessionを返すようscriptedしたうえで、Result overlayが実際に消える
+  （新しい試合へ遷移する）ことまで確認する。
+- 2A-3で確立したCounter応答UIのdecline button hit-test
+  （`Technique / Counter Decision Traits`group、D.）も、中心座標の
+  確認だけでなく実際に`tester.tap`し、`declineCounter` actionが
+  送信されることまで確認するよう強化した。
+
+2A-2（Guidance/Direction/Recent Log reachability）・2A-3（Technique
+readability・trait badges・Counter family/group・ROUGH説明・
+Technique card hit-testability・320/360/390px coverage）の既存
+regression testはすべて無変更のまま全green。

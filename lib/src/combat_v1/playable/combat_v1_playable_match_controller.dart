@@ -26,6 +26,7 @@ import '../combat_v1_production_catalog.dart';
 import '../combat_v1_production_match_setup.dart';
 import '../combat_v1_rules_config.dart';
 import 'combat_v1_playable_action_feedback.dart';
+import 'combat_v1_playable_counter_prevention.dart';
 import 'combat_v1_playable_match_config.dart';
 import 'combat_v1_playable_match_result.dart';
 import 'combat_v1_playable_match_snapshot.dart';
@@ -629,17 +630,38 @@ class CombatV1PlayableMatchController {
           relatedActionDisplayName: pendingBefore == null
               ? null
               : _techniqueName(pendingBefore.attackCardId),
-          // Playable 2A-4「Result Feedback — Counter Prevents」——
-          // Counterが成立したことで、無効化された攻撃側TECHNIQUEが
-          // 本来持っていたDIRECT PIN/SUBMISSION自動移行・ROUGH属性も
-          // 一切発動しなかったことを説明するための、宣言済み
-          // （＝公開済み）静的metadataの複製。`_buildTechniqueResolvedFeedback`
-          // と同じFINISHER優先順位ルールをそのまま適用する（新しい
-          // Combat rule判定ではない）。
+          // Playable 2A-4「Result Feedback — Counter Prevents」
+          // （Review Findings Fix、Major）——`preventedDirectPin`/
+          // `preventedSubmissionHold`は「無効化された攻撃側TECHNIQUEが
+          // DIRECT PIN/SUBMISSION traitを持っていた」ことではなく、
+          // 「Counterしなければ`combat_v1_engine.dart`
+          // `_resolvePendingAttack`が実際にその自動移行へ進んでいた」
+          // ことを意味する
+          // （`combat_v1_playable_counter_prevention.dart`
+          // `combatV1PlayableWouldTransitionToDirectPin`/
+          // `combatV1PlayableWouldTransitionToSubmission`——Coreと同じ
+          // DOWN posture/HP閾値条件を、`pendingBefore`+防御側before
+          // stateから安全にprojectionする純粋関数、新しいCombat rule
+          // 判定はここでは行わない）。DIRECT PIN/SUBMISSION traitを
+          // 持っていても、解決後postureがDOWNにならない・damage適用後
+          // HPが閾値を超える場合は自動移行自体が起きないため、trait
+          // 単独では`true`にしない。
           preventedDirectPin: pendingBefore != null &&
-              _effectiveDirectPin(pendingBefore),
+              combatV1PlayableWouldTransitionToDirectPin(
+                effectiveDirectPin: _effectiveDirectPin(pendingBefore),
+                resultOpponentState: pendingBefore.resultOpponentState,
+                defenderPostureBeforeResolution:
+                    _playerAt(stateBefore, defender).posture,
+              ),
           preventedSubmissionHold: pendingBefore != null &&
-              _effectiveSubmissionHold(pendingBefore),
+              combatV1PlayableWouldTransitionToSubmission(
+                effectiveSubmissionHold: _effectiveSubmissionHold(pendingBefore),
+                defenderHpBeforeResolution:
+                    _playerAt(stateBefore, defender).hp,
+                defenderMaxHp: _playerAt(stateBefore, defender).maxHp,
+                damage: pendingBefore.damage,
+                rules: _rules,
+              ),
           preventedIsRough:
               pendingBefore?.attribute == CombatV1EnergyAttribute.rough,
         );

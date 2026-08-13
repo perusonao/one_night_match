@@ -351,6 +351,78 @@ void main() {
       expect(result.secondary, contains('SUBMISSION'));
     });
 
+    // Playable 2A-4 Review Findings Fix（Major、negative assertion）——
+    // `preventedDirectPin == false`は「DIRECT PIN traitはあったが、
+    // Counterしなくても自動PIN移行は起きなかった」ケースを含む
+    // （projection側の修正後、trait単独では`true`にならない）。この
+    // 場合、formatterは「自動PIN移行を防いだ」と断定する文言
+    // （`combatV1PlayableWouldTransitionToDirectPin`が実際に使う
+    // wording「automatic PIN transition」）を一切出力してはならない。
+    test(
+      'preventedDirectPin == false: DIRECT PIN traitがあっても'
+      '「自動PIN移行を防いだ」とは表示しない',
+      () {
+        final feedback = testActionFeedback(
+          kind: CombatV1PlayableFeedbackKind.counterPlayed,
+          relatedActionDisplayName: 'テストダイレクトピン技',
+          preventedDirectPin: false,
+        );
+        final result = combatV1PlayableDeriveMatchFeedback(
+          feedback,
+          humanPlayerIndex: _humanPlayerIndex,
+        );
+        expect(result.secondary, isNot(contains('PIN')));
+        expect(result.secondary, isNot(contains('automatic PIN transition')));
+      },
+    );
+
+    // Playable 2A-4 Review Findings Fix（Major、negative assertion）——
+    // `preventedSubmissionHold == false`は「SUBMISSION traitはあったが、
+    // Counterしなくても実際にSUBMISSION resolutionへは移行しなかった」
+    // ケースを含む。この場合、formatterは「SUBMISSION移行条件を防いだ」
+    // と断定する文言（「the SUBMISSION transition condition」）を一切
+    // 出力してはならない。
+    test(
+      'preventedSubmissionHold == false: SUBMISSION traitがあっても'
+      '「SUBMISSION移行条件を防いだ」とは表示しない',
+      () {
+        final feedback = testActionFeedback(
+          kind: CombatV1PlayableFeedbackKind.counterPlayed,
+          relatedActionDisplayName: 'テストアームキャッチ',
+          preventedSubmissionHold: false,
+        );
+        final result = combatV1PlayableDeriveMatchFeedback(
+          feedback,
+          humanPlayerIndex: _humanPlayerIndex,
+        );
+        expect(result.secondary, isNot(contains('SUBMISSION')));
+        expect(
+          result.secondary,
+          isNot(contains('the SUBMISSION transition condition')),
+        );
+      },
+    );
+
+    test(
+      'preventedDirectPin/preventedSubmissionHoldが両方falseでも、'
+      'DMG/HEAT/state changesを防いだことは通常通り表示する',
+      () {
+        final feedback = testActionFeedback(
+          kind: CombatV1PlayableFeedbackKind.counterPlayed,
+          relatedActionDisplayName: 'テスト通常技',
+          preventedDirectPin: false,
+          preventedSubmissionHold: false,
+        );
+        final result = combatV1PlayableDeriveMatchFeedback(
+          feedback,
+          humanPlayerIndex: _humanPlayerIndex,
+        );
+        expect(result.secondary, contains('DMG'));
+        expect(result.secondary, contains('HEAT'));
+        expect(result.secondary, contains('state changes'));
+      },
+    );
+
     test('ROUGH技へのCounter成立: 非対称性（宣言時点で確定したPIN不可は取り消'
         'されない／次ターン制限は防げる）を明示する', () {
       final feedback = testActionFeedback(
