@@ -358,82 +358,114 @@ class _CombatV1PlayableMatchScreenState
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Column(
                     children: [
-                      // Playable 2A-5「1章 最重要方針」——両wrestlerの
-                      // 背景状態（HP/KOC/PIN Cards等）をここへ隣接させて
-                      // まとめる。以前はHuman status panelがhand群の下部
-                      // （画面最下段近く）に独立して置かれ、Expandedへ
-                      // 割り当てられる高さを圧迫していた（「4章 Hand
-                      // Visibility」調査結果、`docs/design/
-                      // combat_v1_playable_match_ui.md`Playable 2A-5追記
-                      // 参照）。Tier 1（現在操作するTechnique hand）を
-                      // 常時スクロールなしで比較できるようにするため、
-                      // Tier優先度が相対的に低い「両者の背景ステータス」を
-                      // 画面上部へ集約し、Expandedへ渡す残り高さを増やす。
-                      _CpuStatusPanel(cpu: snapshot.cpu),
-                      _HumanStatusPanel(human: snapshot.human),
-                      _SharedStatusPanel(snapshot: snapshot),
-                      // Playable 2A-5「9章 Guidance / Direction / Result /
-                      // Logの圧縮」——Tier 3（Guidance）は常時表示のまま、
-                      // Tier 4（Direction/Latest Result/Recent Log）は
-                      // 既定で折りたたむ（`_ActorAndRecentPanel`参照）。
-                      // 責務・情報自体は削除しない——明示操作（トグル）で
-                      // 常に到達可能（design doc「70.10章」の到達可能性
-                      // 原則を維持）。
-                      _ActorAndRecentPanel(
-                        snapshot: snapshot,
-                        humanPlayerIndex: _humanPlayerIndex,
-                        cpuBusy: _cpuBusy,
-                      ),
-                      if (_submitErrorMessage != null)
-                        _ErrorBanner(message: _submitErrorMessage!),
+                      // Playable 2A-6 Review Findings Fix（Critical、
+                      // 4.2章）——以前は「両wrestlerの背景ステータス
+                      // （CPU/Human/Shared）＋Actor/Guidance/detail panel」
+                      // を外側`Column`の固定sizeな子として並べ、残りを
+                      // 1つの`Expanded`（hand＋詳細のscrollview＋固定
+                      // 技action footerの入れ子`Column`）へ渡していた。
+                      // この構成では、`_MatchGuidancePanel`（FINISHER
+                      // HEAT到達行）や`_ActorAndRecentPanel`の詳細展開
+                      // （「▼ 試合の詳細」）で固定部分の高さ予算が伸びる
+                      // と、`Expanded`に残る高さがどんどん減り、320×568
+                      // のような低height viewportではその内側の固定
+                      // footer（`_TechniqueStickyActionBar`）自身の高さ
+                      // すら収まらずRenderFlex overflowとなり、
+                      // overflow分がすぐ下の`_PrimaryActionsBar`（例:
+                      // 「ターン終了」）へ視覚的に重なってしまっていた。
+                      //
+                      // 修正: 「常に画面内に固定表示すべきaction bar
+                      // （技action footer／Stand Up・Rest・PIN・End
+                      // Turnのbottom bar）」以外——両wrestlerの背景
+                      // ステータス・Actor/Guidance/detail panel・hand＋
+                      // 選択technique詳細——をすべて1つの`Expanded`+
+                      // `SingleChildScrollView`へまとめる。こうすると
+                      // 外側`Column`は「固定sizeのbottom bar 2本を確保
+                      // したうえで、残りを丸ごとscrollviewへ渡す」という
+                      // 単純な1段構成になり、scrollviewだけが可変（0まで
+                      // 縮んでもscroll可能なためoverflowしない）で、両
+                      // bottom barは常に固定高さのまま重ならずに並ぶ
+                      // （到達可能性・「scrollしないと押せない」への
+                      // 後戻り、いずれも防ぐ——design doc「70.10章」）。
+                      // 情報の優先順位（Tier）自体は変わらない——単に
+                      // 極端な高さ不足時の逃がし先が「Expanded 1つ」から
+                      // 「そのExpandedの中身全体」へ広がるだけで、通常の
+                      // 画面高さでは以前と同じくscroll不要で全て収まる。
                       Expanded(
-                        child: IgnorePointer(
-                          ignoring: _cpuBusy,
-                          // Playable 2A-6「4章 Sticky Technique Action」
-                          // ——このExpanded領域を「scrollする詳細
-                          // （hand＋技/discard情報）」と「常に固定表示の
-                          // 技action footer」の2段Columnへ分割する。
-                          // scrollできるのは前者だけ——後者
-                          // （`_TechniqueStickyActionBar`）はscroll
-                          // viewportの外側（兄弟）に置かれるため、
-                          // どれだけhand/detailが長くなってもscroll
-                          // せずに常に画面内へ残る。
+                        child: SingleChildScrollView(
+                          // Review Findings Fix（Minor、4.1章）
+                          // ——mobile visibility testが、この
+                          // 領域の実際のclip viewport（Expanded
+                          // へ割り当てられた高さ）を正確に取得
+                          // できるようにするためのkey。この
+                          // Viewport矩形こそが「実際に見えて
+                          // いる範囲」であり、画面全体のサイズ
+                          // をそのまま使うとAppBar/他panelの分
+                          // だけ広く見積もってしまう（実際には
+                          // この範囲外はscroll clipで見えない）。
+                          key: const Key(
+                            'combat_v1_playable_technique_area_scroll',
+                          ),
                           child: Column(
                             children: [
-                              Expanded(
-                                child: SingleChildScrollView(
-                                  // Review Findings Fix（Minor、4.1章）
-                                  // ——mobile visibility testが、この
-                                  // 領域の実際のclip viewport（Expanded
-                                  // へ割り当てられた高さ）を正確に取得
-                                  // できるようにするためのkey。この
-                                  // Viewport矩形こそが「実際に見えて
-                                  // いる範囲」であり、画面全体のサイズ
-                                  // をそのまま使うとAppBar/他panelの分
-                                  // だけ広く見積もってしまう（実際には
-                                  // この範囲外はscroll clipで見えない）。
-                                  key: const Key(
-                                    'combat_v1_playable_technique_area_scroll',
-                                  ),
-                                  child: _MatchBody(
-                                    snapshot: snapshot,
-                                    selectedCardInstanceId:
-                                        _selectedCardInstanceId,
-                                    onSelectCard: _onSelectCard,
-                                    findAction: _findLegalAction,
-                                    onSubmit: _submitAction,
-                                  ),
-                                ),
-                              ),
-                              _TechniqueStickyActionBar(
+                              // Playable 2A-5「1章 最重要方針」——
+                              // 両wrestlerの背景状態（HP/KOC/PIN
+                              // Cards等）をここへ隣接させてまとめる
+                              // （「4章 Hand Visibility」調査結果、
+                              // `docs/design/
+                              // combat_v1_playable_match_ui.md`
+                              // Playable 2A-5追記参照）。CPU処理中も
+                              // 表示専用panelとして常に操作でき続ける
+                              // （Match Directionと同じ意図的な挙動、
+                              // 元々`_cpuBusy`のIgnorePointerの対象外
+                              // だったふるまいを維持する）。
+                              _CpuStatusPanel(cpu: snapshot.cpu),
+                              _HumanStatusPanel(human: snapshot.human),
+                              _SharedStatusPanel(snapshot: snapshot),
+                              // Playable 2A-5「9章 Guidance /
+                              // Direction / Result / Logの圧縮」——
+                              // Tier 3（Guidance）は常時表示のまま、
+                              // Tier 4（Direction/Latest
+                              // Result/Recent Log）は既定で折りたたむ
+                              // （`_ActorAndRecentPanel`参照）。
+                              // 責務・情報自体は削除しない——明示操作
+                              // （トグル）で常に到達可能（design doc
+                              // 「70.10章」の到達可能性原則を維持）。
+                              _ActorAndRecentPanel(
                                 snapshot: snapshot,
-                                selectedCardInstanceId:
-                                    _selectedCardInstanceId,
-                                findAction: _findLegalAction,
-                                onSubmit: _submitAction,
+                                humanPlayerIndex: _humanPlayerIndex,
+                                cpuBusy: _cpuBusy,
+                              ),
+                              if (_submitErrorMessage != null)
+                                _ErrorBanner(message: _submitErrorMessage!),
+                              // `_MatchBody`（hand選択／技詳細／discard
+                              // confirm）だけがCPU処理中に無効化される
+                              // 対象——`IgnorePointer`のscopeは元の
+                              // 実装と同じに保つ（上のstatus/actor panel
+                              // 群はここへ移す前から`_cpuBusy`の影響を
+                              // 受けていなかった）。
+                              IgnorePointer(
+                                ignoring: _cpuBusy,
+                                child: _MatchBody(
+                                  snapshot: snapshot,
+                                  selectedCardInstanceId:
+                                      _selectedCardInstanceId,
+                                  onSelectCard: _onSelectCard,
+                                  findAction: _findLegalAction,
+                                  onSubmit: _submitAction,
+                                ),
                               ),
                             ],
                           ),
+                        ),
+                      ),
+                      IgnorePointer(
+                        ignoring: _cpuBusy,
+                        child: _TechniqueStickyActionBar(
+                          snapshot: snapshot,
+                          selectedCardInstanceId: _selectedCardInstanceId,
+                          findAction: _findLegalAction,
+                          onSubmit: _submitAction,
                         ),
                       ),
                       IgnorePointer(

@@ -1033,4 +1033,172 @@ void main() {
       );
     });
   });
+
+  group(
+    'Playable 2A-6 Review Findings Fix（Critical、4.2章）— '
+    '低height viewportでの技action bar到達可能性',
+    () {
+      // レビュー指摘の再現条件: Shared HEATがFINISHER閾値へ到達すると
+      // `_MatchGuidancePanel`へ「FINISHER HEAT到達」の行が追加され
+      // （`combat_v1_playable_match_guidance.dart`）、かつユーザーが
+      // 「▼ 試合の詳細」（`_ActorAndRecentPanel._detailExpanded`）を
+      // 展開すると、固定表示のはずの技action bar
+      // （`_TechniqueStickyActionBar`）が320×568のような低height
+      // viewportでは`_PrimaryActionsBar`（ターン終了等）と重なる
+      // RenderFlex overflowを起こしていた（Root cause: 両者を同居させて
+      // いた内側`Column`の高さ予算が、外側`Expanded`の縮小によって
+      // 技action bar自身の必要高さを下回っていたため）。
+      CombatV1PlayableMatchSnapshot finisherThresholdSnapshot({
+        required bool cardUsable,
+      }) => testSnapshot(
+        revision: 42,
+        phase: CombatV1MatchPhase.action,
+        isHumanInputRequired: true,
+        sharedHeat: 250,
+        finisherHeatThreshold: 200,
+        human: testHumanStatus(
+          hand: [
+            testTechniqueCard(
+              instanceId: 'h1',
+              technique: testNormalTechnique,
+              isUsable: cardUsable,
+            ),
+          ],
+        ),
+        legalActions: [
+          CombatV1TechniqueAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
+          const CombatV1EndTurnAction(actorPlayerIndex: 0),
+        ],
+      );
+
+      Future<void> selectCardAndExpandDetail(WidgetTester tester) async {
+        final cardFinder = find.byKey(
+          const Key('combat_v1_playable_hand_card_h1'),
+        );
+        await tester.ensureVisible(cardFinder);
+        await tester.pumpAndSettle();
+        await tester.tap(cardFinder);
+        await tester.pump();
+
+        final toggleFinder = find.byKey(
+          const Key('combat_v1_playable_detail_toggle'),
+        );
+        await tester.ensureVisible(toggleFinder);
+        await tester.pumpAndSettle();
+        await tester.tap(toggleFinder);
+        await tester.pump();
+      }
+
+      testWidgets(
+        'reviewer repro: 320×568・FINISHER HEAT到達・詳細展開・カード選択済み'
+        'の状態でRenderFlex overflowが起きず、技action barがEnd Turnと'
+        '重ならず、実tapが技action bar自体へ届く',
+        (tester) async {
+          await _withViewport(
+            tester,
+            () async {
+              final snapshot = finisherThresholdSnapshot(cardUsable: true);
+              final session = FakePlayableMatchSession(snapshot);
+              await tester.pumpWidget(_wrap(_screen(session)));
+              await tester.pump();
+
+              await selectCardAndExpandDetail(tester);
+
+              // (a) overflow例外が一切発生していないこと。
+              expect(tester.takeException(), isNull);
+
+              final techniqueFinder = find.byKey(
+                const Key('combat_v1_playable_action_technique'),
+              );
+              final endTurnFinder = find.byKey(
+                const Key('combat_v1_playable_action_end_turn'),
+              );
+              expect(techniqueFinder, findsOneWidget);
+              expect(endTurnFinder, findsOneWidget);
+
+              final techniqueRect = tester.getRect(techniqueFinder);
+              final endTurnRect = tester.getRect(endTurnFinder);
+
+              // (b) 技action barの矩形がEnd Turn buttonの矩形と重ならない
+              // こと（誤tap hazardの直接的な検証）。
+              expect(
+                techniqueRect.overlaps(endTurnRect),
+                isFalse,
+                reason:
+                    '技action bar($techniqueRect)がEnd Turn'
+                    'button($endTurnRect)と重なっている',
+              );
+
+              // (c) 実際にtechnique button中心をtapすると、正しく
+              // technique buttonがhitし、End Turnではなく正しい
+              // LegalActionがsubmitされること（hit-test警告が出ない
+              // ことも含めて検証——warnIfMissedは既定でtrueのため、
+              // ここで実際に外れているとFlutter test frameworkの
+              // warningとして検出される）。
+              await tester.tap(techniqueFinder);
+              await tester.pump();
+
+              expect(session.submitCalls, hasLength(1));
+              expect(session.submitCalls.single.expectedRevision, 42);
+              expect(
+                session.submitCalls.single.action,
+                const CombatV1TechniqueAction(
+                  actorPlayerIndex: 0,
+                  cardInstanceId: 'h1',
+                ),
+              );
+            },
+            size: const Size(320, 568),
+          );
+        },
+      );
+
+      // 一般化した低height viewport sweep — 320×568以外の短い高さでも
+      // 同じ誘発条件（FINISHER HEAT到達＋詳細展開）でoverflow/重なりが
+      // 起きないことを確認する。
+      for (final size in const [
+        Size(320, 568),
+        Size(360, 600),
+        Size(390, 640),
+      ]) {
+        testWidgets(
+          '${size.width.toInt()}x${size.height.toInt()}: FINISHER HEAT到達＋'
+          '詳細展開でも技action barが overflow/End Turnとの重なりを起こさない',
+          (tester) async {
+            await _withViewport(
+              tester,
+              () async {
+                final snapshot = finisherThresholdSnapshot(cardUsable: false);
+                await tester.pumpWidget(
+                  _wrap(_screen(FakePlayableMatchSession(snapshot))),
+                );
+                await tester.pump();
+
+                await selectCardAndExpandDetail(tester);
+
+                expect(tester.takeException(), isNull);
+
+                final techniqueFinder = find.byKey(
+                  const Key('combat_v1_playable_action_technique'),
+                );
+                final endTurnFinder = find.byKey(
+                  const Key('combat_v1_playable_action_end_turn'),
+                );
+                expect(techniqueFinder, findsOneWidget);
+                expect(endTurnFinder, findsOneWidget);
+
+                expect(
+                  tester
+                      .getRect(techniqueFinder)
+                      .overlaps(tester.getRect(endTurnFinder)),
+                  isFalse,
+                );
+              },
+              size: size,
+            );
+          },
+        );
+      }
+    },
+  );
 }
