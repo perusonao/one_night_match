@@ -20,6 +20,7 @@ library;
 import '../combat_v1_enums.dart';
 import '../combat_v1_legal_action.dart';
 import '../playable/combat_v1_playable_match_snapshot.dart';
+import 'combat_v1_playable_ui_formatters.dart';
 
 /// [CombatV1PlayableMatchGuidance.primary]が属する大まかな段階
 /// （design doc「68章 Current Action Guidance」）。Widget側が
@@ -109,11 +110,21 @@ CombatV1PlayableMatchGuidance _discardGuidance(
   CombatV1PlayableMatchSnapshot snapshot,
 ) {
   final isDown = snapshot.human.posture == CombatV1WrestlerPosture.down;
+  // Playable 2A-6「10章 Guidance Label Consistency」——action名
+  // （Stand Up/Rest）を独自の英語一文字列として複製せず、既存の
+  // `combatV1PlayableActionKindLabel`（button labelそのもののSSOT）を
+  // そのまま参照する。
+  final standUpLabel = combatV1PlayableActionKindLabel(
+    CombatV1LegalActionKind.standUp,
+  );
+  final restLabel = combatV1PlayableActionKindLabel(
+    CombatV1LegalActionKind.rest,
+  );
   return CombatV1PlayableMatchGuidance(
     kind: CombatV1PlayableGuidanceKind.discard,
     primary: '手札から1枚選んで捨ててください',
     secondary: isDown
-        ? 'DOWN中 — 次の行動前にStand UpまたはRestが必要です'
+        ? 'DOWN中 — 次の行動前に$standUpLabelまたは$restLabelが必要です'
         : '残したカードは攻撃やCounterに使用できます',
   );
 }
@@ -161,10 +172,20 @@ CombatV1PlayableMatchGuidance _counterResponseGuidance(
 /// 文言も既存`_ActionHint`と完全一致させない（同じ意味の情報を別々の
 /// 場所へ一字一句重複表示しない、design doc「68章 UI / Mobile」）。
 CombatV1PlayableMatchGuidance _downDecisionGuidance() {
-  return const CombatV1PlayableMatchGuidance(
+  // Playable 2A-6「10章 Guidance Label Consistency」——「Stand Up」/
+  // 「Rest」という英語一文字列を独自に複製せず、button labelそのものの
+  // SSOT（`combatV1PlayableActionKindLabel`）をそのまま参照する
+  // （既存`_ActionHint`が使うlabelと必ず一致させる）。
+  final standUpLabel = combatV1PlayableActionKindLabel(
+    CombatV1LegalActionKind.standUp,
+  );
+  final restLabel = combatV1PlayableActionKindLabel(
+    CombatV1LegalActionKind.rest,
+  );
+  return CombatV1PlayableMatchGuidance(
     kind: CombatV1PlayableGuidanceKind.downDecision,
-    primary: 'DOWN中です。Stand Upして攻撃を続けるか、Restできます',
-    secondary: 'Rest — HP回復・ターン終了',
+    primary: 'DOWN中です。$standUpLabelか$restLabelかを選んでください',
+    secondary: '$restLabel — HP回復・ターン終了',
   );
 }
 
@@ -188,11 +209,21 @@ CombatV1PlayableMatchGuidance _actionGuidance(
   );
 }
 
+/// Playable 2A-6「10章 Guidance Label Consistency」——以前はaction kind
+/// ごとに独自の英語一文字列（'Technique'/'End Turn'）を複製していたが、
+/// これは実際のbutton labelと表記が一致しない（button側は既に日本語
+/// 「技を使う」「ターン終了」）うえ、プレイヤー向け操作文言は日本語を
+/// 基本とする方針（design doc「Playable 2A-5 8章」）にも反していた。
+/// 新しい行動名を作らず、既存`combatV1PlayableActionKindLabel`（button
+/// labelそのもののSSOT）をそのまま列挙する。
 String _actionPhasePrimary(Set<CombatV1LegalActionKind> humanKinds) {
   final labels = <String>[
-    if (humanKinds.contains(CombatV1LegalActionKind.technique)) 'Technique',
-    if (humanKinds.contains(CombatV1LegalActionKind.pin)) 'PIN',
-    if (humanKinds.contains(CombatV1LegalActionKind.endTurn)) 'End Turn',
+    if (humanKinds.contains(CombatV1LegalActionKind.technique))
+      combatV1PlayableActionKindLabel(CombatV1LegalActionKind.technique),
+    if (humanKinds.contains(CombatV1LegalActionKind.pin))
+      combatV1PlayableActionKindLabel(CombatV1LegalActionKind.pin),
+    if (humanKinds.contains(CombatV1LegalActionKind.endTurn))
+      combatV1PlayableActionKindLabel(CombatV1LegalActionKind.endTurn),
   ];
   if (labels.isEmpty) {
     // 通常到達しない防御的ケース（action phase・STAND・Human入力待ちなら
@@ -200,11 +231,11 @@ String _actionPhasePrimary(Set<CombatV1LegalActionKind> humanKinds) {
     // 汎用文言に留める。
     return '選択できる行動を確認してください';
   }
-  if (labels.length == 1) {
-    return '${labels.single}を選択できます';
-  }
-  final head = labels.sublist(0, labels.length - 1).join('、');
-  return '$head、または${labels.last}を選択できます';
+  // labelの品詞が混在する（動詞句「技を使う」／名詞「PIN」「ターン終了」）
+  // ため、「〜を選択できます」を後置して1文に合成すると不自然になる
+  // （例:「技を使うを選択できます」）。button labelをそのまま列挙する
+  // 表示に留める。
+  return '選べる行動: ${labels.join(' ・ ')}';
 }
 
 /// Guidance Priority（design doc「68章」、優先順位4〜7）に沿って、
@@ -239,7 +270,11 @@ String? _actionPhaseContextHint(
   // 安全な一般的表現に留める（「PINできます」と断定しない、design doc
   // 「68章 Opponent DOWN」）。
   if (snapshot.cpu.posture == CombatV1WrestlerPosture.down) {
-    return '相手はDOWN中 — PINや一部Techniqueにつながる重要な状態です';
+    // Playable 2A-6「10章」——「Technique」という英語一文字列を、
+    // 他の場所と同じ既存の日本語表記「技」に置き換える（新しい訳語を
+    // 発明しない——`_SelectedTechniquePanel`の「使用する技」等、この
+    // fileの外でも既に一貫して使われている表記）。
+    return '相手はDOWN中 — PINや一部の技につながる重要な状態です';
   }
 
   // 7. Remaining Energy / continued attack — 既にこのターン中に
@@ -249,7 +284,14 @@ String? _actionPhaseContextHint(
   // するため、ENERGY残量を独自に再計算しない。
   if (humanKinds.contains(CombatV1LegalActionKind.technique) &&
       _hasUsedTechniqueThisTurn(snapshot, humanPlayerIndex)) {
-    return '残りEnergyがあれば、このターンはさらにTechniqueを使用できます';
+    // Playable 2A-6「10章」——「Technique」という英語一文字列を独自に
+    // 複製せず、button labelそのもののSSOT
+    // （`combatV1PlayableActionKindLabel`＝「技を使う」）をそのまま
+    // 名詞化して使う（「〜ことができます」で自然な文にする）。
+    final techniqueLabel = combatV1PlayableActionKindLabel(
+      CombatV1LegalActionKind.technique,
+    );
+    return '残りEnergyがあれば、このターンはさらに$techniqueLabelことができます';
   }
 
   return null;

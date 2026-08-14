@@ -277,4 +277,36 @@ void main() {
       );
     });
   });
+
+  // Playable 2A-6「5章 Technique Identity Readability」——短縮形
+  // （displayLabel）と1:1対応するfull-word labelがすべてのenum値へ
+  // 定義されていること、新しいcategorizationを作らず既存6値のみを
+  // 対象にしていることを検証する。
+  group('combatV1PlayableEnergyAttributeFullLabel', () {
+    test('全ての属性へfull-word labelが定義されている', () {
+      const expected = {
+        CombatV1EnergyAttribute.strike: '打撃',
+        CombatV1EnergyAttribute.joint: '関節技',
+        CombatV1EnergyAttribute.throwing: '投げ技',
+        CombatV1EnergyAttribute.aerial: '飛び技',
+        CombatV1EnergyAttribute.rough: 'ラフファイト',
+        CombatV1EnergyAttribute.wild: 'ワイルド',
+      };
+      for (final attribute in CombatV1EnergyAttribute.values) {
+        expect(
+          combatV1PlayableEnergyAttributeFullLabel(attribute),
+          expected[attribute],
+          reason: '$attributeのfull-word labelが一致しない',
+        );
+      }
+    });
+
+    test('既存displayLabel（短縮形）と異なる、より長い表記である', () {
+      for (final attribute in CombatV1EnergyAttribute.values) {
+        final full = combatV1PlayableEnergyAttributeFullLabel(attribute);
+        expect(full, isNot(attribute.displayLabel));
+        expect(full.length, greaterThan(attribute.displayLabel.length));
+      }
+    });
+  });
 }

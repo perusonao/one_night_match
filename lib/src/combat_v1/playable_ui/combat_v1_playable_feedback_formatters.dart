@@ -350,6 +350,32 @@ String _joinEnglishList(List<String> items) {
   return '${items.sublist(0, items.length - 1).join(', ')} and ${items.last}';
 }
 
+/// Playable 2A-6「8章 Match Finish Clarity — 決め技」——
+/// `CombatV1PlayableMatchController._settle()`は、各actionの
+/// `_recordFeedback`直後・同一の`_apply`呼び出し内で（間に他のfeedback
+/// recordを挟まず）terminal判定を行う（`combat_v1_playable_match_
+/// controller.dart`参照）。そのため`snapshot.status == matchOver`の瞬間の
+/// `snapshot.latestFeedback`は、常に「試合を終わらせたそのaction」の
+/// feedbackと一致する——この関数はその前提のうえで、[latestFeedback]から
+/// 「決め技」の表示名を安全に導出できる場合のみ返す。
+///
+/// `kind == techniqueResolved`かつ`actionDisplayName`が非nullの場合のみ
+/// 「技で終わった」と断定する——通常PIN宣言（`pinResolved`、technique
+/// card自体を使わないaction）には技識別子が存在しないため、この場合は
+/// `null`を返す（呼び出し側は「決め技 不明」を表示し、推測しない）。
+String? combatV1PlayableTerminalFinishingTechniqueLabel(
+  CombatV1PlayableActionFeedback? latestFeedback,
+) {
+  final feedback = latestFeedback;
+  if (feedback == null) return null;
+  if (feedback.kind != CombatV1PlayableFeedbackKind.techniqueResolved) {
+    return null;
+  }
+  final name = feedback.actionDisplayName;
+  if (name == null) return null;
+  return feedback.isFinisher ? '$name (FINISHER)' : name;
+}
+
 /// recent log（compact list）用の1行summary。
 String combatV1PlayableFeedbackCompactLabel(
   CombatV1PlayableActionFeedback feedback, {

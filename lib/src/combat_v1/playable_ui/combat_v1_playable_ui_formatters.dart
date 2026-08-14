@@ -123,6 +123,22 @@ String combatV1PlayableActionKindLabel(CombatV1LegalActionKind kind) =>
       CombatV1LegalActionKind.endTurn => 'ターン終了',
     };
 
+/// Playable 2A-6「5章 Technique Identity Readability」——
+/// [CombatV1EnergyAttributeLabel.displayLabel]（打／関／投／飛／ラフ／＊）と
+/// 同じ`CombatV1EnergyAttribute`を、より読みやすいfull-wordへ変換する。
+/// 新しいcategorization・新しいdata fieldは一切追加しない——既存enum値を
+/// そのまま日本語のfull-wordへmapするだけの表示専用helper。
+String combatV1PlayableEnergyAttributeFullLabel(
+  CombatV1EnergyAttribute attribute,
+) => switch (attribute) {
+  CombatV1EnergyAttribute.strike => '打撃',
+  CombatV1EnergyAttribute.joint => '関節技',
+  CombatV1EnergyAttribute.throwing => '投げ技',
+  CombatV1EnergyAttribute.aerial => '飛び技',
+  CombatV1EnergyAttribute.rough => 'ラフファイト',
+  CombatV1EnergyAttribute.wild => 'ワイルド',
+};
+
 /// recent action 1件の要約label（design doc「45章 Action Feedback」「46章
 /// Recent Log」）。damage等をCore再計算せず、actor（YOU/CPU）＋action
 /// kindのみで表現する——CPUが使用したカードの表示名はhidden-safe

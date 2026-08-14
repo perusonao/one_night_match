@@ -291,45 +291,99 @@ void main() {
     });
   });
 
-  group('Technique使用とDiscardの明確な分離（7章）', () {
-    testWidgets('discard phaseのhand tileはDMG/HEAT/Energy/trait badgeを一切表示しない', (
-      tester,
-    ) async {
-      final snapshot = testSnapshot(
-        phase: CombatV1MatchPhase.discard,
-        isHumanInputRequired: true,
-        human: testHumanStatus(
-          hand: [
-            testTechniqueCard(
-              instanceId: 'h1',
-              technique: testFinisherTechnique,
-            ),
+  group('Technique使用とDiscardの明確な分離（7章）／Playable 2A-6「1・3章」', () {
+    // Review Findings（Playable 2A-6、実プレイテスト由来）: Playable
+    // 2A-5時点ではdiscard phaseのhand tileがDMG/HEAT/Energy/trait badgeを
+    // 一切出さない設計だったが、「情報が無さすぎて捨てるカードを比較
+    // できない」問題が判明した。そのため、Playable 2A-6でこれらを
+    // 「技として使う場合の参考情報」として復元した——ただし「捨てる」
+    // framing（別のverb label・色・selected文言）でTechnique compact
+    // tileとは視覚的・文言的に区別する（design doc Playable 2A-6追記
+    // 「1・3章」）。discard自体は手札の全カードが常にlegalであることは
+    // 変わらない。
+    testWidgets(
+      'discard phaseのhand tileは「捨てる」framingでcategory/Energy/DMG/trait '
+      'chipを参考情報として表示する',
+      (tester) async {
+        final snapshot = testSnapshot(
+          phase: CombatV1MatchPhase.discard,
+          isHumanInputRequired: true,
+          human: testHumanStatus(
+            hand: [
+              testTechniqueCard(
+                instanceId: 'h1',
+                technique: testFinisherTechnique,
+              ),
+            ],
+          ),
+          legalActions: const [
+            CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
           ],
-        ),
-        legalActions: const [
-          CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
-        ],
-      );
-      await tester.pumpWidget(
-        _wrap(_screen(FakePlayableMatchSession(snapshot))),
-      );
-      await tester.pump();
+        );
+        await tester.pumpWidget(
+          _wrap(_screen(FakePlayableMatchSession(snapshot))),
+        );
+        await tester.pump();
 
-      expect(
-        find.byKey(const Key('combat_v1_playable_card_energy_line')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const Key('combat_v1_playable_card_trait_badges')),
-        findsNothing,
-      );
-      expect(find.textContaining('DMG'), findsNothing);
-      // discard専用tile key（discardModeで描画されていることの直接証跡）。
-      expect(
-        find.byKey(const Key('combat_v1_playable_discard_hand_card_h1')),
-        findsOneWidget,
-      );
-    });
+        // discard専用tile key（discardModeで描画されていることの直接証跡）。
+        final tileFinder = find.byKey(
+          const Key('combat_v1_playable_discard_hand_card_h1'),
+        );
+        expect(tileFinder, findsOneWidget);
+        // 「捨てる」framing（Technique compact tileには存在しないlabel）。
+        expect(
+          find.descendant(
+            of: tileFinder,
+            matching: find.byKey(
+              const Key('combat_v1_playable_discard_card_verb_label'),
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: tileFinder,
+            matching: find.byKey(
+              const Key('combat_v1_playable_discard_card_energy_line'),
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: tileFinder,
+            matching: find.textContaining(
+              'DMG ${testFinisherTechnique.damage}',
+            ),
+          ),
+          findsOneWidget,
+        );
+        // 「技として使用可否」は捨てる可否とは無関係な参考情報として
+        // 明示される。
+        expect(
+          find.descendant(
+            of: tileFinder,
+            matching: find.byKey(
+              const Key(
+                'combat_v1_playable_discard_card_technique_usable_reference',
+              ),
+            ),
+          ),
+          findsOneWidget,
+        );
+        // Technique compact tile専用のusable icon key/trait badges keyは
+        // discard tileには存在しない（別のtile実装であることの証跡）。
+        expect(
+          find.descendant(
+            of: tileFinder,
+            matching: find.byKey(
+              const Key('combat_v1_playable_compact_card_usable_icon'),
+            ),
+          ),
+          findsNothing,
+        );
+      },
+    );
 
     testWidgets('discardカード選択で「捨てるカード」パネルが現れ、名前が一致する', (
       tester,
@@ -759,15 +813,18 @@ void main() {
               const Key('combat_v1_playable_action_technique'),
             );
             expect(buttonFinder, findsOneWidget);
-            await tester.ensureVisible(buttonFinder);
+            // Playable 2A-6「4章 Sticky Technique Action」——buttonは
+            // もはや`combat_v1_playable_technique_area_scroll`の内側
+            // ではなく、その外側（兄弟）に固定表示されるsticky footer
+            // （`_TechniqueStickyActionBar`）の中にある。そのため
+            // 「実際の画面viewport全体」に対してhit-testableであることを
+            // 確認する（scrollしなくても既に画面内にあるはず、design doc
+            // Playable 2A-6追記「4章」の中核要件）。
             await tester.pumpAndSettle();
-            final buttonViewportRect = tester.getRect(
-              find.byKey(
-                const Key('combat_v1_playable_technique_area_scroll'),
-              ),
-            );
+            final screenRect =
+                Offset.zero & (tester.view.physicalSize / tester.view.devicePixelRatio);
             final buttonRect = tester.getRect(buttonFinder);
-            final visibleButtonRect = buttonRect.intersect(buttonViewportRect);
+            final visibleButtonRect = buttonRect.intersect(screenRect);
             expect(visibleButtonRect.width, greaterThan(0));
             expect(visibleButtonRect.height, greaterThan(0));
             await tester.tapAt(visibleButtonRect.center);

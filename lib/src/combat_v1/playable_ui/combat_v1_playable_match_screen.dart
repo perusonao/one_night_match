@@ -358,57 +358,114 @@ class _CombatV1PlayableMatchScreenState
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Column(
                     children: [
-                      // Playable 2A-5「1章 最重要方針」——両wrestlerの
-                      // 背景状態（HP/KOC/PIN Cards等）をここへ隣接させて
-                      // まとめる。以前はHuman status panelがhand群の下部
-                      // （画面最下段近く）に独立して置かれ、Expandedへ
-                      // 割り当てられる高さを圧迫していた（「4章 Hand
-                      // Visibility」調査結果、`docs/design/
-                      // combat_v1_playable_match_ui.md`Playable 2A-5追記
-                      // 参照）。Tier 1（現在操作するTechnique hand）を
-                      // 常時スクロールなしで比較できるようにするため、
-                      // Tier優先度が相対的に低い「両者の背景ステータス」を
-                      // 画面上部へ集約し、Expandedへ渡す残り高さを増やす。
-                      _CpuStatusPanel(cpu: snapshot.cpu),
-                      _HumanStatusPanel(human: snapshot.human),
-                      _SharedStatusPanel(snapshot: snapshot),
-                      // Playable 2A-5「9章 Guidance / Direction / Result /
-                      // Logの圧縮」——Tier 3（Guidance）は常時表示のまま、
-                      // Tier 4（Direction/Latest Result/Recent Log）は
-                      // 既定で折りたたむ（`_ActorAndRecentPanel`参照）。
-                      // 責務・情報自体は削除しない——明示操作（トグル）で
-                      // 常に到達可能（design doc「70.10章」の到達可能性
-                      // 原則を維持）。
-                      _ActorAndRecentPanel(
-                        snapshot: snapshot,
-                        humanPlayerIndex: _humanPlayerIndex,
-                        cpuBusy: _cpuBusy,
-                      ),
-                      if (_submitErrorMessage != null)
-                        _ErrorBanner(message: _submitErrorMessage!),
+                      // Playable 2A-6 Review Findings Fix（Critical、
+                      // 4.2章）——以前は「両wrestlerの背景ステータス
+                      // （CPU/Human/Shared）＋Actor/Guidance/detail panel」
+                      // を外側`Column`の固定sizeな子として並べ、残りを
+                      // 1つの`Expanded`（hand＋詳細のscrollview＋固定
+                      // 技action footerの入れ子`Column`）へ渡していた。
+                      // この構成では、`_MatchGuidancePanel`（FINISHER
+                      // HEAT到達行）や`_ActorAndRecentPanel`の詳細展開
+                      // （「▼ 試合の詳細」）で固定部分の高さ予算が伸びる
+                      // と、`Expanded`に残る高さがどんどん減り、320×568
+                      // のような低height viewportではその内側の固定
+                      // footer（`_TechniqueStickyActionBar`）自身の高さ
+                      // すら収まらずRenderFlex overflowとなり、
+                      // overflow分がすぐ下の`_PrimaryActionsBar`（例:
+                      // 「ターン終了」）へ視覚的に重なってしまっていた。
+                      //
+                      // 修正: 「常に画面内に固定表示すべきaction bar
+                      // （技action footer／Stand Up・Rest・PIN・End
+                      // Turnのbottom bar）」以外——両wrestlerの背景
+                      // ステータス・Actor/Guidance/detail panel・hand＋
+                      // 選択technique詳細——をすべて1つの`Expanded`+
+                      // `SingleChildScrollView`へまとめる。こうすると
+                      // 外側`Column`は「固定sizeのbottom bar 2本を確保
+                      // したうえで、残りを丸ごとscrollviewへ渡す」という
+                      // 単純な1段構成になり、scrollviewだけが可変（0まで
+                      // 縮んでもscroll可能なためoverflowしない）で、両
+                      // bottom barは常に固定高さのまま重ならずに並ぶ
+                      // （到達可能性・「scrollしないと押せない」への
+                      // 後戻り、いずれも防ぐ——design doc「70.10章」）。
+                      // 情報の優先順位（Tier）自体は変わらない——単に
+                      // 極端な高さ不足時の逃がし先が「Expanded 1つ」から
+                      // 「そのExpandedの中身全体」へ広がるだけで、通常の
+                      // 画面高さでは以前と同じくscroll不要で全て収まる。
                       Expanded(
-                        child: IgnorePointer(
-                          ignoring: _cpuBusy,
-                          child: SingleChildScrollView(
-                            // Review Findings Fix（Minor、4.1章）——mobile
-                            // visibility testが、この領域の実際のclip
-                            // viewport（Expandedへ割り当てられた高さ）を
-                            // 正確に取得できるようにするためのkey。この
-                            // Viewport矩形こそが「実際に見えている範囲」
-                            // であり、画面全体のサイズをそのまま使うと
-                            // AppBar/他panelの分だけ広く見積もってしまう
-                            // （実際にはこの範囲外はscroll clipで見えない）。
-                            key: const Key(
-                              'combat_v1_playable_technique_area_scroll',
-                            ),
-                            child: _MatchBody(
-                              snapshot: snapshot,
-                              selectedCardInstanceId: _selectedCardInstanceId,
-                              onSelectCard: _onSelectCard,
-                              findAction: _findLegalAction,
-                              onSubmit: _submitAction,
-                            ),
+                        child: SingleChildScrollView(
+                          // Review Findings Fix（Minor、4.1章）
+                          // ——mobile visibility testが、この
+                          // 領域の実際のclip viewport（Expanded
+                          // へ割り当てられた高さ）を正確に取得
+                          // できるようにするためのkey。この
+                          // Viewport矩形こそが「実際に見えて
+                          // いる範囲」であり、画面全体のサイズ
+                          // をそのまま使うとAppBar/他panelの分
+                          // だけ広く見積もってしまう（実際には
+                          // この範囲外はscroll clipで見えない）。
+                          key: const Key(
+                            'combat_v1_playable_technique_area_scroll',
                           ),
+                          child: Column(
+                            children: [
+                              // Playable 2A-5「1章 最重要方針」——
+                              // 両wrestlerの背景状態（HP/KOC/PIN
+                              // Cards等）をここへ隣接させてまとめる
+                              // （「4章 Hand Visibility」調査結果、
+                              // `docs/design/
+                              // combat_v1_playable_match_ui.md`
+                              // Playable 2A-5追記参照）。CPU処理中も
+                              // 表示専用panelとして常に操作でき続ける
+                              // （Match Directionと同じ意図的な挙動、
+                              // 元々`_cpuBusy`のIgnorePointerの対象外
+                              // だったふるまいを維持する）。
+                              _CpuStatusPanel(cpu: snapshot.cpu),
+                              _HumanStatusPanel(human: snapshot.human),
+                              _SharedStatusPanel(snapshot: snapshot),
+                              // Playable 2A-5「9章 Guidance /
+                              // Direction / Result / Logの圧縮」——
+                              // Tier 3（Guidance）は常時表示のまま、
+                              // Tier 4（Direction/Latest
+                              // Result/Recent Log）は既定で折りたたむ
+                              // （`_ActorAndRecentPanel`参照）。
+                              // 責務・情報自体は削除しない——明示操作
+                              // （トグル）で常に到達可能（design doc
+                              // 「70.10章」の到達可能性原則を維持）。
+                              _ActorAndRecentPanel(
+                                snapshot: snapshot,
+                                humanPlayerIndex: _humanPlayerIndex,
+                                cpuBusy: _cpuBusy,
+                              ),
+                              if (_submitErrorMessage != null)
+                                _ErrorBanner(message: _submitErrorMessage!),
+                              // `_MatchBody`（hand選択／技詳細／discard
+                              // confirm）だけがCPU処理中に無効化される
+                              // 対象——`IgnorePointer`のscopeは元の
+                              // 実装と同じに保つ（上のstatus/actor panel
+                              // 群はここへ移す前から`_cpuBusy`の影響を
+                              // 受けていなかった）。
+                              IgnorePointer(
+                                ignoring: _cpuBusy,
+                                child: _MatchBody(
+                                  snapshot: snapshot,
+                                  selectedCardInstanceId:
+                                      _selectedCardInstanceId,
+                                  onSelectCard: _onSelectCard,
+                                  findAction: _findLegalAction,
+                                  onSubmit: _submitAction,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      IgnorePointer(
+                        ignoring: _cpuBusy,
+                        child: _TechniqueStickyActionBar(
+                          snapshot: snapshot,
+                          selectedCardInstanceId: _selectedCardInstanceId,
+                          findAction: _findLegalAction,
+                          onSubmit: _submitAction,
                         ),
                       ),
                       IgnorePointer(
@@ -1152,6 +1209,14 @@ class _MatchDirectionPanel extends StatelessWidget {
 /// （design doc「Result Feedbackの情報階層」）を視覚的にも区別する
 /// ——ただし色だけに依存しない（文言自体が既に事実を明示している、
 /// 18章「Accessibility Semantics」）。
+///
+/// Playable 2A-6「6-7章 Technique Execution Feedback」——primary文言
+/// 自体（「actor — 技名 — DAMAGE」の順序、`combatV1PlayableDeriveMatchFeedback`
+/// が既に確定済み）は変更しない。「一目でactor・技名・結果が読める」
+/// ことをfont weight/強調stateだけで底上げする（新しいderivationは
+/// 行わない）——DOWNへ移行した事実（`feedback.postureBefore/After`、
+/// 既存field）がある場合のみ、secondary文言と重複しない補助badgeとして
+/// 明示する（推測で作らない、実際に観測されたposture差分のみを見る）。
 class _LatestFeedbackBanner extends StatelessWidget {
   const _LatestFeedbackBanner({
     super.key,
@@ -1170,9 +1235,20 @@ class _LatestFeedbackBanner extends StatelessWidget {
     );
     final isHuman = feedback.actorPlayerIndex == humanPlayerIndex;
     final color = isHuman ? _pink : _gold;
+    final isDecisive =
+        result.severity == CombatV1PlayableFeedbackSeverity.matchDecisive;
     final emphasized =
-        result.severity == CombatV1PlayableFeedbackSeverity.matchDecisive ||
+        isDecisive ||
         result.severity == CombatV1PlayableFeedbackSeverity.majorStateChange;
+    // Playable 2A-6「6-7章」——実際に観測されたposture差分（`feedback`
+    // 自身のfield）からのみDOWN badgeを出す。fabricateしない
+    // ——Counter'd attackはそもそも`postureBefore`/`postureAfter`を
+    // 一切設定しないため（`_buildFeedback` case counter参照）、この
+    // badgeは自動的に出ない。
+    final becameDown =
+        feedback.postureBefore != null &&
+        feedback.postureBefore != CombatV1WrestlerPosture.down &&
+        feedback.postureAfter == CombatV1WrestlerPosture.down;
     return Container(
       key: const Key('combat_v1_playable_latest_feedback_banner'),
       width: double.infinity,
@@ -1188,15 +1264,29 @@ class _LatestFeedbackBanner extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(
-            result.primary,
-            key: const Key('combat_v1_playable_latest_feedback_primary'),
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 6,
+            runSpacing: 2,
+            children: [
+              Text(
+                result.primary,
+                key: const Key('combat_v1_playable_latest_feedback_primary'),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  // Playable 2A-6「6-7章」——severityが高いほど、一目で
+                  // 目に入るようfont weight/sizeを底上げする（新しい
+                  // derivationではなく、既に確定済みのTierを表示スタイル
+                  // へ機械的にmapするだけ）。
+                  fontSize: isDecisive ? 15 : 14,
+                  fontWeight: isDecisive ? FontWeight.w900 : FontWeight.bold,
+                  color: color,
+                ),
+              ),
+              if (becameDown)
+                const _MiniBadge(label: 'DOWN', color: _healthError),
+            ],
           ),
           if (result.secondary != null)
             Padding(
@@ -1295,6 +1385,7 @@ class _MatchBody extends StatelessWidget {
           onSelectCard: onSelectCard,
           findAction: findAction,
           onSubmit: onSubmit,
+          submissionHpThreshold: snapshot.submissionHpThreshold,
         ),
       );
     }
@@ -1304,8 +1395,6 @@ class _MatchBody extends StatelessWidget {
         snapshot: snapshot,
         selectedCardInstanceId: selectedCardInstanceId,
         onSelectCard: onSelectCard,
-        findAction: findAction,
-        onSubmit: onSubmit,
       ),
     );
   }
@@ -1322,15 +1411,11 @@ class _TechniqueSelectionArea extends StatelessWidget {
     required this.snapshot,
     required this.selectedCardInstanceId,
     required this.onSelectCard,
-    required this.findAction,
-    required this.onSubmit,
   });
 
   final CombatV1PlayableMatchSnapshot snapshot;
   final String? selectedCardInstanceId;
   final ValueChanged<String> onSelectCard;
-  final _FindLegalAction findAction;
-  final ValueChanged<CombatV1LegalAction> onSubmit;
 
   @override
   Widget build(BuildContext context) {
@@ -1366,11 +1451,6 @@ class _TechniqueSelectionArea extends StatelessWidget {
             finisherHeatThreshold: snapshot.finisherHeatThreshold,
             availableEnergy: snapshot.human.availableEnergy,
             submissionHpThreshold: snapshot.submissionHpThreshold,
-            action: findAction(
-              CombatV1LegalActionKind.technique,
-              cardInstanceId: selectedCard.instanceId,
-            ),
-            onSubmit: onSubmit,
           ),
       ],
     );
@@ -1378,10 +1458,18 @@ class _TechniqueSelectionArea extends StatelessWidget {
 }
 
 /// Playable 2A-5「5章 Technique Selection → Action」——カードを選んだら
-/// そのTechniqueの近く（handのすぐ下）で最終操作できるようにする。
+/// そのTechniqueの近く（handのすぐ下）で詳細を確認できるようにする。
 /// 「使用可能／不可能」は`card.isUsable`（LegalAction SSOTからそのまま
 /// 導出済み、`combat_v1_playable_match_controller.dart`参照）をそのまま
 /// 表示するだけで、ここでlegalityを再計算しない。
+///
+/// Playable 2A-6「4章 Sticky Technique Action」——「技を使う」button
+/// 自体はこのpanelから`_TechniqueStickyActionBar`（scrollしない固定
+/// footer）へ移した。このpanelはscrollする詳細情報（badge/DMG/Energy/
+/// posture/使用可否理由）のみを担当する——scroll可能領域の末尾まで
+/// scrollしないと使用buttonへ到達できなかった問題（design doc Playable
+/// 2A-6追記「4章」）を、button自体を常時可視な領域へ切り離すことで解決
+/// する。
 class _SelectedTechniquePanel extends StatelessWidget {
   const _SelectedTechniquePanel({
     required this.card,
@@ -1389,8 +1477,6 @@ class _SelectedTechniquePanel extends StatelessWidget {
     required this.finisherHeatThreshold,
     required this.availableEnergy,
     required this.submissionHpThreshold,
-    required this.action,
-    required this.onSubmit,
   });
 
   final CombatV1PlayableHandCard card;
@@ -1398,12 +1484,6 @@ class _SelectedTechniquePanel extends StatelessWidget {
   final int finisherHeatThreshold;
   final Map<CombatV1EnergyAttribute, int> availableEnergy;
   final int submissionHpThreshold;
-
-  /// `null`＝現在このカードのTechnique actionはlegalActions（SSOT）に
-  /// 存在しない——`card.isUsable`と矛盾する場合はbuttonをdisabledのまま
-  /// にする防御的扱い（新しいlegality判定は作らない）。
-  final CombatV1LegalAction? action;
-  final ValueChanged<CombatV1LegalAction> onSubmit;
 
   @override
   Widget build(BuildContext context) {
@@ -1471,41 +1551,10 @@ class _SelectedTechniquePanel extends StatelessWidget {
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
-          _TechniqueTraitBadges(
+          _TechniqueFactsBlock(
             technique: technique,
             submissionHpThreshold: submissionHpThreshold,
           ),
-          Text(
-            '${technique.attribute.displayLabel} DMG ${technique.damage} '
-            'HEAT ${technique.heatGain}',
-            style: const TextStyle(fontSize: 13),
-          ),
-          if (technique.requiredOpponentState != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                combatV1PlayableRequiredOpponentStateLabel(
-                  technique.requiredOpponentState!,
-                ),
-                key: const Key('combat_v1_playable_card_required_posture'),
-                style: const TextStyle(fontSize: 11, color: Colors.white54),
-              ),
-            ),
-          if (technique.resultOpponentState != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                combatV1PlayableOpponentResultStateLabel(
-                  technique.resultOpponentState!,
-                ),
-                key: const Key('combat_v1_playable_card_result_posture'),
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Colors.white70,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
           const SizedBox(height: 8),
           _SelectedTechniqueEnergyBlock(
             technique: technique,
@@ -1543,22 +1592,82 @@ class _SelectedTechniquePanel extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: _ActionButton(
-              key: const Key('combat_v1_playable_action_technique'),
-              label: combatV1PlayableActionKindLabel(
-                CombatV1LegalActionKind.technique,
-              ),
-              onPressed: (disabled || action == null)
-                  ? null
-                  : () => onSubmit(action!),
-              primary: true,
-            ),
-          ),
         ],
       ),
+    );
+  }
+}
+
+/// Playable 2A-6「1・3・5章」——`_SelectedTechniquePanel`（Technique
+/// 選択時の詳細）と、discard確認panel（`_DiscardConfirmPanel`「捨てる
+/// カードの詳細」）が共通して必要とする「技の事実情報」（trait badge・
+/// 属性full-word・DMG/HEAT・必要/結果posture）を1箇所へ集約する——両者で
+/// 同じ情報行を重複実装しない（design doc Playable 2A-6追記「1章 Discard
+/// UX」で明示された再利用方針）。legality判定・damage計算は一切行わない
+/// ——既存`_TechniqueTraitBadges`・`combatV1Playable*Label`群が確定した
+/// 値をそのまま並べるだけ。
+class _TechniqueFactsBlock extends StatelessWidget {
+  const _TechniqueFactsBlock({
+    required this.technique,
+    required this.submissionHpThreshold,
+  });
+
+  final CombatV1Technique technique;
+  final int? submissionHpThreshold;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _TechniqueTraitBadges(
+          technique: technique,
+          submissionHpThreshold: submissionHpThreshold,
+        ),
+        // Playable 2A-6「5章 Technique Identity Readability」——短縮形
+        // （打／関／投／飛／ラフ）だけでなく、full-wordも並べて示す
+        // （新しいcategorizationは作らない、既存enum値のfull-word表示）。
+        Text(
+          combatV1PlayableEnergyAttributeFullLabel(technique.attribute),
+          key: const Key('combat_v1_playable_technique_attribute_full_label'),
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Colors.white70,
+          ),
+        ),
+        Text(
+          '${technique.attribute.displayLabel} DMG ${technique.damage} '
+          'HEAT ${technique.heatGain}',
+          style: const TextStyle(fontSize: 13),
+        ),
+        if (technique.requiredOpponentState != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              combatV1PlayableRequiredOpponentStateLabel(
+                technique.requiredOpponentState!,
+              ),
+              key: const Key('combat_v1_playable_card_required_posture'),
+              style: const TextStyle(fontSize: 11, color: Colors.white54),
+            ),
+          ),
+        if (technique.resultOpponentState != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              combatV1PlayableOpponentResultStateLabel(
+                technique.resultOpponentState!,
+              ),
+              key: const Key('combat_v1_playable_card_result_posture'),
+              style: const TextStyle(
+                fontSize: 11,
+                color: Colors.white70,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -1646,13 +1755,14 @@ class _EnergyCompareRow extends StatelessWidget {
   }
 }
 
-/// Playable 2A-5「7章 Technique使用とDiscardを明確に分離」——discard
-/// phase専用のarea。既存Core semantics調査結果（`combat_v1_legal_
-/// action_enumerator.dart` `_enumerateDiscard`）どおり、手札の全カードが
-/// 常に`CombatV1DiscardAction`としてlegal（＝discard対象として選べる）
-/// であり、技としての使用可否とは無関係——そのため`_HandCardTile`を
-/// discardMode（`discardMode: true`）で描画し、DMG/HEAT/Energy/使用可否
-/// といったTechnique文脈の情報を一切出さない（「捨てるカードを選ぶ」と
+/// Playable 2A-5「7章 Technique使用とDiscardを明確に分離」／Playable
+/// 2A-6「1章 Discard UX」——discard phase専用のarea。既存Core semantics
+/// 調査結果（`combat_v1_legal_action_enumerator.dart`
+/// `_enumerateDiscard`）どおり、手札の全カードが常に
+/// `CombatV1DiscardAction`としてlegal（＝discard対象として選べる）で
+/// あり、技としての使用可否とは無関係——そのため`_HandCardTile`を
+/// discardMode（`discardMode: true`）で描画し、「捨てる」framingで
+/// Technique modeと視覚的・文言的に区別する（「捨てるカードを選ぶ」と
 /// 「技を選ぶ」を混同させないため、design doc Playable 2A-5追記
 /// 「7章」）。
 class _DiscardSelectionArea extends StatelessWidget {
@@ -1662,6 +1772,7 @@ class _DiscardSelectionArea extends StatelessWidget {
     required this.onSelectCard,
     required this.findAction,
     required this.onSubmit,
+    required this.submissionHpThreshold,
   });
 
   final List<CombatV1PlayableHandCard> hand;
@@ -1669,6 +1780,11 @@ class _DiscardSelectionArea extends StatelessWidget {
   final ValueChanged<String> onSelectCard;
   final _FindLegalAction findAction;
   final ValueChanged<CombatV1LegalAction> onSubmit;
+
+  /// Playable 2A-6「1章」——「捨てるカードの詳細」panelが
+  /// `_TechniqueFactsBlock`（trait badgeのTooltip）を再利用するために
+  /// 必要な、公開済みのrule定数（`snapshot.submissionHpThreshold`）。
+  final int submissionHpThreshold;
 
   @override
   Widget build(BuildContext context) {
@@ -1708,6 +1824,7 @@ class _DiscardSelectionArea extends StatelessWidget {
         if (selectedCard != null)
           _DiscardConfirmPanel(
             card: selectedCard,
+            submissionHpThreshold: submissionHpThreshold,
             action: findAction(
               CombatV1LegalActionKind.discard,
               cardInstanceId: selectedCard.instanceId,
@@ -1719,21 +1836,35 @@ class _DiscardSelectionArea extends StatelessWidget {
   }
 }
 
-/// Playable 2A-5「7章」——「捨てるカード: X」→「このカードを捨てて技を
-/// 使う」ではなく（discard phaseはTechniqueの追加コストではなく独立した
-/// フェーズのため、8章の実例をそのまま実装しない）、「捨てるカード」を
-/// 明示したうえで確定操作のみを提供する。別のカードをtapすると選択が
-/// 切り替わる（`_onSelectCard`が既に持つtoggle/switch挙動をそのまま
+/// Playable 2A-5「7章」／Playable 2A-6「1章 Discard UX」——「捨てるカード:
+/// X」→「このカードを捨てて技を使う」ではなく（discard phaseは
+/// Techniqueの追加コストではなく独立したフェーズのため、8章の実例を
+/// そのまま実装しない）、「捨てるカード」を明示したうえで確定操作のみを
+/// 提供する（「技を使う」style buttonは出さない）。別のカードをtapすると
+/// 選択が切り替わる（`_onSelectCard`が既に持つtoggle/switch挙動をそのまま
 /// 使う）ため、専用の「変更する」buttonは追加しない。
+///
+/// Playable 2A-6「1章」——確定buttonの前に「捨てるカードの詳細」panel
+/// を追加した。`_SelectedTechniquePanel`が使う情報行
+/// （`_TechniqueFactsBlock`：trait badge・属性full-word・DMG/HEAT・
+/// 必要/結果posture）をそのまま再利用し、重複実装しない。
 class _DiscardConfirmPanel extends StatelessWidget {
-  const _DiscardConfirmPanel({required this.card, required this.action, required this.onSubmit});
+  const _DiscardConfirmPanel({
+    required this.card,
+    required this.submissionHpThreshold,
+    required this.action,
+    required this.onSubmit,
+  });
 
   final CombatV1PlayableHandCard card;
+  final int submissionHpThreshold;
   final CombatV1LegalAction? action;
   final ValueChanged<CombatV1LegalAction> onSubmit;
 
   @override
   Widget build(BuildContext context) {
+    final technique = card.technique;
+    final counter = card.counter;
     return Container(
       key: const Key('combat_v1_playable_discard_confirm_panel'),
       width: double.infinity,
@@ -1756,7 +1887,65 @@ class _DiscardConfirmPanel extends StatelessWidget {
             key: const Key('combat_v1_playable_discard_selected_card_name'),
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
+          Container(
+            key: const Key('combat_v1_playable_discard_card_detail'),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.black26,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '捨てるカードの詳細',
+                  style: TextStyle(fontSize: 11, color: Colors.white54),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  combatV1PlayableCategoryLabel(card.category),
+                  style: const TextStyle(fontSize: 12, color: Colors.white70),
+                ),
+                if (technique != null) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      // Playable 2A-6「1章」——「category/DMG/Energy/
+                      // traits/posture」のうちEnergyは`_TechniqueFactsBlock`
+                      // が持たない（Technique使用時の必要/現在Energy比較
+                      // ＝`_SelectedTechniqueEnergyBlock`はTechnique
+                      // 使用可否の文脈専用のため、discard詳細では必要
+                      // Energyのみを示す既存`combatV1PlayableEnergyCostLabel`
+                      // をそのまま使う）。
+                      '必要Energy: '
+                      '${combatV1PlayableEnergyCostLabel(technique.energyCost.amounts)}',
+                      key: const Key(
+                        'combat_v1_playable_discard_card_energy_cost_line',
+                      ),
+                      style: const TextStyle(fontSize: 12, color: Colors.white70),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: _TechniqueFactsBlock(
+                      technique: technique,
+                      submissionHpThreshold: submissionHpThreshold,
+                    ),
+                  ),
+                ] else if (counter != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Cost属性 ${counter.attribute.displayLabel}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
           const Text(
             '別のカードをタップすると変更できます',
             style: TextStyle(fontSize: 11, color: Colors.white38),
@@ -1916,11 +2105,16 @@ class _HandRow extends StatelessWidget {
   /// Tooltip文言に使う、公開済みのrule定数（`snapshot.submissionHpThreshold`）。
   final int? submissionHpThreshold;
 
-  /// Playable 2A-5「7章」——discard phase専用の表示modeへ切り替える。
-  /// `true`の場合、`_HandCardTile`はDMG/HEAT/Energy/使用可否といった
-  /// Technique文脈の情報を一切出さない（discard phaseでは手札の全カード
-  /// が常にdiscard対象としてlegalであり、技としての使用可否とは無関係
-  /// なため——「捨てるカードを選ぶ」と「技を選ぶ」を混同させない）。
+  /// Playable 2A-5「7章」／Playable 2A-6「1章 Discard UX」——discard
+  /// phase専用の表示modeへ切り替える。`true`の場合、`_HandCardTile`は
+  /// 「捨てる」framing（別のverb label・色）で描画される。Playable 2A-5
+  /// 時点ではTechnique文脈の情報（DMG/Energy/trait）を一切出さない設計
+  /// だったが、実プレイテストで「情報が無さすぎて比較できない」問題が
+  /// 判明したため、Playable 2A-6でCategory/必要Energy/DMG/主要trait
+  /// chipを「技として使う場合の参考情報」として復元した——ただし
+  /// 「技として使用可否」はdiscard自体の可否とは無関係であることを
+  /// 明示し（discard phaseは手札の全カードが常にdiscard対象として
+  /// legal）、「捨てるカードを選ぶ」と「技を選ぶ」の混同は引き続き防ぐ。
   final bool discardMode;
 
   @override
@@ -1931,83 +2125,42 @@ class _HandRow extends StatelessWidget {
         child: Text('手札がありません', style: TextStyle(color: Colors.white38)),
       );
     }
-    if (!discardMode) {
-      // Playable 2A-5 Review Findings Fix「2〜4章 Hand Comparison」——
-      // 初期5枚のTechnique handを横scroll無しで比較できるようにする。
-      // 268px幅カードの横scroll listだった旧実装は、320〜390px幅では
-      // 同時に2枚程度しか見えず、5枚を比較するために必ずscrollが必要
-      // だった。`Wrap`で折り返す固定幅compact card
-      // （`_HandCardTile(compactMode: true)`）へ置き換え、詳細
-      // （DMG/HEAT/trait/posture/使用不可理由）は選択後に現れる
-      // `_SelectedTechniquePanel`（`_TechniqueSelectionArea`側）が担当
-      // する——「一覧＝比較」「詳細＝判断確認」の責務分離（design doc
-      // Playable 2A-5 Review Findings Fix追記参照）。discard phaseは
-      // 元々カード枚数が少なく、Technique文脈の情報を持たない簡潔な
-      // tileのため、既存の横scroll listのまま維持する（6章「Do Not
-      // Regress Play vs Discard」——discard UXを流用・変更しない）。
-      return Wrap(
-        key: const Key('combat_v1_playable_human_hand'),
-        spacing: 6,
-        runSpacing: 6,
-        children: [
-          for (final card in hand)
-            _HandCardTile(
-              key: ValueKey(
-                'combat_v1_playable_hand_card_${card.instanceId}',
-              ),
-              card: card,
-              selected: card.instanceId == selectedCardInstanceId,
-              onTap: () => onSelectCard(card.instanceId),
-              sharedHeat: sharedHeat,
-              finisherHeatThreshold: finisherHeatThreshold,
-              availableEnergy: availableEnergy,
-              submissionHpThreshold: submissionHpThreshold,
-              compactMode: true,
-            ),
-        ],
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    // Playable 2A-5 Review Findings Fix「2〜4章 Hand Comparison」——
+    // 初期5枚のTechnique handを横scroll無しで比較できるようにする。
+    // 268px幅カードの横scroll listだった旧実装は、320〜390px幅では
+    // 同時に2枚程度しか見えず、5枚を比較するために必ずscrollが必要
+    // だった。`Wrap`で折り返す固定幅compact card
+    // （`_HandCardTile(compactMode: true)`）へ置き換え、詳細
+    // （DMG/HEAT/trait/posture/使用不可理由）は選択後に現れる
+    // `_SelectedTechniquePanel`（`_TechniqueSelectionArea`側）が担当
+    // する——「一覧＝比較」「詳細＝判断確認」の責務分離（design doc
+    // Playable 2A-5 Review Findings Fix追記参照）。
+    //
+    // Playable 2A-6「1章 Discard UX」——discard phaseも同じ
+    // `Wrap`パターンへ揃える。以前は横scroll `ListView`のままだった
+    // （Playable 2A-5では「discard UXを流用・変更しない」方針だった）が、
+    // 実プレイテストで「捨てる候補を比較しにくい」問題が新たに判明した
+    // ため、5枚を横scroll無しで比較できるcompactな`Wrap`表示へ変更する
+    // （`_HandCardTile._buildDiscardMode`側でTechnique modeとは異なる
+    // 「捨てる」framingを明示し、混同を防ぐ）。
+    return Wrap(
+      key: const Key('combat_v1_playable_human_hand'),
+      spacing: 6,
+      runSpacing: 6,
       children: [
-        // Playable 1C「Horizontal Hand Cue」——discard phaseのみ、右側の
-        // カードを見落としやすいため小さなscroll cueを添える
-        // （Technique modeはPlayable 2A-5 Review Findings Fixで横scroll
-        // 自体が不要になったため、discardModeの場合のみ表示する）。
-        if (hand.length > 1)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 4),
-            child: Text(
-              '→ 横にスクロールできます',
-              key: Key('combat_v1_playable_hand_scroll_hint'),
-              style: TextStyle(fontSize: 10, color: Colors.white38),
-            ),
+        for (final card in hand)
+          _HandCardTile(
+            key: ValueKey('combat_v1_playable_hand_card_${card.instanceId}'),
+            card: card,
+            selected: card.instanceId == selectedCardInstanceId,
+            onTap: () => onSelectCard(card.instanceId),
+            sharedHeat: sharedHeat,
+            finisherHeatThreshold: finisherHeatThreshold,
+            availableEnergy: availableEnergy,
+            submissionHpThreshold: submissionHpThreshold,
+            discardMode: discardMode,
+            compactMode: !discardMode,
           ),
-        SizedBox(
-          height: 108,
-          child: ListView.separated(
-            key: const Key('combat_v1_playable_human_hand'),
-            scrollDirection: Axis.horizontal,
-            itemCount: hand.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              final card = hand[index];
-              return _HandCardTile(
-                key: ValueKey(
-                  'combat_v1_playable_hand_card_${card.instanceId}',
-                ),
-                card: card,
-                selected: card.instanceId == selectedCardInstanceId,
-                onTap: () => onSelectCard(card.instanceId),
-                sharedHeat: sharedHeat,
-                finisherHeatThreshold: finisherHeatThreshold,
-                availableEnergy: availableEnergy,
-                submissionHpThreshold: submissionHpThreshold,
-                discardMode: discardMode,
-              );
-            },
-          ),
-        ),
       ],
     );
   }
@@ -2288,29 +2441,45 @@ class _HandCardTile extends StatelessWidget {
     );
   }
 
-  /// Playable 2A-5「7章 Technique使用とDiscardを明確に分離」——discard
-  /// phase専用の簡略tile。DMG/HEAT/Energy/trait badge/使用可否といった
-  /// 「技として使えるか」の情報を一切出さない——discard phaseでは
-  /// それらが無関係（手札の全カードが常にdiscard対象としてlegal）で
-  /// あるうえ、それらを見せてしまうと「技を選んでいる」ように誤解
-  /// させる（design doc Playable 2A-5追記「7章」）。
+  /// Playable 2A-5「7章 Technique使用とDiscardを明確に分離」／Playable
+  /// 2A-6「1章 Discard UX」——discard phase専用のcompact tile。
+  ///
+  /// Playable 2A-5時点ではDMG/HEAT/Energy/trait badge/使用可否を一切
+  /// 出さない設計だったが、実プレイテストで「情報が無さすぎて、捨てる
+  /// カードを比較できない」問題が判明した（design doc Playable 2A-6
+  /// 追記「3章」）。そのため、`_buildCompactMode`と同じ`_compactPrimaryTrait`
+  /// を再利用しつつ、category/必要Energy/DMG/主要trait chipを表示する
+  /// ——ただし「技として使う場合の参考情報」であることを明示し、
+  /// 「捨てる」framing（verb label・色・selected文言）で終始
+  /// `_buildCompactMode`（Technique用）と視覚的・文言的に区別する
+  /// （色だけに依存しない、18章「Accessibility / Semantics」と同じ
+  /// 方針）。
+  ///
+  /// `card.isUsable`をここでも参照するが、これは「捨てられるか」では
+  /// なく「（参考として）現在Technique actionとしても legal か」を示す
+  /// だけ——discard自体は手札の全カードが常にlegal（`combat_v1_legal_
+  /// action_enumerator.dart` `_enumerateDiscard`）なので、新しいlegality
+  /// 判定を作らずSSOTをそのまま読むだけで安全に表示できる。
   Widget _buildDiscardMode(BuildContext context) {
+    final technique = card.technique;
+    final counter = card.counter;
+    final trait = technique == null ? null : _compactPrimaryTrait(technique);
     return Semantics(
       button: true,
       selected: selected,
       label: '${card.displayName}を捨てる',
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         child: Container(
           key: Key(
             'combat_v1_playable_discard_hand_card_${card.instanceId}',
           ),
-          width: 134,
-          padding: const EdgeInsets.all(8),
+          width: 96,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           decoration: BoxDecoration(
             color: _cardSurface,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: selected ? _gold : Colors.white24,
               width: selected ? 2 : 1,
@@ -2318,33 +2487,92 @@ class _HandCardTile extends StatelessWidget {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Playable 2A-6「1章」——「捨てる」framingを明示するlabel。
+              // Technique compact tileには存在しない行のため、tap前でも
+              // 一目で「これはdiscard用tileだ」と区別できる（色だけに
+              // 頼らない）。
+              const Text(
+                '捨てる',
+                key: Key('combat_v1_playable_discard_card_verb_label'),
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: _gold,
+                ),
+              ),
               Text(
                 card.displayName,
-                maxLines: 3,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
-                  fontSize: 13,
+                  fontSize: 11,
                 ),
               ),
-              const SizedBox(height: 2),
               Text(
                 combatV1PlayableCategoryLabel(card.category),
-                style: const TextStyle(fontSize: 10, color: Colors.white38),
+                style: const TextStyle(fontSize: 9, color: Colors.white38),
               ),
+              if (technique != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  combatV1PlayableEnergyCostLabel(
+                    technique.energyCost.amounts,
+                  ),
+                  key: const Key('combat_v1_playable_discard_card_energy_line'),
+                  style: const TextStyle(fontSize: 10, color: Colors.white70),
+                ),
+                Text(
+                  'DMG ${technique.damage}',
+                  style: const TextStyle(fontSize: 9, color: Colors.white54),
+                ),
+                if (trait != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: _MiniBadge(label: trait.label, color: trait.color),
+                  ),
+              ] else if (counter != null) ...[
+                const SizedBox(height: 3),
+                const Text(
+                  'COUNTER',
+                  style: TextStyle(fontSize: 9, color: Colors.white70),
+                ),
+              ],
+              if (technique != null || counter != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Tooltip(
+                    // Playable 2A-6「1章」——discard自体は常にlegalで
+                    // あり、この行が示すのはあくまで「技として使う場合」
+                    // の参考情報であることを明示する（discard可否とは
+                    // 無関係）。
+                    message:
+                        'このカードを技として使用できるかの参考情報です。'
+                        '捨てる操作自体は常に選べます',
+                    child: Text(
+                      '技として使用: ${card.isUsable ? '可' : '不可'}',
+                      key: const Key(
+                        'combat_v1_playable_discard_card_technique_usable_reference',
+                      ),
+                      style: const TextStyle(
+                        fontSize: 8,
+                        color: Colors.white38,
+                      ),
+                    ),
+                  ),
+                ),
               if (selected)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6),
+                  padding: const EdgeInsets.only(top: 4),
                   child: Text(
                     '捨てるカードとして選択中',
                     key: const Key(
                       'combat_v1_playable_discard_card_selected_marker',
                     ),
                     style: const TextStyle(
-                      fontSize: 10,
+                      fontSize: 9,
                       fontWeight: FontWeight.bold,
                       color: _gold,
                     ),
@@ -2406,6 +2634,18 @@ class _HandCardTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 if (technique != null) ...[
+                  // Playable 2A-6「5章 Technique Identity Readability」
+                  // ——短縮形（打／関／投／飛／ラフ、Energy行の中に埋め
+                  // 込まれている）だけでなく、その技の種類をfull-wordで
+                  // 明示する。新しいcategorizationは追加しない（既存
+                  // `CombatV1EnergyAttribute`のfull-word表示のみ）。
+                  Text(
+                    combatV1PlayableEnergyAttributeFullLabel(
+                      technique.attribute,
+                    ),
+                    key: const Key('combat_v1_playable_compact_card_attribute'),
+                    style: const TextStyle(fontSize: 9, color: Colors.white54),
+                  ),
                   Row(
                     children: [
                       Expanded(
@@ -2651,12 +2891,123 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
-/// Playable 2A-5「5・7章」——Technique使用（「技を使う」）とdiscard
-/// （「手札を捨てる」）は、いずれもカード選択と一体のinline panel
-/// （`_SelectedTechniquePanel`／`_DiscardConfirmPanel`、hand直下）へ
-/// 移動したため、この下部barはカード選択と無関係な行動（Stand Up/
-/// Rest/PIN/End Turn）のみを扱う——「カードを選ぶ／選ばない」に
-/// 依存しない行動だけがここに残る。
+/// Playable 2A-6「4章 Sticky Technique Action」——Technique選択時の
+/// 「技を使う」action（またはそのdisabled状態＋理由）を、scrollしても
+/// 必ず画面内へ残る固定footerとして提供する。
+///
+/// 経緯（design doc Playable 2A-6追記「4章」）: 以前は同じbuttonが
+/// `_SelectedTechniquePanel`（`_TechniqueSelectionArea`側、hand＋詳細と
+/// 同じscroll領域内）の末尾にあり、hand（`Wrap`、可変行数）＋詳細panelが
+/// 短い画面で画面内へ収まりきらない場合、buttonへ到達するために
+/// scrollが必要だった。この widget は`_TechniqueSelectionArea`を包む
+/// `SingleChildScrollView`の**外側**（同じ`Expanded`領域内の兄弟）に
+/// 置かれるため、常にvisible/hit-testableになる。
+///
+/// `_PrimaryActionsBar`（Stand Up/Rest/PIN/End Turn専用）とは意図的に
+/// 統合しない——2A-5でTechnique使用とその他の行動を分離した設計判断
+/// （「カードを選ぶ／選ばない」に依存する行動と依存しない行動を分ける）を
+/// 維持する。legality判定は一切行わない——`card.isUsable`／
+/// `findAction`（LegalAction SSOT）をそのまま読むだけ。
+class _TechniqueStickyActionBar extends StatelessWidget {
+  const _TechniqueStickyActionBar({
+    required this.snapshot,
+    required this.selectedCardInstanceId,
+    required this.findAction,
+    required this.onSubmit,
+  });
+
+  final CombatV1PlayableMatchSnapshot snapshot;
+  final String? selectedCardInstanceId;
+  final _FindLegalAction findAction;
+  final ValueChanged<CombatV1LegalAction> onSubmit;
+
+  /// `_TechniqueSelectionArea`が実際にrenderされる条件
+  /// （`_MatchBody._isDown`/`_isDiscardPhase`と同じ判定）と一致させる
+  /// ——Technique選択panel自体が表示されない局面（DOWN／discard／CPU
+  /// 手番／Counter応答）ではこのbuttonも出さない。
+  bool get _isTechniquePhase =>
+      snapshot.isHumanInputRequired &&
+      snapshot.phase == CombatV1MatchPhase.action &&
+      snapshot.human.posture != CombatV1WrestlerPosture.down;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isTechniquePhase) return const SizedBox.shrink();
+    final instanceId = selectedCardInstanceId;
+    if (instanceId == null) return const SizedBox.shrink();
+    final card = _firstWhereOrNull(
+      snapshot.human.hand,
+      (c) => c.instanceId == instanceId,
+    );
+    final technique = card?.technique;
+    // COUNTERカードが選択されている場合（`_SelectedTechniquePanel`が
+    // 用途説明のみを表示するcase）はTechnique buttonを出さない——
+    // COUNTERは相手の技への応答専用のため（既存`_handCardDisabledMessage`
+    // と同じ理由）。
+    if (card == null || technique == null) return const SizedBox.shrink();
+
+    final disabled = !card.isUsable;
+    final action = findAction(
+      CombatV1LegalActionKind.technique,
+      cardInstanceId: card.instanceId,
+    );
+    final reason = disabled
+        ? _handCardDisabledMessage(
+            card,
+            sharedHeat: snapshot.sharedHeat,
+            finisherHeatThreshold: snapshot.finisherHeatThreshold,
+            availableEnergy: snapshot.human.availableEnergy,
+          )
+        : null;
+
+    return Container(
+      key: const Key('combat_v1_playable_technique_sticky_action_bar'),
+      width: double.infinity,
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (reason != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                // Playable 2A-6「4章」——disabled理由をbutton直上へ明示
+                // する（例:「使用できません\nEnergyが不足しています\n
+                // 必要 3 / 現在 2」に相当する情報——具体的な理由文言
+                // 自体は既存`_handCardDisabledMessage`のSSOTをそのまま
+                // 使い、新しい理由判定は作らない）。
+                '使用できません\n$reason',
+                key: const Key(
+                  'combat_v1_playable_technique_sticky_disabled_reason',
+                ),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 11, color: _healthError),
+              ),
+            ),
+          _ActionButton(
+            key: const Key('combat_v1_playable_action_technique'),
+            label: combatV1PlayableActionKindLabel(
+              CombatV1LegalActionKind.technique,
+            ),
+            onPressed: (disabled || action == null)
+                ? null
+                : () => onSubmit(action),
+            primary: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Playable 2A-5「5・7章」・Playable 2A-6「4章」——Technique使用
+/// （「技を使う」）は`_TechniqueStickyActionBar`（固定footer）へ、discard
+/// （「手札を捨てる」）はカード選択と一体のinline panel
+/// （`_DiscardConfirmPanel`、hand直下）へ、それぞれ独立して存在する。
+/// この下部barはカード選択と無関係な行動（Stand Up/Rest/PIN/End Turn）
+/// のみを扱う——「カードを選ぶ／選ばない」に依存しない行動だけがここに
+/// 残る。
 class _PrimaryActionsBar extends StatelessWidget {
   const _PrimaryActionsBar({
     required this.snapshot,
@@ -3226,6 +3577,22 @@ class _ResultOverlay extends StatelessWidget {
             key: const Key('combat_v1_playable_result_cause'),
             style: const TextStyle(color: Colors.white70),
           ),
+        const SizedBox(height: 4),
+        // Playable 2A-6「8章 Match Finish Clarity — 決め技」——
+        // `terminalFeedback`（`snapshot.latestFeedback`）は、controllerの
+        // 記録タイミング（`_recordFeedback`直後・同一`_apply`呼び出し内で
+        // terminal判定、間に他のfeedback recordを挟まない）により、
+        // status==matchOverの瞬間は常に「試合を終わらせたそのaction」の
+        // feedbackと一致する（`combat_v1_playable_match_controller.dart`
+        // 参照）。ここから安全に技識別子を導出できる場合のみ「決め技」を
+        // 名指しする——通常PIN宣言（technique cardを使わないaction）等、
+        // 安全に判定できない場合は「決め技 不明」——推測しない。
+        Text(
+          '決め技: '
+          '${combatV1PlayableTerminalFinishingTechniqueLabel(terminalFeedback) ?? '不明'}',
+          key: const Key('combat_v1_playable_result_finishing_move'),
+          style: const TextStyle(fontSize: 12, color: Colors.white54),
+        ),
         const SizedBox(height: 12),
         _statsRows(r),
         const SizedBox(height: 16),

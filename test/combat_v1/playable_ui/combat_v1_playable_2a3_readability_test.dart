@@ -304,7 +304,10 @@ void main() {
           ),
           findsOneWidget,
         );
-        expect(find.textContaining('HEATが不足しています'), findsOneWidget);
+        // Playable 2A-6「4章 Sticky Technique Action」——同じ理由が
+        // sticky action barにも現れるため`findsWidgets`（1件以上）で
+        // 検証する。
+        expect(find.textContaining('HEATが不足しています'), findsWidgets);
       },
     );
 

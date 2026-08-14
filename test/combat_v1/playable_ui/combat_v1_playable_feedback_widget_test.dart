@@ -835,9 +835,12 @@ void main() {
 
       // 「7章 Minor — English unusable reason」——HEAT不足の説明は
       // 日本語化済み（HEAT自体はゲーム用語として維持）。
-      expect(find.textContaining('HEATが不足しています'), findsOneWidget);
-      expect(find.textContaining('必要 200'), findsOneWidget);
-      expect(find.textContaining('現在 40'), findsOneWidget);
+      // Playable 2A-6「4章 Sticky Technique Action」——同じ理由が
+      // sticky action barにも現れるため`findsWidgets`（1件以上）で
+      // 検証する。
+      expect(find.textContaining('HEATが不足しています'), findsWidgets);
+      expect(find.textContaining('必要 200'), findsWidgets);
+      expect(find.textContaining('現在 40'), findsWidgets);
     });
   });
 
@@ -934,39 +937,41 @@ void main() {
       },
     );
 
-    testWidgets('discard phaseのhandが複数枚ある場合、横スクロールcueを表示する', (
-      tester,
-    ) async {
-      final snapshot = testSnapshot(
-        phase: CombatV1MatchPhase.discard,
-        human: testHumanStatus(
-          hand: [
-            testTechniqueCard(instanceId: 'h1'),
-            testTechniqueCard(instanceId: 'h2'),
-          ],
-        ),
-        legalActions: const [
-          CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
-          CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'h2'),
-        ],
-      );
-      await tester.pumpWidget(
-        _wrap(
-          CombatV1PlayableMatchScreen(
-            humanWrestlerId: 'akari',
-            cpuWrestlerId: 'reina',
-            cpuDelay: Duration.zero,
-            sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+    testWidgets(
+      'discard phaseのhandもPlayable 2A-6でWrapベースのcompact表示へ揃えたため、'
+      '横scroll cueはもう出さない',
+      (tester) async {
+        final snapshot = testSnapshot(
+          phase: CombatV1MatchPhase.discard,
+          human: testHumanStatus(
+            hand: [
+              testTechniqueCard(instanceId: 'h1'),
+              testTechniqueCard(instanceId: 'h2'),
+            ],
           ),
-        ),
-      );
-      await tester.pump();
+          legalActions: const [
+            CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
+            CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'h2'),
+          ],
+        );
+        await tester.pumpWidget(
+          _wrap(
+            CombatV1PlayableMatchScreen(
+              humanWrestlerId: 'akari',
+              cpuWrestlerId: 'reina',
+              cpuDelay: Duration.zero,
+              sessionFactory: (_) => FakePlayableMatchSession(snapshot),
+            ),
+          ),
+        );
+        await tester.pump();
 
-      expect(
-        find.byKey(const Key('combat_v1_playable_hand_scroll_hint')),
-        findsOneWidget,
-      );
-    });
+        expect(
+          find.byKey(const Key('combat_v1_playable_hand_scroll_hint')),
+          findsNothing,
+        );
+      },
+    );
   });
 
   group('Accessibility Semantics', () {

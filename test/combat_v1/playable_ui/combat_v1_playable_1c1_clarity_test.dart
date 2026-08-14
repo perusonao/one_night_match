@@ -280,7 +280,12 @@ void main() {
       await tester.pump();
       await _selectHandCard(tester, 'h1');
 
-      expect(find.textContaining('Energy不足: 投2 / 1'), findsOneWidget);
+      // Playable 2A-6「4章 Sticky Technique Action」——同じ理由文言が
+      // 選択中panel（usable status行）とsticky action bar（button直上の
+      // disabled reason）の両方に現れるようになったため、`findsWidgets`
+      // （1件以上）で検証する——「同じSSOTの理由が安全に表示されている」
+      // ことが目的で、表示箇所数そのものは仕様ではない。
+      expect(find.textContaining('Energy不足: 投2 / 1'), findsWidgets);
     });
 
     testWidgets('支払い可能なのにisUsable==falseの場合はEnergy不足と断定しない', (tester) async {
@@ -311,7 +316,9 @@ void main() {
       await _selectHandCard(tester, 'h1');
 
       expect(find.textContaining('Energy不足'), findsNothing);
-      expect(find.textContaining('現在は使用できません'), findsOneWidget);
+      // Playable 2A-6「4章」——sticky action barにも同じ汎用理由が現れる
+      // ため`findsWidgets`（1件以上）で検証する。
+      expect(find.textContaining('現在は使用できません'), findsWidgets);
     });
 
     testWidgets('Shared HEATとTechnique Energyは別セクションで表示される', (tester) async {
