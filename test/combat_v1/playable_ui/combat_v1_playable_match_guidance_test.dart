@@ -10,8 +10,22 @@ import 'package:one_night_match/src/combat_v1/combat_v1_legal_action.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_controller.dart';
 import 'package:one_night_match/src/combat_v1/playable/combat_v1_playable_match_snapshot.dart';
 import 'package:one_night_match/src/combat_v1/playable_ui/combat_v1_playable_match_guidance.dart';
+import 'package:one_night_match/src/combat_v1/playable_ui/combat_v1_playable_ui_formatters.dart';
 
 import 'combat_v1_playable_ui_test_fixtures.dart';
+
+final _techniqueLabel = combatV1PlayableActionKindLabel(
+  CombatV1LegalActionKind.technique,
+);
+final _standUpLabel = combatV1PlayableActionKindLabel(
+  CombatV1LegalActionKind.standUp,
+);
+final _restLabel = combatV1PlayableActionKindLabel(
+  CombatV1LegalActionKind.rest,
+);
+final _endTurnLabel = combatV1PlayableActionKindLabel(
+  CombatV1LegalActionKind.endTurn,
+);
 
 const int _human = CombatV1PlayableMatchController.humanPlayerIndex;
 const int _cpu = 1;
@@ -71,7 +85,7 @@ void main() {
       expect(guidance.secondary, contains('DOWN'));
       // discard中に「今すぐ」立ち上がれるかのような案内をしない。
       expect(guidance.secondary, isNot(contains('今すぐ')));
-      expect(guidance.primary, isNot(contains('Stand Up')));
+      expect(guidance.primary, isNot(contains(_standUpLabel)));
     });
   });
 
@@ -88,9 +102,13 @@ void main() {
       );
       final guidance = _derive(snapshot)!;
       expect(guidance.kind, CombatV1PlayableGuidanceKind.downDecision);
-      expect(guidance.primary, contains('Stand Up'));
-      expect(guidance.primary, contains('Rest'));
-      expect(guidance.secondary, contains('Rest'));
+      expect(guidance.primary, contains(_standUpLabel));
+      expect(guidance.primary, contains(_restLabel));
+      expect(guidance.secondary, contains(_restLabel));
+      // 英語一文字列（'Stand Up'/'Rest'）を独自に複製していないこと
+      // （Playable 2A-6「10章 Guidance Label Consistency」）。
+      expect(guidance.primary, isNot(contains('Stand Up')));
+      expect(guidance.secondary, isNot(contains('Rest')));
       // REST回復量はsnapshotに公開されていないため、数値を複製しない。
       expect(guidance.secondary, isNot(contains(RegExp(r'\d'))));
     });
@@ -155,9 +173,13 @@ void main() {
       );
       final guidance = _derive(snapshot)!;
       expect(guidance.kind, CombatV1PlayableGuidanceKind.action);
-      expect(guidance.primary, contains('Technique'));
+      expect(guidance.primary, contains(_techniqueLabel));
       expect(guidance.primary, contains('PIN'));
-      expect(guidance.primary, contains('End Turn'));
+      expect(guidance.primary, contains(_endTurnLabel));
+      // 英語一文字列（'Technique'/'End Turn'）を独自に複製していない
+      // こと（Playable 2A-6「10章 Guidance Label Consistency」）。
+      expect(guidance.primary, isNot(contains('Technique')));
+      expect(guidance.primary, isNot(contains('End Turn')));
     });
 
     test('PINが非合法な場合「PIN」を案内文へ含めない', () {
@@ -183,8 +205,8 @@ void main() {
         legalActions: const [CombatV1EndTurnAction(actorPlayerIndex: _human)],
       );
       final guidance = _derive(snapshot)!;
-      expect(guidance.primary, isNot(contains('Technique')));
-      expect(guidance.primary, contains('End Turn'));
+      expect(guidance.primary, isNot(contains(_techniqueLabel)));
+      expect(guidance.primary, contains(_endTurnLabel));
     });
   });
 
@@ -307,8 +329,11 @@ void main() {
         ],
       );
       final guidance = _derive(snapshot)!;
-      expect(guidance.secondary, contains('Technique'));
+      expect(guidance.secondary, contains(_techniqueLabel));
       expect(guidance.secondary, contains('Energy'));
+      // 英語一文字列（'Technique'）を独自に複製していないこと
+      // （Playable 2A-6「10章 Guidance Label Consistency」）。
+      expect(guidance.secondary, isNot(contains('Technique')));
     });
 
     test('このターン未使用なら継続Techniqueのhintを出さない（毎ターン表示しない）', () {

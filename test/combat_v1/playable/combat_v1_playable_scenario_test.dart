@@ -944,5 +944,141 @@ void main() {
         expect(feedback!.pinOutcome, CombatV1PlayablePinFeedbackOutcome.matchOver);
       },
     );
+
+    // Playable 2A-6「8章 Match Finish Clarity」——PINと同じ探索方針で、
+    // Submission家系（submission/submissionFinisher）決着でも
+    // submissionOutcome==matchOverが最終feedbackから安全に得られることを
+    // 確認する（controller独自のescape/give-up判定を追加しない）。
+    test(
+      'Submission match-over feedback: Submission家系で決着した試合の最終'
+      'feedbackでsubmissionOutcome==matchOverが得られる',
+      () {
+        CombatV1PlayableMatchController? found;
+
+        outer:
+        for (final wrestlerId in _wrestlerIds) {
+          for (var seed = 0; seed < 80; seed++) {
+            final controller = CombatV1PlayableMatchController(
+              _config(
+                humanWrestlerId: wrestlerId,
+                cpuWrestlerId: wrestlerId,
+                engineSeed: seed,
+                maxActions: 400,
+              ),
+            );
+            var iterations = 0;
+            while (controller.status ==
+                    CombatV1PlayableControllerStatus.active &&
+                iterations < 400) {
+              iterations += 1;
+              final snap = controller.snapshot;
+              if (snap.isHumanInputRequired) {
+                final action = chooseFirstLegalHumanAction(snap);
+                final result = controller.submitHumanAction(
+                  expectedRevision: snap.revision,
+                  action: action,
+                );
+                if (!result.isAccepted) break;
+              } else {
+                final advance = controller.advanceCpuUntilHumanInput();
+                if (advance.actionsExecuted == 0) break;
+              }
+            }
+
+            final result = controller.result;
+            if (result != null &&
+                result.status == CombatV1PlayableControllerStatus.matchOver &&
+                (result.terminalCause ==
+                        CombatV1MatchTerminalCause.submission ||
+                    result.terminalCause ==
+                        CombatV1MatchTerminalCause.submissionFinisher)) {
+              found = controller;
+              break outer;
+            }
+          }
+        }
+
+        expect(
+          found,
+          isNotNull,
+          reason: '探索範囲内でSubmission決着の試合が見つかりませんでした',
+        );
+        final feedback = found!.snapshot.latestFeedback;
+        expect(feedback, isNotNull);
+        expect(
+          feedback!.submissionOutcome,
+          CombatV1PlayableSubmissionFeedbackOutcome.matchOver,
+        );
+        // terminal actionは常にtechniqueResolved（SUBMISSION自動移行）
+        // なので、技識別子（決め技）を安全に導出できる。
+        expect(feedback.kind, CombatV1PlayableFeedbackKind.techniqueResolved);
+        expect(feedback.actionDisplayName, isNotNull);
+      },
+    );
+
+    // Playable 2A-6「6-7章 Non-Terminal Finisher」——FINISHER成立が観測
+    // されても、それだけでは試合が終わらない（PIN/SUBMISSIONへの自動
+    // 移行がmatchOverまで進まない）場合、controllerのstatusはactiveの
+    // ままである——「FINISHERを使った＝勝利」という誤った断定を防ぐ
+    // ガードとして、新しいCombat rule判定を追加せず既存publicな
+    // `status`をそのまま確認するだけ。
+    test(
+      '非terminalなFINISHER成立: isFinisher==trueのfeedbackが観測された'
+      '時点でも、matchOverに至っていなければstatusはactiveのまま',
+      () {
+        CombatV1PlayableMatchController? nonTerminalFound;
+
+        outer:
+        for (final wrestlerId in _wrestlerIds) {
+          for (var seed = 0; seed < 60; seed++) {
+            final controller = CombatV1PlayableMatchController(
+              _config(
+                humanWrestlerId: wrestlerId,
+                cpuWrestlerId: wrestlerId,
+                engineSeed: seed,
+                maxActions: 400,
+              ),
+            );
+            var iterations = 0;
+            while (controller.status ==
+                    CombatV1PlayableControllerStatus.active &&
+                iterations < 400) {
+              iterations += 1;
+              final snap = controller.snapshot;
+              if (snap.isHumanInputRequired) {
+                final action = chooseFirstLegalHumanAction(snap);
+                final result = controller.submitHumanAction(
+                  expectedRevision: snap.revision,
+                  action: action,
+                );
+                if (!result.isAccepted) break;
+              } else {
+                final advance = controller.advanceCpuUntilHumanInput();
+                if (advance.actionsExecuted == 0) break;
+              }
+              final latest = controller.snapshot.latestFeedback;
+              if (latest != null &&
+                  latest.isFinisher &&
+                  controller.status ==
+                      CombatV1PlayableControllerStatus.active) {
+                nonTerminalFound = controller;
+                break outer;
+              }
+            }
+          }
+        }
+
+        expect(
+          nonTerminalFound,
+          isNotNull,
+          reason: '探索範囲内で非terminalなFINISHER成立が見つかりませんでした',
+        );
+        expect(
+          nonTerminalFound!.status,
+          CombatV1PlayableControllerStatus.active,
+        );
+        expect(nonTerminalFound.result, isNull);
+      },
+    );
   });
 }

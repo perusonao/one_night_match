@@ -442,7 +442,10 @@ void main() {
       await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_h1')));
       await tester.pump();
 
-      expect(find.textContaining('Energy不足: 打4 / 3'), findsOneWidget);
+      // Playable 2A-6「4章 Sticky Technique Action」——同じ理由が選択中
+      // panelとsticky action barの両方に現れるため`findsWidgets`
+      // （1件以上）で検証する。
+      expect(find.textContaining('Energy不足: 打4 / 3'), findsWidgets);
 
       const techniqueKey = Key('combat_v1_playable_action_technique');
       expect(_isEnabled(tester, techniqueKey), isFalse);
@@ -592,13 +595,255 @@ void main() {
     }
   });
 
+  group('Playable 2A-6「1章 Discard UX」— 5枚discard handのscroll無し比較', () {
+    for (final width in [320.0, 360.0, 390.0]) {
+      final size = Size(width, 844);
+
+      testWidgets(
+        '${width.toInt()}px: discard phaseの5枚全てが横scroll無しでviewport内へ'
+        '届き、比較できる（15章 A/R）',
+        (tester) async {
+          await _withViewport(tester, () async {
+            final snapshot = testSnapshot(
+              phase: CombatV1MatchPhase.discard,
+              isHumanInputRequired: true,
+              human: _fiveCardHumanStatus(),
+              legalActions: const [
+                CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'a'),
+                CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'b'),
+                CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'c'),
+                CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'd'),
+                CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'e'),
+              ],
+            );
+            await tester.pumpWidget(
+              _wrap(_screen(FakePlayableMatchSession(snapshot))),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+
+            final viewportRect = tester.getRect(
+              find.byKey(
+                const Key('combat_v1_playable_technique_area_scroll'),
+              ),
+            );
+
+            for (final entry in const [
+              ('a', _techA),
+              ('b', _techB),
+              ('c', _techC),
+              ('d', _techD),
+              ('e', _techE),
+            ]) {
+              final (instanceId, technique) = entry;
+              final tileFinder = find.byKey(
+                Key('combat_v1_playable_discard_hand_card_$instanceId'),
+              );
+              expect(tileFinder, findsOneWidget, reason: '$instanceIdが見つからない');
+              final tileRect = tester.getRect(tileFinder);
+              expect(
+                tileRect.overlaps(viewportRect),
+                isTrue,
+                reason:
+                    'discard card$instanceId（${technique.name}）がscroll前に'
+                    'viewport内にない: tile=$tileRect, viewport=$viewportRect',
+              );
+
+              final nameFinder = find.descendant(
+                of: tileFinder,
+                matching: find.text(technique.name),
+              );
+              expect(nameFinder, findsOneWidget);
+              expect(tester.getRect(nameFinder).overlaps(viewportRect), isTrue);
+            }
+
+            // discard phaseでは横scroll cue自体が存在しない（Playable
+            // 2A-6でTechnique modeと同じWrap表示へ揃えたため）。
+            expect(
+              find.byKey(const Key('combat_v1_playable_hand_scroll_hint')),
+              findsNothing,
+            );
+          }, size: size);
+        },
+      );
+    }
+
+    testWidgets('discard: Aをtap→選択、Bをtap→Bへ切り替わりAは解除、同じBを再tapで解除', (
+      tester,
+    ) async {
+      final snapshot = testSnapshot(
+        phase: CombatV1MatchPhase.discard,
+        isHumanInputRequired: true,
+        human: _fiveCardHumanStatus(),
+        legalActions: const [
+          CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'a'),
+          CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'b'),
+        ],
+      );
+      await tester.pumpWidget(
+        _wrap(_screen(FakePlayableMatchSession(snapshot))),
+      );
+      await tester.pump();
+
+      final nameKey = const Key('combat_v1_playable_discard_selected_card_name');
+
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_a')));
+      await tester.pump();
+      expect(tester.widget<Text>(find.byKey(nameKey)).data, _techA.name);
+
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_b')));
+      await tester.pump();
+      expect(tester.widget<Text>(find.byKey(nameKey)).data, _techB.name);
+      expect(find.byKey(nameKey), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_b')));
+      await tester.pump();
+      expect(
+        find.byKey(const Key('combat_v1_playable_discard_confirm_panel')),
+        findsNothing,
+      );
+    });
+
+    testWidgets(
+      'discard tileをtapすると「捨てるカードの詳細」にcategory/DMG/Energy/'
+      'traits/postureが表示される（15章 C）',
+      (tester) async {
+        // 「捨てるカードの詳細」がposture行（required/result）も表示する
+        // ことを検証するため、両方を持つtest技を専用に用意する
+        // （`_techA`〜`_techE`はいずれもposture未設定のため）。
+        const techWithPosture = CombatV1Technique(
+          id: 'test_review_fix_posture',
+          name: 'テスト技（posture付き）',
+          category: CombatV1CardCategory.finisher,
+          attribute: CombatV1EnergyAttribute.rough,
+          energyCost: CombatV1EnergyCost({CombatV1EnergyAttribute.rough: 2}),
+          damage: 40,
+          heatGain: 30,
+          family: CombatV1TechniqueFamily.choke,
+          finisherType: CombatV1FinisherType.normal,
+          requiredOpponentState: CombatV1WrestlerPosture.stand,
+          resultOpponentState: CombatV1WrestlerPosture.down,
+        );
+        final snapshot = testSnapshot(
+          phase: CombatV1MatchPhase.discard,
+          isHumanInputRequired: true,
+          sharedHeat: 0,
+          finisherHeatThreshold: 200,
+          human: testHumanStatus(
+            hand: [
+              testTechniqueCard(instanceId: 'h1', technique: techWithPosture),
+            ],
+          ),
+          legalActions: const [
+            CombatV1DiscardAction(actorPlayerIndex: 0, cardInstanceId: 'h1'),
+          ],
+        );
+        await tester.pumpWidget(
+          _wrap(_screen(FakePlayableMatchSession(snapshot))),
+        );
+        await tester.pump();
+
+        await tester.tap(find.byKey(const Key('combat_v1_playable_hand_card_h1')));
+        await tester.pump();
+
+        final detailFinder = find.byKey(
+          const Key('combat_v1_playable_discard_card_detail'),
+        );
+        expect(detailFinder, findsOneWidget);
+        expect(find.text('捨てるカードの詳細'), findsOneWidget);
+        // category。
+        expect(
+          find.descendant(
+            of: detailFinder,
+            matching: find.text('FINISHER'),
+          ),
+          findsWidgets,
+        );
+        // DMG/HEAT行（`_TechniqueFactsBlock`）。
+        expect(
+          find.descendant(
+            of: detailFinder,
+            matching: find.textContaining('DMG ${techWithPosture.damage}'),
+          ),
+          findsOneWidget,
+        );
+        // Energy（cost）。
+        expect(
+          find.descendant(
+            of: detailFinder,
+            matching: find.byKey(
+              const Key('combat_v1_playable_discard_card_energy_cost_line'),
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: detailFinder,
+            matching: find.textContaining('ラフ2'),
+          ),
+          findsOneWidget,
+        );
+        // trait badge（FINISHERはnormal typeなので"FINISHER"合成badge）。
+        expect(
+          find.descendant(
+            of: detailFinder,
+            matching: find.byKey(
+              const Key('combat_v1_playable_card_finisher_resolution_badge'),
+            ),
+          ),
+          findsOneWidget,
+        );
+        // posture（required/result両方）。
+        expect(
+          find.descendant(
+            of: detailFinder,
+            matching: find.byKey(
+              const Key('combat_v1_playable_card_required_posture'),
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: detailFinder,
+            matching: find.byKey(
+              const Key('combat_v1_playable_card_result_posture'),
+            ),
+          ),
+          findsOneWidget,
+        );
+        // 属性full-word label（Playable 2A-6「5章」）。
+        expect(
+          find.descendant(
+            of: detailFinder,
+            matching: find.byKey(
+              const Key('combat_v1_playable_technique_attribute_full_label'),
+            ),
+          ),
+          findsOneWidget,
+        );
+        // 「技を使う」style buttonはここには出さない。
+        expect(
+          find.byKey(const Key('combat_v1_playable_action_technique')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('combat_v1_playable_action_discard')),
+          findsOneWidget,
+        );
+      },
+    );
+  });
+
   group('Selected Detail Reachability（11章）', () {
     for (final width in [320.0, 360.0, 390.0]) {
       final size = Size(width, 780);
 
       testWidgets(
         '${width.toInt()}px: compact cardをtapした後、選択detail（name/DMG/HEAT/'
-        'Energy/traits/unusable reason/技を使う）へ縦scroll込みで到達できる',
+        'Energy/traits/unusable reason）へ縦scroll込みで到達でき、'
+        '技を使うbuttonはscroll不要で最初から到達できる（Playable 2A-6「4章」）',
         (tester) async {
           await _withViewport(tester, () async {
             final snapshot = testSnapshot(
@@ -709,10 +954,30 @@ void main() {
               ),
               'unusable reason',
             );
-            await expectReachable(
-              find.byKey(const Key('combat_v1_playable_action_technique')),
-              '技を使うbutton',
+
+            // Playable 2A-6「4章 Sticky Technique Action」——
+            // 「技を使う」button自体はもう`_SelectedTechniquePanel`
+            // （scrollする詳細領域）の中には無く、`_TechniqueStickyActionBar`
+            // （scroll領域の外側、常時固定表示）へ移動した。ここまで
+            // 一切scrollしていない時点（`expectReachable`が内部で
+            // scrollした可能性はあるが、button自体はそのscroll位置に
+            // 依存せず常に画面内にあるはず）で、button自体が実座標で
+            // hit-testableであることを確認する。
+            final buttonFinder = find.byKey(
+              const Key('combat_v1_playable_action_technique'),
             );
+            expect(buttonFinder, findsOneWidget);
+            final screenRect =
+                Offset.zero &
+                (tester.view.physicalSize / tester.view.devicePixelRatio);
+            final buttonRect = tester.getRect(buttonFinder);
+            final visibleButtonRect = buttonRect.intersect(screenRect);
+            expect(
+              visibleButtonRect.width,
+              greaterThan(0),
+              reason: '技を使うbuttonがscroll無しでviewport内にない: rect=$buttonRect',
+            );
+            expect(visibleButtonRect.height, greaterThan(0));
           }, size: size);
         },
       );
